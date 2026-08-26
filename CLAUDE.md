@@ -1,4 +1,4 @@
-# Trove — Media Department Asset Checkout System
+# Stockroom — Media Department Asset Checkout System
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made — it's meant to be the single source of truth for anyone (human or AI) picking up this codebase.
 
@@ -6,7 +6,7 @@ This file is the master reference for the project: what it is, how it's built, h
 
 ## 1. What this is
 
-Trove is a fully local asset checkout/check-in system for the school's media department. It replaces manual equipment tracking with barcode-driven scanning, custody tracking, and reservations — all running on a single dedicated machine, with no internet/wifi dependency for daily use.
+Stockroom is a fully local asset checkout/check-in system for the school's media department. It replaces manual equipment tracking with barcode-driven scanning, custody tracking, and reservations — all running on a single dedicated machine, with no internet/wifi dependency for daily use.
 
 **Core loop:** scan a barcode → see the asset → check it out to a person or check it back in. Everything else (bookings, kits, roles, custom fields) supports that loop.
 
@@ -35,30 +35,18 @@ Trove is a fully local asset checkout/check-in system for the school's media dep
 
 One dedicated Windows PC lives in the camera closet, always on. It hosts the database and backend. The barcode scanner plugs into this machine. Two front ends talk to the same local backend:
 
-- **Wails desktop app** — primary interface, native window, scanner-driven
-- **Astro web app** — secondary interface, served on `localhost`, mirrors the desktop app
+- **Wails desktop app** (`desktop-app/`) — primary interface, native window (Svelte + TypeScript), scanner-driven
+- **Web app** (`web-app/`) — secondary interface, served on `localhost` (Vite + Svelte + TypeScript, NOT Astro — that was the original plan, changed during scaffolding), mirrors the desktop app
 
 Nightly, a script exports every table to CSV into a folder watched by a cloud sync client (Google Drive/OneDrive/Dropbox) already installed on the machine — the sync client handles the actual off-site upload, no custom cloud API code needed.
 
 ---
 
-## 4. Backend architecture — DECISION POINT (Week 3)
+## 4. Backend architecture — DECIDED: Option A (Supabase)
 
-There are two viable paths. Pick one in Week 3 and delete the other section below once decided.
+Running Postgres + Auth (GoTrue) + REST API (PostgREST) + Studio admin UI locally via the Supabase CLI (`supabase start`, Docker-based). This was chosen over the Docker-free native-Postgres alternative for simplicity, since the dev/deployment target is a single dedicated workstation where Docker's extra moving part is an acceptable tradeoff for getting Auth + Studio out of the box.
 
-### Option A — Supabase (via Supabase CLI, Docker-based)
-Runs Postgres + Auth (GoTrue) + REST API (PostgREST) + Studio admin UI, all bundled via `supabase start`.
-- ✅ Auth, admin GUI, and REST API all work out of the box
-- ❌ Requires Docker Desktop + WSL2 on the closet PC — needs admin rights, another service that must stay running
-
-### Option B — Native Postgres + PostgREST (recommended, no Docker)
-Real Postgres installed as a native Windows service, PostgREST as a single standalone binary providing the same REST API shape, simple hand-rolled login (a `profiles` table + basic password check — genuinely sufficient for one local machine and four roles).
-- ✅ No Docker dependency at all — fewer moving parts, less that can break or get blocked by IT policy
-- ❌ No Studio-style admin GUI out of the box (use a lightweight tool like DBeaver/pgAdmin instead); auth is hand-rolled instead of a full auth service
-
-**Recommendation:** Option B, given a single dedicated machine with no multi-station requirement — Docker's main benefit (bundling many services) matters least here, and its main cost (another failure point / IT friction) matters most on a tight timeline.
-
-Either way, **the database schema in Section 6 is identical** — only how you stand up Postgres and the REST layer changes.
+**Auth model:** both frontends talk to the local Supabase REST API using the **service_role key** (not the anon key), which bypasses Row Level Security entirely. `anon`/`authenticated` roles have been explicitly revoked from all tables (see `supabase/migrations/20260826180000_grant_service_role.sql`). This is intentional, not an oversight — RLS policies are unneeded complexity for a single trusted local machine with no untrusted network exposure. **Role permission checks (owner/executive_producer/producer/member, Section 7) must be enforced in app code**, since there is no RLS layer doing it automatically.
 
 ---
 
@@ -66,19 +54,19 @@ Either way, **the database schema in Section 6 is identical** — only how you s
 
 | Layer | Technology |
 |---|---|
-| Database | PostgreSQL |
-| REST API | PostgREST (Option B) or Supabase's bundled PostgREST (Option A) |
-| Auth | Hand-rolled (Option B) or Supabase Auth/GoTrue (Option A) |
-| Desktop app | Wails (Go backend + Svelte or React frontend) |
-| Web app | Astro (same Svelte/React components as islands where interactive) |
-| Barcode scanner | Standard USB HID scanner (keyboard-wedge — no drivers) |
-| Backups | Scheduled script → CSV → cloud-synced folder (Windows Task Scheduler) |
+| Database | PostgreSQL (via Supabase local stack) |
+| REST API | Supabase's bundled PostgREST, accessed with the service_role key (no RLS) |
+| Auth | None — service_role key bypasses auth; role checks done in app code |
+| Desktop app | Wails (Go backend + Svelte 5 + TypeScript frontend) |
+| Web app | Vite + Svelte 5 + TypeScript (not Astro — plan changed during scaffolding) |
+| Barcode scanner | Standard USB HID scanner (keyboard-wedge — no drivers) — not yet tested with real hardware |
+| Backups | Scheduled script → CSV → cloud-synced folder (Windows Task Scheduler) — not yet built |
 
 ---
 
 ## 6. Database schema
 
-Full schema — apply as a single migration regardless of which backend option you pick.
+This is the schema as originally designed. It has been applied and verified working — see `supabase/migrations/20260826173006_init_schema.sql` for the actual migration (identical to below), plus a follow-up migration `supabase/migrations/20260826180000_grant_service_role.sql` that grants full privileges to `service_role` and revokes `anon`/`authenticated` (see Section 4). Sample data lives in `supabase/seed.sql` (10 sample assets across 5 categories, 2 locations, 1 test profile) and loads automatically on `supabase db reset`.
 
 ```sql
 create extension if not exists "uuid-ossp";
@@ -261,7 +249,7 @@ select * from active_custody
 where due_at is not null and due_at < now();
 ```
 
-> If you go with **Option A (Supabase)**, also enable Row Level Security and add policies per role (see earlier project discussion for the full policy set). If you go with **Option B**, enforce role checks in the PostgREST layer or in app code instead, since there's no RLS/auth service doing it for you automatically.
+> RLS is intentionally **not** enabled (see Section 4 — service_role key bypasses it). Role checks happen in app code instead.
 
 ---
 
@@ -279,53 +267,43 @@ where due_at is not null and due_at < now();
 ## 8. Repository structure
 
 ```
-trove/
-├── db/
-│   └── migrations/
-│       └── 001_init_schema.sql
-├── desktop-app/          # Wails app — primary UI
+stockroom/
+├── desktop-app/               # Wails app — primary UI
 │   ├── app.go
 │   ├── main.go
+│   ├── wails.json
 │   └── frontend/
-├── web-app/              # Astro app — secondary UI
-│   ├── astro.config.mjs
+│       └── src/
+│           ├── lib/supabase.ts   # Supabase client (service_role key)
+│           ├── App.svelte        # assets list screen (proof of chain: auth → API → render)
+│           └── main.ts
+├── web-app/                   # Vite + Svelte secondary UI — scaffolded only, not wired to Supabase yet
 │   └── src/
+├── supabase/
+│   ├── config.toml
+│   ├── migrations/
+│   │   ├── 20260826173006_init_schema.sql      # full schema (Section 6)
+│   │   └── 20260826180000_grant_service_role.sql
+│   └── seed.sql                # sample assets/locations/categories, loads on `supabase db reset`
 ├── scripts/
-│   └── backup-to-csv.ps1
-├── CLAUDE.md              # this file
-└── README.md
+│   ├── start-mac.sh            # one-step start/stop for macOS, verified working end-to-end
+│   └── start-windows.ps1       # Windows equivalent — written but NOT yet tested on real Windows
+├── CLAUDE.md                   # this file
+└── README.md                  # dependencies + how to run
 ```
 
 ---
 
 ## 9. Setup instructions
 
-### Common prerequisites (both options)
-1. Go (for Wails) and Node.js (for Astro + frontend tooling)
-2. Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-3. `wails doctor` should report no missing dependencies
+**Easiest path:** see `README.md` — run `./scripts/start-mac.sh` (macOS) or `scripts/start-windows.ps1` (Windows). It checks dependencies, starts Docker + the local Supabase stack, installs frontend packages, and launches both frontends. Ctrl+C stops everything cleanly and preserves data.
 
-### If Option A (Supabase/Docker)
-1. Enable WSL2: `wsl --install` (admin PowerShell, reboot)
-2. Install Docker Desktop, set to use the WSL2 backend
-3. Install Supabase CLI: `npm install -g supabase`
-4. `supabase init` in the repo root
-5. Drop `db/migrations/001_init_schema.sql` into `supabase/migrations/`
-6. `supabase start` — note the printed API URL, DB URL, Studio URL, anon key
-7. Confirm tables exist via Studio (`localhost:54323`)
-
-### If Option B (native Postgres, no Docker)
-1. Install PostgreSQL for Windows (standard installer, no admin friction)
-2. Create the database: `createdb trove`
-3. Apply schema: `psql trove -f db/migrations/001_init_schema.sql`
-4. Download the PostgREST binary for Windows, point it at the `trove` database via a config file
-5. Run PostgREST — it now serves a REST API for every table at e.g. `localhost:3000`
-6. Confirm with `curl localhost:3000/assets`
-
-### Then, both options
-1. In `desktop-app/`, wire the frontend's API client to whichever local URL you're running (Supabase's `localhost:54321` or PostgREST's `localhost:3000`)
-2. In `web-app/`, do the same
-3. Test the barcode scanner: focus a text field, scan a test barcode, confirm it types the code + Enter
+### Manual steps
+1. Install Go, Node.js, Docker Desktop, the Supabase CLI, and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`) — see README for download links
+2. `supabase start` (from repo root) — starts Postgres, Auth, REST API, Studio (`http://127.0.0.1:54323`); migrations + seed data apply automatically
+3. `cd desktop-app && wails dev` — primary UI, opens a native window
+4. `cd web-app && npm run dev` — secondary UI (not yet wired to Supabase)
+5. `supabase stop` — stops the stack, preserves data (add `--no-backup` only if you intentionally want to discard it)
 
 ---
 
@@ -353,7 +331,7 @@ Keep a visible input focused so manual typing works identically as a fallback.
 Nightly, scheduled via Windows Task Scheduler, a script dumps every core table to CSV into a folder watched by a cloud sync client already installed on the machine (Google Drive/OneDrive/Dropbox):
 
 ```powershell
-$dumpDir = "C:\Users\<user>\Google Drive\TroveBackups\$(Get-Date -Format yyyy-MM-dd)"
+$dumpDir = "C:\Users\<user>\Google Drive\StockroomBackups\$(Get-Date -Format yyyy-MM-dd)"
 New-Item -ItemType Directory -Path $dumpDir -Force
 $tables = @("assets","bookings","custody_events","activity_log","locations","categories","kits")
 foreach ($t in $tables) {
@@ -366,13 +344,22 @@ Test a full restore at least once before go-live: wipe a scratch database, reapp
 
 ## 12. Build timeline (9 weeks total)
 
-**Weeks 1–2 (complete/in progress)** — Environment prep, tooling installed, initial planning.
+**Weeks 1–2 (complete)** — Environment prep, tooling installed, initial planning.
 
-**Week 3 — Decide & initialize external software**
-Finalize Option A vs. Option B (Section 4). Get Postgres/Supabase and PostgREST/Auth running independently of each other and confirmed healthy before wiring anything together.
+**Week 3 (complete)** — Decided Option A (Supabase). `supabase init` run, full schema migration written and applied, verified all 12 tables + 2 views + 4 enums present via direct psql inspection and via the REST API.
 
-**Week 4 — Database connectivity**
-Add test items to the database. Verify read/modify/tag operations work directly against the DB. Connect Wails/Go to the database so it can mutate data (create, update, delete).
+**Week 4 (in progress) — Database connectivity**
+Done so far:
+- Supabase local stack confirmed fully healthy (all containers up, REST API reachable)
+- Added `grant_service_role` migration (Section 4) after discovering the initial schema migration never granted table privileges to any Postgres role, including `service_role`
+- Seeded 10 sample assets across 5 categories + 2 locations (`supabase/seed.sql`)
+- Wired the Wails desktop frontend to Supabase (`@supabase/supabase-js`, service_role key) and built a working assets-list screen — verified rendering real data end-to-end in a live view of the running app
+- Fixed two pre-existing scaffold bugs blocking `wails dev`: `desktop-app/frontend/package.json` pinned an incompatible `vite@^8` (needs `^7` for `@sveltejs/vite-plugin-svelte@6`), and `main.ts` used the Svelte 4 `new App(...)` API against the installed Svelte 5 (needs `mount(App, {...})` from `'svelte'`) — this second one silently produced a blank window with no console error, worth remembering if the web-app hits the same issue
+- Wrote `README.md` and one-step start/stop scripts (`scripts/start-mac.sh`, tested and working; `scripts/start-windows.ps1`, written but **not yet tested on a real Windows machine** — verify tree-kill via `taskkill /T /F` actually cleans up `wails dev`'s child processes before relying on it)
+
+Still open for Week 4:
+- Connect Go (Wails backend, `app.go`) to Supabase directly for mutations — everything so far is read-only from the Svelte frontend via `supabase-js`; no create/update/delete flow built yet
+- Wire the web-app (`web-app/`) to Supabase — currently just the Vite/Svelte scaffold, no client, no screens
 
 **Week 5 — Frontend + accounts + check-in/out (start)**
 Rough out frontend formatting/layout direction. Begin the account system (login, role assignment). Start building the check-in/check-out flow.
@@ -391,9 +378,11 @@ Final testing, walkthrough prep, and presentation.
 
 ---
 
-## 13. Open decisions to resolve before/during Week 3
+## 13. Open decisions
 
-- [ ] Option A vs. Option B backend (Section 4)
-- [ ] Svelte vs. React for the frontend components (shared between Wails and Astro)
+- [x] Option A vs. Option B backend → **Option A, Supabase** (Section 4)
+- [x] Svelte vs. React → **Svelte 5** (both `desktop-app` and `web-app` scaffolded with it)
+- [x] RLS vs. app-code role enforcement → **app-code**, service_role key bypasses RLS (Section 4)
 - [ ] Which cloud sync client is already installed on the closet PC (Drive/OneDrive/Dropbox) — determines the backup folder path
 - [ ] Barcode scanner model to purchase (Week 7) — confirm it's a standard HID keyboard-wedge scanner, not one requiring proprietary software
+- [ ] Web-app framework note: CLAUDE.md originally called for Astro; it was scaffolded as plain Vite+Svelte instead. Decide whether to migrate to Astro later or keep Vite+Svelte as the permanent choice (Section 3/5 currently reflect Vite+Svelte as the actual state)

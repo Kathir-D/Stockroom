@@ -1,79 +1,100 @@
 <script lang="ts">
-  import logo from './assets/images/logo-universal.png'
-  import {Greet} from '../wailsjs/go/main/App.js'
+  import { onMount } from 'svelte'
+  import { supabase } from './lib/supabase'
 
-  let resultText: string = "Please enter your name below 👇"
-  let name: string
-
-  function greet(): void {
-    Greet(name).then(result => resultText = result)
+  type Asset = {
+    id: string
+    asset_tag: string
+    name: string
+    status: string
   }
+
+  let assets: Asset[] = []
+  let loading = true
+  let error: string | null = null
+
+  onMount(async () => {
+    const { data, error: err } = await supabase
+      .from('assets')
+      .select('id, asset_tag, name, status')
+      .order('asset_tag')
+
+    if (err) {
+      error = err.message
+    } else {
+      assets = data ?? []
+    }
+    loading = false
+  })
 </script>
 
 <main>
-  <img alt="Wails logo" id="logo" src="{logo}">
-  <div class="result" id="result">{resultText}</div>
-  <div class="input-box" id="input">
-    <input autocomplete="off" bind:value={name} class="input" id="name" type="text"/>
-    <button class="btn" on:click={greet}>Greet</button>
-  </div>
+  <h1>Stockroom — Assets</h1>
+
+  {#if loading}
+    <p>Loading assets…</p>
+  {:else if error}
+    <p class="error">Failed to load assets: {error}</p>
+  {:else if assets.length === 0}
+    <p>No assets found.</p>
+  {:else}
+    <table>
+      <thead>
+        <tr>
+          <th>Tag</th>
+          <th>Name</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each assets as asset (asset.id)}
+          <tr>
+            <td>{asset.asset_tag}</td>
+            <td>{asset.name}</td>
+            <td><span class="status status-{asset.status}">{asset.status}</span></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
 </main>
 
 <style>
-
-  #logo {
-    display: block;
-    width: 50%;
-    height: 50%;
-    margin: auto;
-    padding: 10% 0 0;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-origin: content-box;
+  main {
+    max-width: 700px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    font-family: sans-serif;
   }
 
-  .result {
-    height: 20px;
-    line-height: 20px;
-    margin: 1.5rem auto;
+  h1 {
+    margin-bottom: 1rem;
   }
 
-  .input-box .btn {
-    width: 60px;
-    height: 30px;
-    line-height: 30px;
-    border-radius: 3px;
-    border: none;
-    margin: 0 0 0 20px;
-    padding: 0 8px;
-    cursor: pointer;
+  table {
+    width: 100%;
+    border-collapse: collapse;
   }
 
-  .input-box .btn:hover {
-    background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
-    color: #333333;
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #ddd;
   }
 
-  .input-box .input {
-    border: none;
-    border-radius: 3px;
-    outline: none;
-    height: 30px;
-    line-height: 30px;
-    padding: 0 10px;
-    background-color: rgba(240, 240, 240, 1);
-    -webkit-font-smoothing: antialiased;
+  .status {
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
   }
 
-  .input-box .input:hover {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
-  }
+  .status-available { background: #d4edda; color: #155724; }
+  .status-checked_out { background: #fff3cd; color: #856404; }
+  .status-reserved { background: #d1ecf1; color: #0c5460; }
+  .status-maintenance { background: #f8d7da; color: #721c24; }
+  .status-retired, .status-lost { background: #e2e3e5; color: #383d41; }
 
-  .input-box .input:focus {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
+  .error {
+    color: #c00;
   }
-
 </style>
