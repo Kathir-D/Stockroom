@@ -36,11 +36,32 @@ The script:
 
 Press **Ctrl+C** in the script's terminal window to shut everything down — it stops both frontend processes and the local Supabase stack cleanly. Your database data is preserved between runs.
 
+### URLs once it's running
+
+| What | URL |
+|---|---|
+| Supabase Studio (DB admin UI) | http://127.0.0.1:54323/project/default |
+| Web app | http://localhost:5173/ (Vite bumps to 5174, 5175, etc. if that port's busy — check the terminal output for the actual port) |
+| Stockroom admin (desktop app, in-browser) | http://localhost:34115/ |
+
+The desktop app also opens as its own native window automatically — the `localhost:34115` URL is Wails' dev server, useful if you want to view/inspect it in a regular browser instead.
+
 ### Manual steps
 
 1. `supabase start` (from the repo root) — starts Postgres, Auth, REST API, and Studio (`http://127.0.0.1:54323`)
 2. `cd desktop-app && wails dev` — primary UI, opens a native window
 3. `cd web-app && npm run dev` — secondary UI, served on `http://localhost:5173`
 4. `supabase stop` — stop the local stack when done (data is preserved)
+
+## Adding/editing/removing assets and tags
+
+Two ways to mutate the database:
+
+1. **Stockroom admin panel** (`http://localhost:34115/` or the desktop app's native window) — a plain, unstyled screen for day-to-day use: add/edit/delete assets, add/rename/delete tags globally, and attach/detach tags on individual assets. It's intentionally bare-bones for now (functional first, styled later).
+2. **Supabase Studio** (`http://127.0.0.1:54323/project/default` → Table Editor) — the full Postgres table editor, useful for bulk edits or anything the admin panel doesn't cover yet (categories, locations, bookings, etc.).
+
+The admin panel's logic lives in two files:
+- `desktop-app/frontend/src/lib/db.ts` — the actual mutation functions (`createAsset`, `updateAsset`, `deleteAsset`, `createTag`, `renameTag`, `deleteTag`, `addTagToAsset`, `removeTagFromAsset`, `listAllAssetTags`, etc.), each a thin wrapper around the Supabase client in `lib/supabase.ts`. Import from here if you're adding new UI or scripting mutations directly.
+- `desktop-app/frontend/src/App.svelte` — the screen that calls those functions from forms/buttons.
 
 See `CLAUDE.md` for full architecture, database schema, and project roadmap.
