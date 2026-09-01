@@ -19,8 +19,12 @@ You don't need to install the Wails CLI by hand — the start script below insta
 ## How to run
 
 ### Easiest: one-step script
-
-- **macOS:** `./scripts/start-mac.sh`
+- **macOS (double-click):** in Finder, double-click `scripts/Start Stockroom.command`. It opens a Terminal window and runs the same script as below. (First time only: macOS Gatekeeper may show an "unidentified developer" warning — right-click the file → **Open** → **Open** to approve it once.)
+- **macOS (terminal):**
+```
+chmod +x ./scripts/start-mac.sh
+./scripts/start-mac.sh
+```
 - **Windows:** right-click `scripts/start-windows.ps1` → **Run with PowerShell** (or run `powershell -ExecutionPolicy Bypass -File scripts\start-windows.ps1` from a terminal)
 
 The script:
