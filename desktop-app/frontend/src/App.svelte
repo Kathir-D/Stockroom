@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import * as db from './lib/db'
   import type { Asset, AssetStatus, Tag } from './lib/db'
+  import AssetBrowser from './lib/AssetBrowser.svelte'
 
   const STATUSES: AssetStatus[] = [
     'available',
@@ -171,16 +172,15 @@
   }
 </script>
 
-<main>
-  <h1>Stockroom — Admin</h1>
+<!-- Primary browse/checkout screen: the Claude Design import. -->
+<AssetBrowser {assets} {loading} {error} />
 
-  {#if error}
-    <p class="error">Error: {error}</p>
-  {/if}
-
-  {#if loading}
-    <p>Loading…</p>
-  {:else}
+<!-- Admin tools below: add/edit/delete assets and manage the global tag list.
+     These predate the design import and aren't part of it yet — fast-follow
+     is to either restyle them to match or move them behind the account menu
+     in the nav once real auth/roles land (Week 5, CLAUDE.md Section 7). -->
+<main class="admin-tools">
+  {#if !loading}
     <section>
       <h2>Add asset</h2>
       <form on:submit|preventDefault={handleCreateAsset}>
@@ -197,7 +197,7 @@
     </section>
 
     <section>
-      <h2>Assets ({assets.length})</h2>
+      <h2>Edit / delete assets</h2>
       <table>
         <thead>
           <tr>
@@ -285,7 +285,7 @@
 </main>
 
 <style>
-  main {
+  .admin-tools {
     max-width: 1000px;
     margin: 2rem auto;
     padding: 0 1rem;
@@ -315,9 +315,5 @@
     padding: 0.1rem 0.4rem;
     margin: 0 0.2rem 0.2rem 0;
     font-size: 0.85rem;
-  }
-
-  .error {
-    color: #c00;
   }
 </style>
