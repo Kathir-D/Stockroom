@@ -31,6 +31,8 @@ func LoadConfig() (Config, error) {
 		}
 	}
 
+	// Values with a sensible local default fall back to it when unset; the
+	// admin failsafe and backup dir are deliberately blank until configured.
 	cfg := Config{
 		DatabaseURL:        getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres"),
 		ServerAddr:         getenv("SERVER_ADDR", "127.0.0.1:8080"),
@@ -40,6 +42,8 @@ func LoadConfig() (Config, error) {
 		BackupDir:          os.Getenv("BACKUP_DIR"),
 	}
 
+	// The idle timeout is the one value that must parse; a bad number is a
+	// config error rather than a silent fallback.
 	idle := getenv("SESSION_IDLE_MINUTES", "30")
 	n, err := strconv.Atoi(idle)
 	if err != nil || n <= 0 {
@@ -50,6 +54,8 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
+// getenv returns the environment value for key, or def when it is unset or
+// empty.
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -57,7 +63,9 @@ func getenv(key, def string) string {
 	return def
 }
 
-// findDotEnv walks up from the working directory looking for a .env file.
+// findDotEnv walks up from the working directory looking for a .env file,
+// stopping at the filesystem root. This lets `go run ./server` and the CLIs
+// be started from any subdirectory of the repo.
 func findDotEnv() (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {

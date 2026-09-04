@@ -17,12 +17,17 @@ import (
 	"stockroom/internal/stockroom"
 )
 
+// main wires the server together in order: load config, connect to Postgres,
+// start listening, then block until Ctrl+C / SIGTERM and shut down gracefully
+// so in-flight requests finish before the process exits.
 func main() {
 	cfg, err := stockroom.LoadConfig()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
 
+	// ctx is cancelled on Ctrl+C / SIGTERM; everything below hangs off it so
+	// the start scripts can stop the server cleanly.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -38,6 +43,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	// Serve in the background so main can wait on the signal context below.
 	go func() {
 		log.Printf("stockroom server listening on http://%s", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -45,6 +51,8 @@ func main() {
 		}
 	}()
 
+	// Block until a stop signal arrives, then give in-flight requests a few
+	// seconds to complete before closing the listener and the DB pool.
 	<-ctx.Done()
 	log.Println("shutting down...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

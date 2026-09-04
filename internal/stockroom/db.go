@@ -14,12 +14,17 @@ type DB struct {
 	Pool *pgxpool.Pool
 }
 
-// Open connects to Postgres at databaseURL and verifies the connection.
+// Open connects to Postgres at databaseURL and verifies the connection with a
+// ping, so a bad URL or a stopped database fails at startup rather than on
+// the first request.
 func Open(ctx context.Context, databaseURL string) (*DB, error) {
 	pcfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
+	// Single-machine deployment with two local frontends: a small pool is
+	// plenty, and idle connections are dropped so the Docker stack can be
+	// restarted underneath us without leaking dead sockets.
 	pcfg.MaxConns = 8
 	pcfg.MaxConnIdleTime = 5 * time.Minute
 
@@ -36,7 +41,8 @@ func Open(ctx context.Context, databaseURL string) (*DB, error) {
 	return db, nil
 }
 
-// Ping runs a trivial query to confirm the database is reachable.
+// Ping runs a trivial query to confirm the database is reachable. It bounds
+// the wait so a hung database surfaces as an error instead of a stall.
 func (db *DB) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

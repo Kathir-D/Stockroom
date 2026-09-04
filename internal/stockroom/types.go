@@ -54,7 +54,7 @@ type Profile struct {
 	Email         *string   `json:"email"`
 	PasswordHash  *string   `json:"-"`
 	FullName      *string   `json:"full_name"`
-	Role          UserRole  `json:"role"` // unused in v1; IsAdmin is the permission flag
+	Role          UserRole  `json:"role"`           // unused in v1; IsAdmin is the permission flag
 	StudentNumber *string   `json:"student_number"` // v1
 	FirstName     *string   `json:"first_name"`     // v1
 	LastName      *string   `json:"last_name"`      // v1
@@ -86,23 +86,23 @@ type Tag struct {
 }
 
 type Asset struct {
-	ID                 string          `json:"id"`
-	AssetTag           string          `json:"asset_tag"`
-	Name               string          `json:"name"`
-	Description        *string         `json:"description"`
-	CategoryID         *string         `json:"category_id"`
-	LocationID         *string         `json:"location_id"`
-	Status             AssetStatus     `json:"status"`
-	Condition          *string         `json:"condition"`
-	SerialNumber       *string         `json:"serial_number"` // scan key (unique in v1)
-	PurchaseDate       *time.Time      `json:"purchase_date"`
-	PurchasePrice      *float64        `json:"purchase_price"`
-	WarrantyExpiration *time.Time      `json:"warranty_expiration"`
-	CustomFields       map[string]any  `json:"custom_fields"`
-	PhotoPath          *string         `json:"photo_path"` // v1
-	CreatedBy          *string         `json:"created_by"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
+	ID                 string         `json:"id"`
+	AssetTag           string         `json:"asset_tag"`
+	Name               string         `json:"name"`
+	Description        *string        `json:"description"`
+	CategoryID         *string        `json:"category_id"`
+	LocationID         *string        `json:"location_id"`
+	Status             AssetStatus    `json:"status"`
+	Condition          *string        `json:"condition"`
+	SerialNumber       *string        `json:"serial_number"` // scan key (unique in v1)
+	PurchaseDate       *time.Time     `json:"purchase_date"`
+	PurchasePrice      *float64       `json:"purchase_price"`
+	WarrantyExpiration *time.Time     `json:"warranty_expiration"`
+	CustomFields       map[string]any `json:"custom_fields"`
+	PhotoPath          *string        `json:"photo_path"` // v1
+	CreatedBy          *string        `json:"created_by"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 type AssetTag struct {
