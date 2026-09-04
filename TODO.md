@@ -1,94 +1,99 @@
 # Stockroom — Backend/Functionality To-Do
 
-Tracks backend/functionality work only (no UI/layout/styling — UI is being planned separately). See `CLAUDE.md` for full architecture/schema reference.
+Backend/functionality work only (no UI/layout/styling — UI is planned separately). `CLAUDE.md` is the architecture/decision reference; this file is the ordered work list. Phases map to the Week 5–9 timeline in CLAUDE.md §12.
 
-**Architecture direction:** move all business logic into a shared Go package (`internal/stockroom`), used by two thin callers — the Wails-bound desktop app, and a new standalone Go HTTP server (`server/`) that `web-app`'s TypeScript calls over localhost. Frontend TS shrinks to pass-through wrappers; no Supabase JS client or direct Postgres/PostgREST access from either frontend once this is done.
+**Shape of the work:** all logic lives in Go, in `internal/stockroom`. `server/` exposes it as a localhost JSON API. Both the Wails desktop app and the web-app are thin Svelte UIs calling that API via `fetch` (`lib/api.ts`). No supabase-js, no DB credentials in TypeScript. Postgres keeps running inside the Supabase Docker stack; Go connects on port 54322.
 
-## Target user flow (functionality this backs)
-
-1. **Sign in** by scanning an ID card (barcode encodes a list of numbers = an ID number) — no password needed on a scan. If someone instead types that same number in by hand, a password is required. Distinguishing "scanned" vs "typed" is an input-timing detail the UI layer owns; the backend just exposes two distinct entry points and trusts which one the frontend calls (acceptable on a single trusted local machine per CLAUDE.md's auth model).
-2. Once signed in, see a **filterable list of assets** (type / category / subcategory / year, filters on the left, results on the right — exact filter set may change once UI is finalized).
-3. **Click an item** → detail popup → **"Add to Cart"**. Cart = a pending set of assets the frontend is holding, not checked out yet.
-4. **Check out the cart** → every item in it transitions to checked-out together.
-5. Every physical item has a **barcode = its serial number**. Scanning an item's barcode is the single "track it" action:
-   - if that item is currently **checked out** → scanning it **checks it back in immediately**
-   - if it's currently **available** → scanning it opens the same detail popup / add-to-cart path as clicking it
-6. **Admin panel**, restricted to select accounts (role-gated), can add/edit/remove assets, categories, and subcategories directly.
+**Target flow being built:** scan ID → sign in · browse/filter → click → detail → add to cart · check out cart (due ≤ 7 days) · scan item → check in (if out) or show detail (if available) · admin panel for assets/categories/users/overdue/backup.
 
 ---
 
-## Phase 0 — Foundation
-- [ ] Restructure repo to a single root Go module (or `go.work`) so `desktop-app`, `server/`, and `internal/stockroom` share code
-- [ ] Create `internal/stockroom` skeleton: `db.go`, `types.go`, `errors.go` (`ErrNotFound`, `ErrForbidden`, `ErrConflict`, `ErrBookingConflict`)
-- [ ] Add `pgx/v5` + `pgxpool`; connect to local Supabase's direct Postgres port (54322) via env var with a local default; verify with a trivial query
+## Phase 0 — Foundation (Week 5)
+- [x] Move `go.mod` to the repo root (module `stockroom`); `desktop-app`, `server`, `cmd`, `internal` share one module. `wails dev`/`wails build` still run from `desktop-app/`
+- [x] `internal/stockroom/` skeleton: `db.go` (pgxpool from `DATABASE_URL`), `types.go` (structs for every table + `active_custody`/`overdue_custody`), `errors.go` (`ErrNotFound`, `ErrForbidden`, `ErrConflict`, `ErrOverdueBlocked`, `ErrPasswordNotSet`, `ErrBadCredentials`)
+- [x] `.env` loading (`godotenv`, searched upward from cwd) in `internal/stockroom/config.go` + `.env.example` with all vars from CLAUDE.md §9
+- [x] `server/main.go`: `net/http` mux, JSON helpers, error→status mapping, `GET /health` hitting the DB; verify with `curl`
+- [x] Update `scripts/start-mac.sh` and `scripts/start-windows.ps1` to also launch `go run ./server` and kill it on exit (Windows script still untested on real Windows)
 
-## Phase 1 — Schema updates for the new flow
-- [ ] Add a scan-id column to `profiles` (e.g. `id_barcode`, unique, nullable) so an ID-card scan can look someone up without a password
-- [ ] Add a unique index on `assets.serial_number` — it becomes the primary scan/lookup key for items (barcode → serial number → asset), separate from `asset_tag`
-- [ ] **Open decision:** does "Type" (from the filter mockup) become a third level on top of the existing `categories.parent_id` hierarchy (Type → Category → Subcategory, no schema change needed), or a new column on `assets`? Decide before Phase 3/6 category work — revisit once UI filters are finalized
-- [ ] "Year" filter can be derived from `assets.purchase_date` — no schema change needed unless a distinct "model year" field turns out to be wanted
+## Phase 1 — v1 schema migration + seed (Week 5)
+- [ ] New migration (CLAUDE.md §6.2): `profiles` += `student_number text unique`, `first_name`, `last_name`, `photo_path`, `is_admin bool not null default false`; `email` nullable
+- [ ] `assets` += `photo_path`; `create unique index idx_assets_serial on assets(serial_number)`
+- [ ] `alter type asset_status add value 'unavailable'`
+- [ ] Rewrite `supabase/seed.sql`: category tree from `Catagories.md` (Type → Category → Model, via `parent_id`), a handful of sample assets under Model nodes with serial numbers (incl. a `T7iBat-001`-style one), one admin + one non-admin profile with `student_number`
+- [ ] `EnsureFailsafeAdmin()` — on server start, upsert the `ADMIN_STUDENT_NUMBER` account with `is_admin = true` and bcrypt(`ADMIN_PASSWORD`)
+- [ ] `supabase db reset` and confirm via Studio/psql
 
-## Phase 2 — Auth, sessions, role enforcement
-- [ ] `LoginByScan(idBarcode)` — no password check; used when the frontend flags the input as a barcode scan
-- [ ] `LoginByPassword(idBarcode_or_email, password)` — used when the same number (or email) is typed manually; bcrypt-hash `profiles.password_hash` (currently unused)
-- [ ] `Logout`, `CurrentProfile` — in-memory session map for HTTP server; in-struct current-actor for Wails
-- [ ] `RequireRole(actor, minRole)` central gate (`owner` > `executive_producer` > `producer` > `member`, per CLAUDE.md §7) — also the gate for admin-panel access
-- [ ] `CreateProfile`, `UpdateProfileRole`, `ListProfiles`, `DeleteProfile` (owner-only)
-- [ ] Wire `RequireRole` into every mutating function going forward
+## Phase 2 — Auth, sessions, users (Week 5)
+- [ ] bcrypt helpers (`golang.org/x/crypto/bcrypt`) for `profiles.password_hash`
+- [ ] `LoginByScan(studentNumber)` → session token; if `password_hash` is null, return `needs_password: true` and a limited session that can only call `SetInitialPassword`
+- [ ] `LoginByPassword(studentNumber, password)` → session token; `ErrPasswordNotSet` if hash is null
+- [ ] `SetInitialPassword(session, password)` — only valid while hash is null
+- [ ] `Logout(session)`, `Me(session)` → profile + `has_overdue` flag (drives the sign-in warning)
+- [ ] In-memory session store with idle timeout (`SESSION_IDLE_MINUTES`); middleware attaches actor to request
+- [ ] `RequireAdmin(actor)` gate; wire into every admin-only function going forward
+- [ ] Users: `ListUsers`, `GetUser`, `CreateUser`, `UpdateUser`, `DeleteUser` (admin; block delete if user has open custody), `SetUserPassword` (admin reset)
+- [ ] `ImportRoster(csv)` — columns `first_name,last_name,student_number,photo_path`; upsert by `student_number`; copy photo into `UPLOADS_DIR/profiles/<student_number>.<ext>` and store the relative path; return per-row results
+- [ ] HTTP: `POST /auth/scan`, `POST /auth/password`, `POST /auth/set-password`, `POST /auth/logout`, `GET /me`, `/users…`, `POST /users/import`
 
-## Phase 3 — Browse & filter (read side of the core screen)
-- [ ] `ListAssets(filter)` — status/type/category/subcategory/year/free-text filters (full-text via existing GIN index); powers the right-hand item list
-- [ ] `ListCategories` — returned as a tree (via `parent_id`) so the left-side Type/Category/Subcategory dropdowns can be populated from one call
-- [ ] `GetAsset(id)` — full detail for the click-to-popup view
-- [ ] Bind above in `app.go`; verify via `wails dev`
-- [ ] Stand up minimal `server/main.go` with the same read endpoints; verify via `curl`
+## Phase 3 — Browse (Week 6)
+- [ ] `GetCategoryTree()` — full tree in one call (Type → Category → Model) for the left-side filters
+- [ ] `ListAssets(filter)` — filter by any category node (includes descendants), status, free-text (existing GIN index); returns category path + photo URL per asset
+- [ ] `GetAsset(id)` — detail popup payload incl. current custodian (if checked out) and category path
+- [ ] Static file serving: `GET /files/…` from `UPLOADS_DIR`
+- [ ] HTTP: `GET /categories/tree`, `GET /assets?…`, `GET /assets/{id}`
 
-## Phase 4 — Scan-to-track + cart checkout (core loop)
-- [ ] `ScanItem(serialNumber)` — the single function behind every item scan:
-  - if asset is currently `checked_out` → runs check-in immediately and returns the check-in result
-  - otherwise → returns asset detail (equivalent to `GetAsset`, for the popup/add-to-cart path)
-- [ ] `CheckOutAssets(actor, custodianID, assetIDs[], dueAt, notes)` — bulk transaction: takes the whole cart at once, inserts one `custody_events` row per asset, sets each `assets.status = 'checked_out'`
-- [ ] `CheckInAsset(assetID)` — single-item check-in transaction (used internally by `ScanItem`, also callable directly for admin correction)
-- [ ] `ListActiveCustody` / `ListOverdueCustody` — wrappers over existing views (in-app alert mechanism, no email/SMS)
-- [ ] `GetAssetCustodyHistory` — full audit trail per asset
+## Phase 4 — Core loop: scan, cart checkout, check-in (Week 6)
+- [ ] `ScanItem(actor, serial)` — the one function behind every item scan:
+  - asset `checked_out` → `CheckInAsset` immediately, return `{action: "checked_in", …}`
+  - asset `available` → return `{action: "detail", asset}` (same payload as `GetAsset`)
+  - asset `unavailable` → return `{action: "detail", asset}` with a flag so the UI can't add it to the cart
+  - unknown serial → `ErrNotFound`
+- [ ] `CheckOutAssets(actor, custodianID, assetIDs[], dueAt, overrideOverdue)` — single transaction:
+  - non-admin: `custodianID` must equal actor; admin may pick anyone
+  - `dueAt` > now and ≤ now + 7 days (server-enforced)
+  - refuse with `ErrOverdueBlocked` if custodian has any row in `overdue_custody`, unless admin passes `overrideOverdue`
+  - every asset must be `available` (else `ErrConflict`, whole cart fails)
+  - insert one `custody_events` row per asset (`checked_out_by = actor`), set `assets.status = 'checked_out'`
+- [ ] `CheckInAsset(actor, assetID, damageNote?)` — close the open `custody_events` row (`checked_in_by = actor`, `condition_in = note`), set status back to `available`; also callable directly by admin
+- [ ] `ListActiveCustody()`, `ListOverdueCustody()` — over the existing views, joined with custodian names
+- [ ] `GetAssetHistory(assetID)`, `GetUserHistory(userID)` — full custody trail (non-admin may only read their own)
+- [ ] HTTP: `POST /scan`, `POST /checkout`, `POST /assets/{id}/checkin`, `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history`, `GET /users/{id}/history`
 
-## Phase 5 — Admin panel functionality
-- [ ] `CreateAsset`, `UpdateAsset`, `RetireAsset` (status change), `DeleteAsset` (hard delete, blocked if open custody/bookings) — all role-gated
-- [ ] `CreateCategory`, `UpdateCategory`, `DeleteCategory` — same functions serve category *and* subcategory (subcategory = a category with a `parent_id`)
-- [ ] `ListLocations`, `CreateLocation`, `UpdateLocation`, `DeleteLocation`
-- [ ] Tag CRUD if still needed alongside the type/category/subcategory filters: `CreateTag`, `RenameTag`, `DeleteTag`, `AddTagToAsset`, `RemoveTagFromAsset`
-- [ ] Bind + expose via Wails and HTTP; validate via CLI/curl
+## Phase 5 — Admin panel API (Week 7)
+- [ ] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (block if open custody), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`), asset photo upload → `UPLOADS_DIR/assets/`
+- [ ] `CreateCategory`, `UpdateCategory`, `DeleteCategory` (block if it has children or assets), enforce max depth 3
+- [ ] Overdue list is `ListOverdueCustody` (Phase 4) — just ensure it's admin-panel friendly (custodian name, student number, days overdue)
+- [ ] `BackupNow()` → calls Phase 7's export, returns the folder written
+- [ ] HTTP: `POST/PUT/DELETE /assets…`, `POST /assets/{id}/photo`, `POST/PUT/DELETE /categories…`, `POST /admin/backup`
+- [ ] Validate everything via `curl`/a small Go test file before UI work starts
 
-## Phase 6 — Bookings/reservations (fast-follow, not in the flow above yet)
-- [ ] `CreateBooking` (role-gated; members restricted to `reserved_by = self`); catch Postgres exclusion-violation (`23P01`) → `ErrBookingConflict`
-- [ ] `UpdateBooking`, `CancelBooking`, `ListBookings` (by asset/kit/user/date range/status)
-- [ ] `MarkOverdueBookings` sweep (no cron yet — run on startup/periodic timer)
-- [ ] Wire booking status transitions into Phase 4's checkout/check-in once bookings are in play
+## Phase 6 — Frontend wiring (Week 8, alongside UI build)
+- [ ] `desktop-app/frontend/src/lib/api.ts` and `web-app/src/lib/api.ts` — identical thin `fetch` wrappers, one function per endpoint, session token handling
+- [ ] `lib/scanner.ts` in both — keystroke buffer + scan-vs-typed detection (CLAUDE.md §10); routes to login or `/scan` depending on active screen
+- [ ] Cart = frontend-only state (list of asset IDs); checkout calls `POST /checkout` once
+- [ ] Sign-out prompt after successful checkout; idle-timeout handling on 401
+- [ ] Delete `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`; remove `@supabase/supabase-js` from `desktop-app/frontend/package.json`; strip `Greet` from `app.go`
+- [ ] Wails `wails.json` / dev config: make sure the frontend can reach `http://127.0.0.1:8080` (CORS on the Go server for the Vite dev origins)
 
-## Phase 7 — Kits, activity log, saved filters
-- [ ] `ListKits`, `CreateKit`, `UpdateKit`, `DeleteKit`, `AddAssetToKit`, `RemoveAssetFromKit`, `ListKitItems`
-- [ ] `CheckOutKit`/`CheckInKit` — one `custody_events` row per asset in the kit
-- [ ] `LogActivity` generic insert helper (supplements the existing status-change trigger)
-- [ ] `ListActivityForAsset`, `ListRecentActivity`
-- [ ] `ListSavedFilters`, `CreateSavedFilter`, `DeleteSavedFilter` (per user)
+## Phase 7 — Backup (Week 8)
+- [ ] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go` — `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
+- [ ] `cmd/backup/main.go` — loads `.env`, runs the export, exits non-zero on failure
+- [ ] Scheduling docs in README: Windows Task Scheduler entry; launchd plist / cron line for macOS
+- [ ] Restore test (CLAUDE.md §11): scratch DB → migrations → load CSVs → row counts match
 
-## Phase 8 — Backup/export
-- [ ] `ExportAllTablesToCSV` in Go (`internal/stockroom/backup.go`), replacing the sketched PowerShell script
-- [ ] Wails-bound "Backup Now" method
-- [ ] Separate `cmd/backup/main.go` CLI for Windows Task Scheduler
-- [ ] Full restore test per CLAUDE.md §11 (wipe scratch DB, reapply migrations, reload CSVs, confirm row counts)
-
-## Phase 9 — Cleanup of legacy TS logic
-- [ ] Delete `desktop-app/frontend/src/lib/supabase.ts` (remove hardcoded service_role key from TS)
-- [ ] Shrink `desktop-app/frontend/src/lib/db.ts` to thin wrappers over Wails-generated bindings (keep function names/signatures so UI call sites don't change)
-- [ ] Create `web-app/src/lib/api.ts` — thin `fetch` wrappers over `server/`'s endpoints
-- [ ] Remove `@supabase/supabase-js` from `desktop-app/frontend/package.json`
-- [ ] Update `scripts/start-mac.sh` / `start-windows.ps1` to also launch `server/` alongside `supabase start` and `wails dev`
+## Phase 8 — Kits (Week 9, only if everything above is done)
+- [ ] `ListKits`, `CreateKit`, `UpdateKit`, `DeleteKit`, `AddAssetToKit`, `RemoveAssetFromKit`
+- [ ] Cart can add a kit → expands to its assets; `CheckOutAssets` handles it unchanged (one custody row per asset)
+- [ ] `CheckInKit` convenience (check in every asset in the kit)
 
 ---
+
+## Deferred / out of scope (tables stay, nothing built)
+Bookings & double-booking prevention · locations · tags · saved filters · `custom_fields` · LAN/multi-station access · email/SMS · GPS. See CLAUDE.md §2.
 
 ## Already done (for reference)
-- [x] Postgres schema fully applied (12 tables, 2 views, 4 enums) — `supabase/migrations/`
-- [x] Sample seed data (10 assets, 5 categories, 2 locations, 1 profile) — `supabase/seed.sql`
-- [x] Asset + tag CRUD working end-to-end via TS/Supabase (`desktop-app/frontend/src/lib/db.ts`) — to be replaced by Phases 3/5/9 above
+- [x] Postgres schema applied (12 tables, 2 views, 4 enums) — `supabase/migrations/`
+- [x] Sample seed data (10 assets, 5 categories, 2 locations, 1 profile) — `supabase/seed.sql` (to be rewritten in Phase 1)
+- [x] Proof-of-chain admin screen via supabase-js in the Wails app (`desktop-app/frontend/src/lib/db.ts`) — to be deleted in Phase 6
 - [x] `scripts/start-mac.sh` tested and working; `start-windows.ps1` written but untested on real Windows
+- [x] Product flow, auth model, roles, scope, and Go-backend architecture decided (CLAUDE.md §13, 2026-09-04)
