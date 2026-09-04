@@ -25,3 +25,6 @@ go.work.sum
 .env
 .DS_Store
 supabase/.DS_Store
+
+# uploaded photos (served by the Go server)
+uploads/
