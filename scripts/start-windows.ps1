@@ -1,6 +1,7 @@
 # One-step start for Stockroom on Windows: verifies dependencies, starts
 # Docker + the local Supabase stack, installs frontend packages, then
-# launches the desktop app and web app. Ctrl+C shuts everything down cleanly.
+# launches the Go API server, the desktop app, and the web app. Ctrl+C shuts
+# everything down cleanly.
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
@@ -105,8 +106,19 @@ try {
     Push-Location "desktop-app/frontend"; npm install; Pop-Location
     Push-Location "web-app"; npm install; Pop-Location
 
+    if (-not (Test-Path ".env")) {
+        Write-Host ""
+        Write-Host "== No .env found - creating one from .env.example =="
+        Copy-Item ".env.example" ".env"
+        Write-Host "  Edit .env to set ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD (see CLAUDE.md section 9)."
+    }
+
     Write-Host ""
     Write-Host "== Launching Stockroom =="
+    Write-Host "Starting Go API server..."
+    $serverProc = Start-Process -FilePath "go" -ArgumentList "run","./server" -WorkingDirectory $RepoRoot -PassThru -NoNewWindow
+    $script:ChildProcesses += $serverProc
+
     Write-Host "Starting desktop app (Wails)..."
     $desktopProc = Start-Process -FilePath "wails" -ArgumentList "dev" -WorkingDirectory (Join-Path $RepoRoot "desktop-app") -PassThru -NoNewWindow
     $script:ChildProcesses += $desktopProc
@@ -117,6 +129,7 @@ try {
 
     Write-Host ""
     Write-Host "Stockroom is running."
+    Write-Host "  API server:  http://127.0.0.1:8080/health"
     Write-Host "  Desktop app: a native window should open automatically"
     Write-Host "  Web app:     see the URL printed above (usually http://localhost:5173)"
     Write-Host "  Studio:      http://127.0.0.1:54323"
@@ -125,7 +138,7 @@ try {
 
     while ($true) {
         Start-Sleep -Seconds 1
-        if ($desktopProc.HasExited -and $webProc.HasExited) { break }
+        if ($serverProc.HasExited -and $desktopProc.HasExited -and $webProc.HasExited) { break }
     }
 }
 finally {
