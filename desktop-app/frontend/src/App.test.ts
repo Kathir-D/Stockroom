@@ -3,9 +3,9 @@ import {fireEvent, render, screen, waitFor, within} from '@testing-library/svelt
 import App from './App.svelte'
 import * as db from './lib/db'
 
-// The screen's own logic is what is under test -- form wiring, the edit/cancel
-// state machine, the delete confirmation, and error surfacing -- so the data
-// layer is mocked wholesale.
+// The screen's own logic is under test here (form wiring, the edit/cancel
+// state machine, the delete confirmation, error surfacing), so the data layer
+// is mocked wholesale.
 vi.mock('./lib/db', () => ({
   listAssets: vi.fn(),
   listCategories: vi.fn(),
@@ -140,7 +140,7 @@ describe('creating an asset', () => {
     expect(mocked.listAssets).toHaveBeenCalledTimes(2)
   })
 
-  // An empty description must not be written as "" -- the column is nullable.
+  // An empty description must not be written as "", because the column is nullable.
   it('omits an empty description', async () => {
     const {container} = await renderLoaded()
     mocked.createAsset.mockResolvedValue({} as never)

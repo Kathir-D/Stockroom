@@ -89,7 +89,7 @@
   <nav class="flex items-center gap-3 px-3 py-2">
     <span class="mr-auto text-lg font-medium">Stockroom</span>
     <div class="ml-auto flex items-center gap-2">
-      <!-- Accounts/roles land in Week 5 (see CLAUDE.md Section 7) — this is a
+      <!-- Accounts/roles land in Week 5 (see CLAUDE.md Section 7). This is a
            placeholder until real auth exists. -->
       <div
         class="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-accent-800 text-[13px] font-medium text-accent-100"

@@ -24,7 +24,7 @@ insert into tags (id, name) values ('11111111-0000-0000-0000-000000000040', 'fix
 -- Uniqueness -----------------------------------------------------------------
 select throws_ok(
   $$insert into assets (asset_tag, name) values ('FIX-001', 'Duplicate tag')$$,
-  '23505', null, 'assets.asset_tag is unique -- two stickers cannot share a tag');
+  '23505', null, 'assets.asset_tag is unique, so two stickers cannot share a tag');
 select throws_ok(
   $$insert into profiles (email) values ('owner@test.local')$$,
   '23505', null, 'profiles.email is unique');
@@ -54,7 +54,7 @@ select throws_ok(
   '23502', null, 'profiles.email is required by the base schema (v1 relaxes it)');
 select throws_ok(
   $$insert into custody_events (asset_id, custodian_id) values ('11111111-0000-0000-0000-000000000030', null)$$,
-  '23502', null, 'custody_events.custodian_id is required -- custody always has an owner');
+  '23502', null, 'custody_events.custodian_id is required because custody always has an owner');
 
 -- Enum inputs ----------------------------------------------------------------
 select throws_ok(

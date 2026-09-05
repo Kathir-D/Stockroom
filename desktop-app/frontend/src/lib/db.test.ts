@@ -95,7 +95,7 @@ describe('listAssets', () => {
     expect(op).toBe('select')
     // The assets→categories hop needs the FK-name hint; the categories→parent
     // hop must be the column-as-embed form or PostgREST returns the children
-    // (an array) instead of the parent -- see the comment in db.ts.
+    // (an array) instead of the parent. See the comment in db.ts.
     expect(select.replace(/\s+/g, ' ')).toBe(
       'id, asset_tag, name, description, status, serial_number, category_id, ' +
         'category:categories!assets_category_id_fkey ( name, parent:parent_id ( name ) )'

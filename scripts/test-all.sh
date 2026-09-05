@@ -6,8 +6,8 @@
 #
 # The database suites need the Supabase stack running (`supabase start`). Go's
 # integration tests skip themselves when Postgres is unreachable unless
-# STOCKROOM_REQUIRE_DB=1 is set -- this script sets it whenever the database is
-# actually up, so a silent skip can never be mistaken for a pass.
+# STOCKROOM_REQUIRE_DB=1 is set. This script sets it whenever the database is
+# actually up, so a silent skip can never pass for a success.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."

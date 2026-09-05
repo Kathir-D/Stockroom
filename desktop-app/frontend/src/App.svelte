@@ -191,7 +191,7 @@
 <AssetBrowser {assets} {loading} {error} />
 
 <!-- Admin tools below: add/edit/delete assets and manage the global tag list.
-     These predate the design import and aren't part of it yet — fast-follow
+     These predate the design import and aren't part of it yet. The fast-follow
      is to either restyle them to match or move them behind the account menu
      in the nav once real auth/roles land (Week 5, CLAUDE.md Section 7). -->
 <main class="mx-auto my-8 max-w-[1000px] px-4">

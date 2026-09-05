@@ -51,7 +51,7 @@ select is(
      join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity),
   0::bigint,
-  'no public table has RLS enabled (by design -- see CLAUDE.md §4)');
+  'no public table has RLS enabled (by design, see CLAUDE.md §4)');
 
 select * from finish();
 rollback;
