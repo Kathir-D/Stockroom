@@ -3,11 +3,12 @@ import {fireEvent, render, screen, waitFor, within} from '@testing-library/svelt
 import App from './App.svelte'
 import * as db from './lib/db'
 
-// The screen's own logic is what is under test -- form wiring, the edit/cancel
-// state machine, the delete confirmation, and error surfacing -- so the data
-// layer is mocked wholesale.
+// The screen's own logic is under test here (form wiring, the edit/cancel
+// state machine, the delete confirmation, error surfacing), so the data layer
+// is mocked wholesale.
 vi.mock('./lib/db', () => ({
   listAssets: vi.fn(),
+  listCategories: vi.fn(),
   listTags: vi.fn(),
   listAllAssetTags: vi.fn(),
   createAsset: vi.fn(),
@@ -27,14 +28,22 @@ const camera = {
   asset_tag: 'CAM-001',
   name: 'Sony A7S III',
   description: 'Full-frame mirrorless',
-  status: 'available' as const
+  status: 'available' as const,
+  serial_number: 'SN-CAM001',
+  category_id: 'c1',
+  category_name: 'Cameras',
+  subcategory_name: null
 }
 const lens = {
   id: 'a2',
   asset_tag: 'LEN-001',
   name: 'Sigma 24-70mm',
   description: null,
-  status: 'checked_out' as const
+  status: 'checked_out' as const,
+  serial_number: null,
+  category_id: null,
+  category_name: null,
+  subcategory_name: null
 }
 const audioTag = {id: 't1', name: 'audio'}
 const videoTag = {id: 't2', name: 'video'}
@@ -43,12 +52,22 @@ function seed(overrides: Partial<{assets: unknown[]; tags: unknown[]; assetTags:
   mocked.listAssets.mockResolvedValue((overrides.assets ?? [camera, lens]) as never)
   mocked.listTags.mockResolvedValue((overrides.tags ?? [audioTag, videoTag]) as never)
   mocked.listAllAssetTags.mockResolvedValue((overrides.assetTags ?? {a1: [audioTag]}) as never)
+  mocked.listCategories.mockResolvedValue([] as never)
 }
 
 async function renderLoaded() {
   const utils = render(App)
-  await screen.findByRole('heading', {name: /Assets \(/})
+  await screen.findByRole('heading', {name: 'Edit / delete assets'})
   return utils
+}
+
+// The browse screen (AssetBrowser) and the admin table both list every asset,
+// so admin-side queries are scoped to the admin table.
+function adminTable(): HTMLElement {
+  return screen.getByRole('heading', {name: 'Edit / delete assets'}).closest('section')!.querySelector('table')!
+}
+function adminRow(assetTag: string): HTMLElement {
+  return within(adminTable()).getByText(assetTag).closest('tr') as HTMLElement
 }
 
 beforeEach(() => {
@@ -67,23 +86,22 @@ describe('initial load', () => {
 
   it('renders every asset with its tag, name and status', async () => {
     await renderLoaded()
-    expect(screen.getByRole('heading', {name: 'Assets (2)'})).toBeInTheDocument()
-    expect(screen.getByText('CAM-001')).toBeInTheDocument()
-    expect(screen.getByText('Sony A7S III')).toBeInTheDocument()
+    expect(within(adminTable()).getAllByRole('row')).toHaveLength(3) // header + 2
+    expect(within(adminRow('CAM-001')).getByText('Sony A7S III')).toBeInTheDocument()
 
     // Scoped to the row: "checked_out" is also an <option> in every status select.
-    const lensRow = screen.getByText('LEN-001').closest('tr') as HTMLElement
-    expect(within(lensRow).getByText('checked_out', {selector: 'td'})).toBeInTheDocument()
+    expect(within(adminRow('LEN-001')).getByText('checked_out', {selector: 'td'})).toBeInTheDocument()
   })
 
   it('shows the assigned tags on the right asset only', async () => {
     await renderLoaded()
-    const cameraRow = screen.getByText('CAM-001').closest('tr') as HTMLElement
-    const lensRow = screen.getByText('LEN-001').closest('tr') as HTMLElement
-    // .chip is the assigned-tag badge; the row's "add tag" select lists every
-    // other tag by name, so the query has to be narrowed to the chips.
-    expect(within(cameraRow).getByText('audio', {selector: '.chip'})).toBeInTheDocument()
-    expect(within(lensRow).queryByText('audio', {selector: '.chip'})).not.toBeInTheDocument()
+    const cameraRow = adminRow('CAM-001')
+    const lensRow = adminRow('LEN-001')
+    // The chip is the assigned-tag badge (a span holding the "x" button); the
+    // row's "add tag" select lists every other tag by name, so the query has
+    // to be narrowed to spans.
+    expect(within(cameraRow).getByText('audio', {selector: 'span'})).toBeInTheDocument()
+    expect(within(lensRow).queryByText('audio', {selector: 'span'})).not.toBeInTheDocument()
   })
 
   it('renders a null description as blank rather than "null"', async () => {
@@ -122,7 +140,7 @@ describe('creating an asset', () => {
     expect(mocked.listAssets).toHaveBeenCalledTimes(2)
   })
 
-  // An empty description must not be written as "" -- the column is nullable.
+  // An empty description must not be written as "", because the column is nullable.
   it('omits an empty description', async () => {
     const {container} = await renderLoaded()
     mocked.createAsset.mockResolvedValue({} as never)
@@ -172,7 +190,7 @@ describe('editing an asset', () => {
     await renderLoaded()
     mocked.updateAsset.mockResolvedValue({} as never)
 
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
 
     const editRow = screen.getByDisplayValue('CAM-001').closest('tr') as HTMLElement
@@ -196,7 +214,7 @@ describe('editing an asset', () => {
 
   it('only puts one row into edit mode', async () => {
     await renderLoaded()
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
 
     expect(screen.getAllByRole('button', {name: 'Save'})).toHaveLength(1)
@@ -205,7 +223,7 @@ describe('editing an asset', () => {
 
   it('discards the edit on cancel without calling the database', async () => {
     await renderLoaded()
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
 
     const editRow = screen.getByDisplayValue('CAM-001').closest('tr') as HTMLElement
@@ -214,7 +232,7 @@ describe('editing an asset', () => {
     })
     await fireEvent.click(within(editRow).getByRole('button', {name: 'Cancel'}))
 
-    await waitFor(() => expect(screen.getByText('CAM-001')).toBeInTheDocument())
+    await waitFor(() => expect(adminRow('CAM-001')).toBeInTheDocument())
     expect(mocked.updateAsset).not.toHaveBeenCalled()
     expect(screen.queryByText('Discarded')).not.toBeInTheDocument()
   })
@@ -222,7 +240,7 @@ describe('editing an asset', () => {
   // A null description must edit as an empty box, not the string "null".
   it('edits a null description as an empty field', async () => {
     await renderLoaded()
-    const row = screen.getByText('LEN-001').closest('tr') as HTMLElement
+    const row = adminRow('LEN-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
 
     const editRow = screen.getByDisplayValue('LEN-001').closest('tr') as HTMLElement
@@ -236,7 +254,7 @@ describe('deleting an asset', () => {
     await renderLoaded()
     mocked.deleteAsset.mockResolvedValue(undefined as never)
 
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Delete'}))
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Sony A7S III'))
@@ -247,7 +265,7 @@ describe('deleting an asset', () => {
     vi.stubGlobal('confirm', vi.fn(() => false))
     await renderLoaded()
 
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Delete'}))
 
     expect(mocked.deleteAsset).not.toHaveBeenCalled()
@@ -305,7 +323,7 @@ describe('tagging an asset', () => {
   // would violate the asset_tags primary key.
   it('offers only the tags the asset does not already have', async () => {
     await renderLoaded()
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
+    const row = adminRow('CAM-001')
     const select = within(row).getByRole('combobox') as HTMLSelectElement
     const options = Array.from(select.options).map(o => o.textContent?.trim())
 
@@ -315,7 +333,7 @@ describe('tagging an asset', () => {
 
   it('offers every tag for an asset with none', async () => {
     await renderLoaded()
-    const row = screen.getByText('LEN-001').closest('tr') as HTMLElement
+    const row = adminRow('LEN-001')
     const select = within(row).getByRole('combobox') as HTMLSelectElement
     const options = Array.from(select.options).map(o => o.textContent?.trim())
 
@@ -326,7 +344,7 @@ describe('tagging an asset', () => {
     await renderLoaded()
     mocked.addTagToAsset.mockResolvedValue(undefined as never)
 
-    const row = screen.getByText('LEN-001').closest('tr') as HTMLElement
+    const row = adminRow('LEN-001')
     await fireEvent.change(within(row).getByRole('combobox'), {target: {value: 't1'}})
     await fireEvent.click(within(row).getByRole('button', {name: 'Add'}))
 
@@ -336,7 +354,7 @@ describe('tagging an asset', () => {
 
   it('does nothing when no tag is selected', async () => {
     await renderLoaded()
-    const row = screen.getByText('LEN-001').closest('tr') as HTMLElement
+    const row = adminRow('LEN-001')
     await fireEvent.click(within(row).getByRole('button', {name: 'Add'}))
 
     expect(mocked.addTagToAsset).not.toHaveBeenCalled()
@@ -346,8 +364,8 @@ describe('tagging an asset', () => {
     await renderLoaded()
     mocked.removeTagFromAsset.mockResolvedValue(undefined as never)
 
-    const row = screen.getByText('CAM-001').closest('tr') as HTMLElement
-    const chip = within(row).getByText('audio').closest('.chip') as HTMLElement
+    const row = adminRow('CAM-001')
+    const chip = within(row).getByText('audio', {selector: 'span'})
     await fireEvent.click(within(chip).getByRole('button', {name: 'x'}))
 
     await waitFor(() => expect(mocked.removeTagFromAsset).toHaveBeenCalledWith('a1', 't1'))

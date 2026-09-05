@@ -96,7 +96,7 @@ func TestWriteErrorSeesThroughWrapping(t *testing.T) {
 }
 
 // An unrecognised error must be a 500 whose body says nothing about the
-// underlying failure -- connection strings and SQL must not reach the client.
+// underlying failure. Connection strings and SQL must not reach the client.
 func TestWriteErrorHidesUnknownDetail(t *testing.T) {
 	secret := `pq: password authentication failed for user "postgres" at 127.0.0.1:54322`
 	rec := httptest.NewRecorder()

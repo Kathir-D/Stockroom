@@ -6,11 +6,11 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
-| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 268 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
+| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 267 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
 | Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 74 | config/`.env` loading, pool + ping failures, error→HTTP mapping, JSON decoding, `/health` |
-| Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 65 | `db.ts` query shapes and error unwrapping, the admin screen's flows |
+| Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
 
-**407 cases total.** Run everything locally:
+433 cases total. Run everything locally:
 
 ```bash
 ./scripts/test-all.sh
@@ -27,17 +27,17 @@ npm --prefix desktop-app/frontend test
 
 ### File-by-file
 
-**Database** — `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
+**Database.** `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
 
-**Go** — `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `server/json_test.go`, `server/router_test.go`.
+**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `server/json_test.go`, `server/router_test.go`.
 
-**Frontend** — `src/lib/db.test.ts`, `src/App.test.ts`.
+**Frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
 
 ---
 
 ## Making the tests block a merge
 
-Two pieces: a workflow that runs them on every PR, and a branch protection rule that makes that workflow's check **required**.
+Two pieces are needed. A workflow that runs them on every PR, and a branch protection rule that makes that workflow's check required.
 
 ### 1. The workflow (already committed)
 
@@ -49,17 +49,17 @@ Two pieces: a workflow that runs them on every PR, and a branch protection rule 
 4. `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`
 5. `supabase test db` (pgTAP)
 6. `npm ci`, `npm run check` (svelte-check), `npm test` (Vitest) for `desktop-app/frontend`
-7. `npm ci`, `npm run check`, `npm run build` for `web-app` (no tests yet — it must still compile)
+7. `npm ci`, `npm run check`, `npm run build` for `web-app` (no tests yet, but it must still compile)
 
-`STOCKROOM_REQUIRE_DB=1` matters: without it the Go integration tests *skip* when Postgres is unreachable, so a broken database would look green. In CI they must fail instead.
+`STOCKROOM_REQUIRE_DB=1` matters. Without it the Go integration tests skip when Postgres is unreachable, so a broken database would look green. In CI they must fail instead.
 
-The job is named **`tests`** — that is the check name you require below.
+The job is named `tests`. That is the check name you require below.
 
 ### 2. Turn on branch protection
 
 The workflow alone does not block anything; GitHub only enforces it once the check is marked required.
 
-**In the web UI:** repo → **Settings** → **Rules** → **Rulesets** → **New branch ruleset**
+In the web UI, open the repo's Settings, then Rules, then Rulesets, then New branch ruleset.
 
 - Target: **Default branch** (`main`)
 - Enable **Require a pull request before merging** (so nothing lands by direct push)
@@ -67,9 +67,9 @@ The workflow alone does not block anything; GitHub only enforces it once the che
 - Enable **Require branches to be up to date before merging** (so a PR is re-tested against the latest `main`)
 - Set **Enforcement status** to **Active**
 
-> The `tests` check only appears in the search box after the workflow has run at least once. Open a throwaway PR first (or push the workflow to `main`), let it finish, then add the check.
+> The `tests` check only appears in the search box after the workflow has run at least once. Open a throwaway PR first, or push the workflow to `main`, let it finish, then add the check.
 
-**Or with the `gh` CLI** (classic branch protection — every field below is required by that API):
+Or with the `gh` CLI. This is classic branch protection, and that API requires every field below.
 
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
@@ -93,13 +93,13 @@ git push -u origin test-ci
 gh pr create --fill
 ```
 
-The PR should show the `tests` check running, and **Merge** should stay disabled until it goes green.
+The PR should show the `tests` check running, and the Merge button should stay disabled until it goes green.
 
 ---
 
 ## Adding new test cases
 
-Put each test with the layer it covers; the CI workflow picks up new files automatically.
+Put each test with the layer it covers. The CI workflow picks up new files automatically.
 
 ### Database (pgTAP)
 
@@ -126,10 +126,10 @@ rollback;
 
 Rules of the road:
 - Always wrap in `begin; … rollback;` so the suite leaves the local database untouched.
-- Use `no_plan()` rather than `plan(N)`; the count stays out of your way.
-- Use fixed UUID prefixes per file (`11111111-…` in `020`, `22222222-…` in `030`, …) so fixtures can't collide.
-- Assert *behaviour* (insert and check what happens) over DDL text wherever you can.
-- Common SQLSTATEs: `23505` unique, `23503` foreign key, `23502` not null, `23514` check, `23P01` exclusion, `22P02` bad enum value.
+- Use `no_plan()` rather than `plan(N)` so the count stays out of your way.
+- Use fixed UUID prefixes per file (`11111111-...` in `020`, `22222222-...` in `030`, and so on) so fixtures can't collide.
+- Assert behaviour (insert and check what happens) over DDL text wherever you can.
+- Common SQLSTATEs are `23505` unique, `23503` foreign key, `23502` not null, `23514` check, `23P01` exclusion, and `22P02` bad enum value.
 
 Run just this layer with `supabase test db`.
 
@@ -150,9 +150,9 @@ Prefer table-driven subtests, and assert on the sentinel errors (`errors.Is(err,
 
 Add `*.test.ts` under `desktop-app/frontend/src/` (the Vitest `include` is `src/**/*.test.ts`).
 
-- Logic in `lib/` → mock `./supabase` and assert the query chain, as `src/lib/db.test.ts` does.
-- Components → `vi.mock('./lib/db', …)`, `render(Component)`, then drive it with `fireEvent` and assert through `screen` / `within`. Query by role and text, not CSS classes, except where a class is the only way to disambiguate.
-- Anything async needs `await waitFor(...)` — the screen tears its form down while `loading` is true, so re-query elements after an action instead of holding a reference.
+- For logic in `lib/`, mock `./supabase` and assert the query chain, as `src/lib/db.test.ts` does.
+- For components, `vi.mock('./lib/db', ...)`, `render(Component)`, then drive it with `fireEvent` and assert through `screen` and `within`. Query by role and text, not CSS classes, except where a class is the only way to disambiguate.
+- Anything async needs `await waitFor(...)`. The admin screen tears its form down while `loading` is true, so re-query elements after an action instead of holding a reference.
 
 Run with `npm --prefix desktop-app/frontend test` (or `test:watch` while writing).
 
@@ -162,4 +162,4 @@ Run with `npm --prefix desktop-app/frontend test` (or `test:watch` while writing
 ./scripts/test-all.sh
 ```
 
-Green locally means green in CI, with one exception: CI also runs `go vet` and `svelte-check`, so run those too if you touched Go or Svelte.
+Green locally means green in CI, with one exception. CI also runs `go vet` and `svelte-check`, so run those too if you touched Go or Svelte.

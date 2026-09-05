@@ -227,7 +227,7 @@ func TestGetenv(t *testing.T) {
 func TestFindDotEnvWalksUp(t *testing.T) {
 	isolateEnv(t)
 	dir := chdirNoDotEnv(t)
-	// .env two levels above the working directory — the case that makes
+	// .env two levels above the working directory, the case that makes
 	// `go run ./server` work from any subdirectory of the repo.
 	repoRoot := filepath.Dir(filepath.Dir(dir))
 	want := filepath.Join(repoRoot, ".env")
