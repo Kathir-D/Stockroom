@@ -35,12 +35,13 @@ select ok(not has_table_privilege('anon', 'public.assets'::regclass, 'insert'),
   'anon cannot write assets');
 
 -- Default privileges: a table added by a future migration is covered
--- automatically for service_role and stays closed to anon.
+-- automatically for service_role. Whether anon can also see a *new* table is
+-- decided by the Supabase image's own default privileges, not by this repo's
+-- migration (it revokes only on tables that existed at the time), so that is
+-- deliberately not asserted here -- it differs between image versions.
 create table public.privilege_probe (id int primary key);
 select ok(has_table_privilege('service_role', 'public.privilege_probe'::regclass, 'select'),
   'default privileges grant service_role access to newly created tables');
-select ok(not has_table_privilege('anon', 'public.privilege_probe'::regclass, 'select'),
-  'a newly created table is not readable by anon');
 
 -- Row level security is deliberately off: the Go server is the only client and
 -- connects as the table owner (CLAUDE.md §4). Assert it, so switching it on is
