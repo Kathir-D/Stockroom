@@ -1,0 +1,78 @@
+/*
+  Tailwind v4 entry for the desktop app. The design tokens below are the
+  "Nocturne" system from the UI import (dark ground, green accent), expressed
+  as Tailwind theme variables so they become utilities: bg-bg, text-fg,
+  bg-accent, text-fg/55, rounded-md, shadow-lg, ...
+
+  Spacing uses Tailwind's default 4px scale rather than the import's 2.8px
+  scale; values were rounded to the nearest step.
+*/
+@import "tailwindcss";
+
+/* Inter, latin subset, variable weight. Extracted from the design export so
+   the app stays fully offline (CLAUDE.md §2). */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/inter-v19-latin.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  --color-bg: #1d1f1e;
+  --color-surface: #232532;
+  --color-fg: #e9e9ed;
+  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+
+  /* Accent ramp derived from the single brand green. */
+  --color-accent: #038940;
+  --color-accent-100: color-mix(in oklch, #038940 20%, white);
+  --color-accent-200: color-mix(in oklch, #038940 40%, white);
+  --color-accent-300: color-mix(in oklch, #038940 60%, white);
+  --color-accent-400: color-mix(in oklch, #038940 80%, white);
+  --color-accent-500: #038940;
+  --color-accent-600: color-mix(in oklch, #038940 70%, black);
+  --color-accent-700: color-mix(in oklch, #038940 55%, black);
+  --color-accent-800: color-mix(in oklch, #038940 40%, black);
+  --color-accent-900: color-mix(in oklch, #038940 25%, black);
+
+  /* Neutral ramp, generated on one shared OKLCH lightness scale. */
+  --color-neutral-100: #f3f5fe;
+  --color-neutral-200: #e4e7f5;
+  --color-neutral-300: #cfd3e5;
+  --color-neutral-400: #b2b6ca;
+  --color-neutral-500: #9397ab;
+  --color-neutral-600: #75798c;
+  --color-neutral-700: #595d6c;
+  --color-neutral-800: #3f424d;
+  --color-neutral-900: #292b31;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+
+  /* Elevation on a dark ground: hairline edge + ambient darkness. */
+  --shadow-sm: 0 0 0 1px #3f424d;
+  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgb(0 0 0 / 0.55);
+  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgb(0 0 0 / 0.65);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-[15px] leading-[1.55] text-fg antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+}

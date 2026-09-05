@@ -70,8 +70,8 @@ func TestHealthOK(t *testing.T) {
 	}
 }
 
-// The point of /health is that it fails when Postgres is gone -- the start
-// scripts poll it. A closed pool stands in for a stopped database.
+// The point of /health is that it fails when Postgres is gone, because the
+// start scripts poll it. A closed pool stands in for a stopped database.
 func TestHealthFailsWhenDatabaseIsDown(t *testing.T) {
 	db := openTestDB(t)
 	db.Close()
