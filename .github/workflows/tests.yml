@@ -34,7 +34,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop-app/frontend/package-lock.json
+          cache-dependency-path: |
+            desktop-app/frontend/package-lock.json
+            web-app/package-lock.json
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v1
@@ -70,6 +72,17 @@ jobs:
 
       - name: Frontend tests (Vitest)
         run: npm --prefix desktop-app/frontend test
+
+      # web-app has no tests yet (it is still a shell), but it must at least
+      # type-check and build so a broken PR can't merge.
+      - name: Install web-app dependencies
+        run: npm --prefix web-app ci
+
+      - name: web-app type check
+        run: npm --prefix web-app run check
+
+      - name: web-app build
+        run: npm --prefix web-app run build
 
       - name: Stop Supabase
         if: always()

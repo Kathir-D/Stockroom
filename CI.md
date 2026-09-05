@@ -48,7 +48,8 @@ Two pieces: a workflow that runs them on every PR, and a branch protection rule 
 3. `go vet ./...`
 4. `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`
 5. `supabase test db` (pgTAP)
-6. `npm ci`, `npm run check` (svelte-check), `npm test` (Vitest)
+6. `npm ci`, `npm run check` (svelte-check), `npm test` (Vitest) for `desktop-app/frontend`
+7. `npm ci`, `npm run check`, `npm run build` for `web-app` (no tests yet — it must still compile)
 
 `STOCKROOM_REQUIRE_DB=1` matters: without it the Go integration tests *skip* when Postgres is unreachable, so a broken database would look green. In CI they must fail instead.
 
