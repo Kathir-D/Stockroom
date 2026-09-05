@@ -1,6 +1,6 @@
 // Command server is the Stockroom HTTP API. It is the only process that talks
 // to Postgres; both frontends call it over localhost. All logic lives in
-// internal/stockroom — handlers here only decode requests, call the package,
+// internal/stockroom. Handlers here only decode requests, call the package,
 // and encode responses.
 package main
 

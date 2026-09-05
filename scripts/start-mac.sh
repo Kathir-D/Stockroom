@@ -40,7 +40,7 @@ fail=0
 check_cmd() {
   local name="$1" cmd="$2" url="$3"
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "  [MISSING] $name — install from: $url"
+    echo "  [MISSING] $name. Install from $url"
     fail=1
   else
     echo "  [OK] $name"
@@ -54,7 +54,7 @@ check_cmd "Supabase CLI" supabase "https://supabase.com/docs/guides/cli/getting-
 
 if ! command -v wails >/dev/null 2>&1; then
   if command -v go >/dev/null 2>&1; then
-    echo "  [MISSING] Wails CLI — installing via 'go install'..."
+    echo "  [MISSING] Wails CLI. Installing via 'go install'..."
     go install github.com/wailsapp/wails/v2/cmd/wails@latest
     export PATH="$PATH:$(go env GOPATH)/bin"
     if command -v wails >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ if ! command -v wails >/dev/null 2>&1; then
       fail=1
     fi
   else
-    echo "  [MISSING] Wails CLI — cannot auto-install without Go. See https://go.dev/dl/"
+    echo "  [MISSING] Wails CLI. Cannot auto-install without Go. See https://go.dev/dl/"
     fail=1
   fi
 else
@@ -80,7 +80,7 @@ fi
 echo ""
 echo "== Starting Docker (required for Supabase) =="
 if ! docker info >/dev/null 2>&1; then
-  echo "Docker isn't running — starting Docker Desktop..."
+  echo "Docker isn't running. Starting Docker Desktop..."
   open -a Docker
   echo "Waiting for Docker to become ready..."
   ready=0
@@ -109,7 +109,7 @@ echo "== Installing frontend dependencies (if needed) =="
 
 if [ ! -f .env ]; then
   echo ""
-  echo "== No .env found — creating one from .env.example =="
+  echo "== No .env found. Creating one from .env.example =="
   cp .env.example .env
   echo "  Edit .env to set ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD (see CLAUDE.md §9)."
 fi
