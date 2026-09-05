@@ -1,8 +1,8 @@
-# Stockroom — Media Department Asset Checkout System
+# Stockroom: media department asset checkout system
 
-This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made — it's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
+This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture all pinned down — see Section 13 for what changed).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture all pinned down; see Section 13 for what changed).
 
 ---
 
@@ -13,7 +13,7 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 ### Target user flow
 
 1. **Sign in by scanning a student ID card.** The card barcode encodes the student's 6-digit number. A scan signs them in instantly, no password. If the same number is *typed* by hand instead, a password is required.
-2. **Browse a filterable list of equipment** — filters (Type → Category → Subcategory/Model, plus free-text search) on the left, matching items on the right.
+2. **Browse a filterable list of equipment**. Filters (Type → Category → Subcategory/Model, plus free-text search) on the left, matching items on the right.
 3. **Click an item → detail popup → "Add to Cart".** The cart is a pending set held by the frontend; nothing is checked out yet.
 4. **Check out the cart.** The user picks a due date (max 7 days out); every item in the cart transitions to `checked_out` together, in one transaction. After checkout the UI offers a sign-out prompt.
 5. **Every physical item has a barcode sticker encoding its serial number.** Scanning an item (while signed in) is the single "track it" action:
@@ -34,16 +34,16 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 - Runs on both the Windows closet PC and a macOS dev machine
 - Automated nightly off-site backup (CSV into a Google Drive-synced folder)
 
-**Non-goals (explicitly out of scope — tables may exist in the schema but nothing is built on them)**
+**Non-goals** (explicitly out of scope; tables may exist in the schema but nothing is built on them)
 - Reservations / future bookings / double-booking prevention (maybe much later)
-- Physical locations (building/room/shelf) — location is "who has it"
+- Physical locations (building/room/shelf). Location is "who has it"
 - Free-form tags, saved filter presets, per-asset custom fields
-- Multi-station / LAN access — the web app is localhost-only on the closet PC
+- Multi-station / LAN access. The web app is localhost-only on the closet PC
 - Native mobile apps
 - Email/SMS reminders (needs internet)
 - GPS tagging
 
-**Lowest priority, kept in scope if time allows:** kits — a named bundle of assets (e.g. "Kit #1 = this camera + this lens + this bag") checked out/in as one unit.
+**Lowest priority, kept in scope if time allows.** Kits, a named bundle of assets (e.g. "Kit #1 = this camera + this lens + this bag") checked out/in as one unit.
 
 ---
 
@@ -51,17 +51,17 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 
 One dedicated Windows PC lives in the camera closet, always on. Development happens on macOS. Three things run on the machine:
 
-1. **Supabase local stack** (Docker) — used purely as the Postgres host (+ Studio for poking at data). Its REST API and Auth services are unused.
-2. **Go HTTP server** (`server/`) — the only process that talks to the database. Listens on localhost. All business logic, account handling, and role checks live here (in `internal/stockroom`).
-3. **Frontends** — two thin UIs that only speak HTTP to the Go server:
-   - **Wails desktop app** (`desktop-app/`) — primary interface, native window, Svelte 5 + TypeScript. Wails' Go side is just a window host; it does not touch the DB.
-   - **Web app** (`web-app/`) — Vite + Svelte 5 + TypeScript, served on `localhost`, mirrors the desktop app. Localhost only, not exposed on the LAN.
+1. **Supabase local stack** (Docker). Used purely as the Postgres host (+ Studio for poking at data). Its REST API and Auth services are unused.
+2. **Go HTTP server** (`server/`). The only process that talks to the database. Listens on localhost. All business logic, account handling, and role checks live here (in `internal/stockroom`).
+3. **Frontends**. Two thin UIs that only speak HTTP to the Go server:
+   - **Wails desktop app** (`desktop-app/`). Primary interface, native window, Svelte 5 + TypeScript. Wails' Go side is just a window host; it does not touch the DB.
+   - **Web app** (`web-app/`). Vite + Svelte 5 + TypeScript, served on `localhost`, mirrors the desktop app. Localhost only, not exposed on the LAN.
 
-The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every table to CSV into a folder that the Google Drive client (already installed on the PC) syncs off-site — no cloud API code needed.
+The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every table to CSV into a folder that the Google Drive client (already installed on the PC) syncs off-site. No cloud API code needed.
 
 ---
 
-## 4. Backend architecture — DECIDED: single Go backend over Supabase-hosted Postgres
+## 4. Backend architecture (decided): single Go backend over Supabase-hosted Postgres
 
 **The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
 
@@ -70,7 +70,7 @@ Why this shape:
 - Both UIs share one code path and one session store, so behaviour can't drift.
 - Postgres still runs inside the Supabase CLI stack because migrations, seed loading, and Studio are already set up and working. Go connects to the **direct Postgres port (54322)** via `DATABASE_URL`.
 
-**Historical note:** an earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (see `supabase/migrations/20260826180000_grant_service_role.sql` and `desktop-app/frontend/src/lib/supabase.ts` / `db.ts`). That migration is harmless and stays; the TS files are slated for deletion in TODO Phase 6. RLS is still not enabled and doesn't need to be — nothing but the Go server (connecting as `postgres`) reaches the DB.
+**Historical note.** An earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (see `supabase/migrations/20260826180000_grant_service_role.sql` and `desktop-app/frontend/src/lib/supabase.ts` / `db.ts`). That migration is harmless and stays; the TS files are slated for deletion in TODO Phase 6. RLS is still not enabled and doesn't need to be. Nothing but the Go server (connecting as `postgres`) reaches the DB.
 
 ---
 
@@ -83,9 +83,9 @@ Why this shape:
 | Backend / API | Go `net/http` server (`server/`) on localhost, JSON endpoints; logic in `internal/stockroom` |
 | Auth | Scan login (student number, no password) or typed login (student number + bcrypt password); in-memory session map in the Go server; `is_admin` flag gates the admin panel |
 | Files | Profile + asset photos copied into a local `uploads/` dir, served by the Go server at `/files/…` |
-| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4) — calls the Go server over HTTP |
-| Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4 — calls the Go server over HTTP; localhost only |
-| Barcode scanner | Standard USB HID keyboard-wedge scanner — not yet tested with real hardware |
+| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Calls the Go server over HTTP |
+| Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Calls the Go server over HTTP; localhost only |
+| Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
 | Backup | Go CLI (`cmd/backup`) → CSV per table → Google Drive-synced folder; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
 | Config | `.env` at repo root (see Section 9) |
 
@@ -278,27 +278,27 @@ select * from active_custody
 where due_at is not null and due_at < now();
 ```
 
-### 6.2 Schema changes for v1 (next migration — TODO Phase 1)
+### 6.2 Schema changes for v1 (next migration, TODO Phase 1)
 
 The base schema was designed for a broader feature set than v1 ships. One additive migration brings it in line with the flow in Section 1; nothing is dropped.
 
 **`profiles`**
-- `student_number text unique` — the 6-digit number encoded on the student ID barcode; the scan/typed login key
-- `first_name text`, `last_name text` — replaces reliance on `full_name` (kept, can be derived)
-- `photo_path text` — relative path under `uploads/`
-- `is_admin boolean not null default false` — the *only* permission flag (Section 7). The `role user_role` column stays but is unused.
+- `student_number text unique`. The 6-digit number encoded on the student ID barcode; the scan/typed login key
+- `first_name text`, `last_name text`. Replaces reliance on `full_name` (kept, can be derived)
+- `photo_path text`. Relative path under `uploads/`
+- `is_admin boolean not null default false`. The *only* permission flag (Section 7). The `role user_role` column stays but is unused.
 - `email` becomes nullable (roster CSV doesn't carry it)
 - `password_hash` is now actually used: bcrypt hash, **null until the user sets one** (see Section 7)
 
 **`assets`**
-- `create unique index on assets(serial_number)` — the serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7iBat-001`, `T5iBat-001`, `SD-014`.
+- `create unique index on assets(serial_number)`. The serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7iBat-001`, `T5iBat-001`, `SD-014`.
 - `photo_path text`
-- `asset_status` enum gains `'unavailable'` — the catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
+- `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
-**`categories`** — no change. Used as a strict 3-level tree via `parent_id`:
+**`categories`.** No change. Used as a strict 3-level tree via `parent_id`:
 `Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`.
 
-**Unused in v1 (tables kept, no code written against them):** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
+**Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
 
 ---
 
@@ -323,7 +323,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 - **Typed** (same number entered by hand): password required, checked against `password_hash` with bcrypt.
 - Roster-imported users have `password_hash = null`. Their first **scan** login prompts them to set a password before continuing; typed login is impossible until then.
 - Admins can set or reset any user's password from the admin panel.
-- **Failsafe admin:** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password — a way back into the admin panel that doesn't depend on any UI.
+- **Failsafe admin.** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password. A way back into the admin panel that doesn't depend on any UI.
 
 **Sessions**
 - In-memory session map in the Go server (token in a cookie or `Authorization` header). Restarting the server signs everyone out; acceptable.
@@ -339,8 +339,8 @@ Two kinds of account, decided by `profiles.is_admin`:
 ```
 stockroom/
 ├── go.mod                     # single root module; desktop-app, server, cmd share internal/
-├── .env.example               # copy to .env — see Section 9
-├── internal/stockroom/        # ALL business logic — the only code that touches Postgres
+├── .env.example               # copy to .env, see Section 9
+├── internal/stockroom/        # ALL business logic; the only code that touches Postgres
 │   ├── db.go                  # pgxpool setup
 │   ├── types.go               # structs for every table + views
 │   ├── errors.go              # ErrNotFound, ErrForbidden, ErrConflict, ErrOverdueBlocked, ...
@@ -351,7 +351,7 @@ stockroom/
 ├── cmd/backup/                # CLI: export all tables to CSV (Task Scheduler / launchd)
 │   └── main.go
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
-├── desktop-app/               # Wails app — primary UI; Go side is only a window host
+├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 │   ├── app.go, main.go, wails.json
 │   └── frontend/src/
 │       ├── lib/api.ts         # fetch wrappers over server/ endpoints (replaces supabase.ts + db.ts)
@@ -368,7 +368,7 @@ stockroom/
 │   └── seed.sql               # category tree from Catagories.md + sample assets + failsafe admin
 ├── scripts/
 │   ├── start-mac.sh           # start/stop everything on macOS (needs: also launch server/)
-│   └── start-windows.ps1      # Windows equivalent — untested on real Windows
+│   └── start-windows.ps1      # Windows equivalent, untested on real Windows
 ├── Catagories.md              # source of truth for the initial category tree
 ├── CLAUDE.md                  # this file
 ├── TODO.md                    # phase-by-phase backend work
@@ -381,7 +381,7 @@ Current state differs: `go.mod` lives in `desktop-app/`, `internal/`, `server/`,
 
 ## 9. Setup instructions
 
-**Easiest path:** see `README.md` — `./scripts/start-mac.sh` (macOS) or `scripts/start-windows.ps1` (Windows). Ctrl+C stops everything and preserves data. (Both scripts still need to be updated to launch the Go server — TODO Phase 0.)
+**Easiest path.** See `README.md`: `./scripts/start-mac.sh` (macOS) or `scripts/start-windows.ps1` (Windows). Ctrl+C stops everything and preserves data. (Both scripts still need to be updated to launch the Go server; TODO Phase 0.)
 
 ### Manual steps
 1. Install Go, Node.js, Docker Desktop, the Supabase CLI, and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
@@ -391,17 +391,17 @@ Current state differs: `go.mod` lives in `desktop-app/`, `internal/`, `server/`,
    |---|---|---|
    | `DATABASE_URL` | direct Postgres connection | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
    | `SERVER_ADDR` | Go server listen address | `127.0.0.1:8080` |
-   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7) | — |
-   | `ADMIN_PASSWORD` | failsafe admin password | — |
+   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7) | (none) |
+   | `ADMIN_PASSWORD` | failsafe admin password | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
-   | `BACKUP_DIR` | CSV export target (Google Drive-synced folder) | — |
+   | `BACKUP_DIR` | CSV export target (Google Drive-synced folder) | (none) |
    | `SESSION_IDLE_MINUTES` | idle timeout | TBD |
 
-3. `supabase start` (repo root) — Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically.
-4. `go run ./server` — the API. Check `curl http://127.0.0.1:8080/health`.
-5. `cd desktop-app && wails dev` — primary UI, native window.
-6. `cd web-app && npm run dev` — secondary UI on `http://localhost:5173`.
-7. `supabase stop` — stops the stack, preserves data.
+3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically.
+4. `go run ./server`. The API. Check `curl http://127.0.0.1:8080/health`.
+5. `cd desktop-app && wails dev`. Primary UI, native window.
+6. `cd web-app && npm run dev`. Secondary UI on `http://localhost:5173`.
+7. `supabase stop`. Stops the stack, preserves data.
 
 Same steps on Windows with PowerShell equivalents; the Go server and CLI are plain `go build` binaries on both OSes.
 
@@ -414,7 +414,7 @@ USB barcode scanners act as HID keyboard-wedge devices: they type the code follo
 - **Student ID cards** → 6-digit number → sign-in
 - **Item stickers** → serial number → `ScanItem` (check in, or open detail)
 
-Which one a scan means is decided by **which screen is active**: on the sign-in screen a scan is a login; anywhere else it's an item scan. The backend never guesses — the frontend calls the matching endpoint.
+Which one a scan means is decided by **which screen is active**: on the sign-in screen a scan is a login; anywhere else it's an item scan. The backend never guesses. The frontend calls the matching endpoint.
 
 **Scan vs typed detection** (frontend, `lib/scanner.ts`): a scanner emits keystrokes within a few ms of each other and ends with Enter. If the whole burst arrives under a threshold (~50 ms between keys, tune with real hardware), treat it as a scan → `LoginByScan`. Otherwise it's typed → show the password field → `LoginByPassword`. Keep a visible input focused so manual entry works identically as a fallback.
 
@@ -447,25 +447,25 @@ Before go-live, test a full restore: wipe a scratch database, reapply migrations
 
 ## 12. Build timeline (9 weeks)
 
-**Weeks 1–2 (done)** — Environment prep, tooling, planning.
+**Weeks 1 to 2 (done).** Environment prep, tooling, planning.
 
-**Week 3 (done)** — Chose Supabase-hosted Postgres. Schema migration written and applied; all tables/views/enums verified.
+**Week 3 (done).** Chose Supabase-hosted Postgres. Schema migration written and applied; all tables/views/enums verified.
 
-**Week 4 (done)** — Supabase stack healthy; seed data; proved the chain end-to-end with a temporary supabase-js admin screen in the Wails app (asset + tag CRUD). Fixed two scaffold bugs: `vite@^8` → `^7` for `@sveltejs/vite-plugin-svelte@6`, and Svelte 5 needs `mount(App, …)` not `new App(…)` (blank window, no error). Wrote README + one-step start scripts (`start-mac.sh` verified; `start-windows.ps1` untested). Interviewed and pinned down the product flow, auth model, and Go-backend architecture (this document).
+**Week 4 (done).** Supabase stack healthy; seed data; proved the chain end-to-end with a temporary supabase-js admin screen in the Wails app (asset + tag CRUD). Fixed two scaffold bugs: `vite@^8` → `^7` for `@sveltejs/vite-plugin-svelte@6`, and Svelte 5 needs `mount(App, …)` not `new App(…)` (blank window, no error). Wrote README + one-step start scripts (`start-mac.sh` verified; `start-windows.ps1` untested). Interviewed and pinned down the product flow, auth model, and Go-backend architecture (this document).
 
-**Week 5 — Go foundation + schema + auth** (TODO Phases 0–2)
+**Week 5: Go foundation + schema + auth** (TODO Phases 0 to 2)
 Root `go.mod`, `internal/stockroom` + `server/` skeleton, pgx connection, `.env`. v1 migration (Section 6.2) and category seed. Scan/typed login, sessions, `RequireAdmin`, failsafe admin, roster CSV import, user CRUD. Start scripts launch the server on both OSes.
 
-**Week 6 — Browse + core loop** (TODO Phases 3–4)
+**Week 6: Browse + core loop** (TODO Phases 3 to 4)
 Asset list with category-tree filters, item detail, `ScanItem`, bulk cart checkout with 7-day due cap and overdue block, check-in with damage note, custody history, overdue list. **All core logic finalized by the end of this week.**
 
-**Week 7 — Admin panel + real data + scanner** (TODO Phase 5, hardware)
+**Week 7: Admin panel + real data + scanner** (TODO Phase 5, hardware)
 Admin panel endpoints (asset/category/user management, overdue, Backup Now). Buy the barcode scanner, tune scan-vs-typed detection against it. Print serial stickers; begin real inventory entry (recruit a CS class / volunteers).
 
-**Week 8 — UI + frontend wiring + backup** (TODO Phases 6–7)
+**Week 8: UI + frontend wiring + backup** (TODO Phases 6 to 7)
 Build the screens in the Wails app first, then mirror in the web app, both on `lib/api.ts`. Delete the supabase-js path. Backup CLI + scheduling + restore test.
 
-**Week 9 — Kits if time, then testing + presentation** (TODO Phase 8)
+**Week 9: Kits if time, then testing + presentation** (TODO Phase 8)
 Kits only if everything above is solid. Final testing, walkthrough prep, presentation.
 
 ---
@@ -490,9 +490,9 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Styling (2026-09-05): **Tailwind CSS v4** in both frontends via `@tailwindcss/vite`; design tokens live in each app's `src/app.css` `@theme` block (desktop: the dark "Nocturne" system from the UI import). No component CSS files, no `tailwind.config.js`.
 
 **Still open**
-- [ ] Barcode scanner model (Week 7) — must be plain HID keyboard-wedge
+- [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
 - [ ] Session idle-timeout length (`SESSION_IDLE_MINUTES`)
-- [ ] Scan-vs-typed keystroke threshold — tune with real hardware
+- [ ] Scan-vs-typed keystroke threshold. Tune with real hardware
 - [ ] Exact `BACKUP_DIR` path on the closet PC
 
 ---
