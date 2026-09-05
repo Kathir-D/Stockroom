@@ -6,11 +6,11 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
-| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 268 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
+| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 267 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
 | Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 74 | config/`.env` loading, pool + ping failures, error→HTTP mapping, JSON decoding, `/health` |
-| Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 65 | `db.ts` query shapes and error unwrapping, the admin screen's flows |
+| Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping; the browse screen (filters, detail dialog) and the admin screen's flows |
 
-**407 cases total.** Run everything locally:
+**433 cases total.** Run everything locally:
 
 ```bash
 ./scripts/test-all.sh
@@ -31,7 +31,7 @@ npm --prefix desktop-app/frontend test
 
 **Go** — `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `server/json_test.go`, `server/router_test.go`.
 
-**Frontend** — `src/lib/db.test.ts`, `src/App.test.ts`.
+**Frontend** — `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
 
 ---
 

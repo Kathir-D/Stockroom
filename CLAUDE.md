@@ -83,8 +83,8 @@ Why this shape:
 | Backend / API | Go `net/http` server (`server/`) on localhost, JSON endpoints; logic in `internal/stockroom` |
 | Auth | Scan login (student number, no password) or typed login (student number + bcrypt password); in-memory session map in the Go server; `is_admin` flag gates the admin panel |
 | Files | Profile + asset photos copied into a local `uploads/` dir, served by the Go server at `/files/…` |
-| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend) — calls the Go server over HTTP |
-| Web app | Vite + Svelte 5 + TypeScript — calls the Go server over HTTP; localhost only |
+| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4) — calls the Go server over HTTP |
+| Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4 — calls the Go server over HTTP; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner — not yet tested with real hardware |
 | Backup | Go CLI (`cmd/backup`) → CSV per table → Google Drive-synced folder; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
 | Config | `.env` at repo root (see Section 9) |
@@ -487,9 +487,26 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Photos: profile + asset photos in local `uploads/`, served by Go.
 - [x] Out of scope: bookings, locations, tags, saved filters, custom fields, LAN access, email. Kits = lowest priority.
 - [x] Backup: nightly CSV via Go CLI into a **Google Drive** folder.
+- [x] Styling (2026-09-05): **Tailwind CSS v4** in both frontends via `@tailwindcss/vite`; design tokens live in each app's `src/app.css` `@theme` block (desktop: the dark "Nocturne" system from the UI import). No component CSS files, no `tailwind.config.js`.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7) — must be plain HID keyboard-wedge
 - [ ] Session idle-timeout length (`SESSION_IDLE_MINUTES`)
 - [ ] Scan-vs-typed keystroke threshold — tune with real hardware
 - [ ] Exact `BACKUP_DIR` path on the closet PC
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `Kathir-D/Stockroom` (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

@@ -58,6 +58,7 @@ describe('error handling', () => {
     ['renameTag', () => db.renameTag('id', 't')],
     ['deleteTag', () => db.deleteTag('id')],
     ['listAllAssetTags', () => db.listAllAssetTags()],
+    ['listCategories', () => db.listCategories()],
     ['addTagToAsset', () => db.addTagToAsset('a', 't')],
     ['removeTagFromAsset', () => db.removeTagFromAsset('a', 't')]
   ]
@@ -74,17 +75,60 @@ describe('error handling', () => {
 })
 
 describe('listAssets', () => {
-  it('selects only the columns the screen renders, ordered by asset tag', async () => {
-    resolves([{id: '1', asset_tag: 'CAM-001', name: 'A7S III', description: null, status: 'available'}])
-    const assets = await db.listAssets()
+  const embedded = {
+    id: '1',
+    asset_tag: 'CAM-001',
+    name: 'A7S III',
+    description: null,
+    status: 'available',
+    serial_number: 'SN-CAM001',
+    category_id: 'c-leaf'
+  }
 
-    expect(state.chain).toEqual([
-      ['from', 'assets'],
-      ['select', 'id, asset_tag, name, description, status'],
-      ['order', 'asset_tag']
-    ])
-    expect(assets).toHaveLength(1)
-    expect(assets[0].asset_tag).toBe('CAM-001')
+  it('embeds the category and its parent through the FK hints, ordered by asset tag', async () => {
+    resolves([{...embedded, category: null}])
+    await db.listAssets()
+
+    expect(state.chain[0]).toEqual(['from', 'assets'])
+    expect(state.chain[2]).toEqual(['order', 'asset_tag'])
+    const [op, select] = state.chain[1] as [string, string]
+    expect(op).toBe('select')
+    // The assets→categories hop needs the FK-name hint; the categories→parent
+    // hop must be the column-as-embed form or PostgREST returns the children
+    // (an array) instead of the parent -- see the comment in db.ts.
+    expect(select.replace(/\s+/g, ' ')).toBe(
+      'id, asset_tag, name, description, status, serial_number, category_id, ' +
+        'category:categories!assets_category_id_fkey ( name, parent:parent_id ( name ) )'
+    )
+  })
+
+  it('flattens a two-level category into category_name + subcategory_name', async () => {
+    resolves([{...embedded, category: {name: 'Zooms', parent: {name: 'Lenses'}}}])
+    const [asset] = await db.listAssets()
+    expect(asset.category_name).toBe('Lenses')
+    expect(asset.subcategory_name).toBe('Zooms')
+  })
+
+  it('treats a top-level category as the category with no subcategory', async () => {
+    resolves([{...embedded, category: {name: 'Cameras', parent: null}}])
+    const [asset] = await db.listAssets()
+    expect(asset.category_name).toBe('Cameras')
+    expect(asset.subcategory_name).toBeNull()
+  })
+
+  it('leaves both names null for an uncategorised asset', async () => {
+    resolves([{...embedded, category_id: null, category: null}])
+    const [asset] = await db.listAssets()
+    expect(asset.category_name).toBeNull()
+    expect(asset.subcategory_name).toBeNull()
+    expect(asset.category_id).toBeNull()
+  })
+
+  it('does not leak the raw embed onto the returned asset', async () => {
+    resolves([{...embedded, category: {name: 'Cameras', parent: null}}])
+    const [asset] = await db.listAssets()
+    expect(asset).not.toHaveProperty('category')
+    expect(asset.serial_number).toBe('SN-CAM001')
   })
 
   it('returns an empty array when the table is empty', async () => {
@@ -99,7 +143,11 @@ describe('createAsset', () => {
     resolves(created)
     const input = {asset_tag: 'CAM-003', name: 'FX3', status: 'available' as const}
 
-    await expect(db.createAsset(input)).resolves.toEqual(created)
+    // The insert does not re-embed the category, so the names come back null
+    // and callers refresh the list to get them.
+    await expect(db.createAsset(input)).resolves.toEqual(
+      expect.objectContaining({...created, category_name: null, subcategory_name: null})
+    )
     expect(state.chain).toEqual([['from', 'assets'], ['insert', input], ['select'], ['single']])
   })
 
@@ -125,6 +173,7 @@ describe('updateAsset', () => {
       ['single']
     ])
     expect(updated.name).toBe('Renamed')
+    expect(updated.category_name).toBeNull()
   })
 
   it('supports a partial patch of one field', async () => {
@@ -139,6 +188,19 @@ describe('deleteAsset', () => {
     resolves(null)
     await db.deleteAsset('1')
     expect(state.chain).toEqual([['from', 'assets'], ['delete'], ['eq', 'id', '1']])
+  })
+})
+
+describe('listCategories', () => {
+  it('reads id, name and parent_id ordered by name', async () => {
+    resolves([{id: 'c1', name: 'Cameras', parent_id: null}])
+    await expect(db.listCategories()).resolves.toEqual([{id: 'c1', name: 'Cameras', parent_id: null}])
+    expect(state.chain).toEqual([['from', 'categories'], ['select', 'id, name, parent_id'], ['order', 'name']])
+  })
+
+  it('returns an empty array when there are no categories', async () => {
+    resolves(null)
+    await expect(db.listCategories()).resolves.toEqual([])
   })
 })
 

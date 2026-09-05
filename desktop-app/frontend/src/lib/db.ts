@@ -77,9 +77,13 @@ function flattenAsset(row: RawAssetRow): Asset {
 export async function listAssets(): Promise<Asset[]> {
   const res = await supabase
     .from('assets')
+    // The category self-join has to use the column-as-embed form
+    // (`parent:parent_id(...)`): a `!categories_parent_id_fkey` hint is
+    // rejected by PostgREST and `!parent_id` resolves to the *children*
+    // direction, coming back as an array instead of the parent row.
     .select(
       `id, asset_tag, name, description, status, serial_number, category_id,
-       category:categories!assets_category_id_fkey ( name, parent:categories!categories_parent_id_fkey ( name ) )`
+       category:categories!assets_category_id_fkey ( name, parent:parent_id ( name ) )`
     )
     .order('asset_tag')
   const rows = unwrap(res) as unknown as RawAssetRow[]

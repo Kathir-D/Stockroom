@@ -170,6 +170,17 @@
     }
   }
 
+  // Utility strings shared by the admin controls below. Tailwind's preflight
+  // strips native input/button chrome, so every control needs these.
+  const input =
+    'rounded-md border border-divider bg-surface px-2 py-1 text-sm text-fg caret-accent hover:border-fg/45 focus-visible:border-accent focus-visible:outline-offset-0'
+  const button =
+    'cursor-pointer rounded-md border border-divider px-2 py-1 text-sm hover:bg-fg/7 active:bg-fg/14'
+  const buttonPrimary =
+    'cursor-pointer rounded-md border border-accent px-2 py-1 text-sm text-accent hover:bg-accent/10 active:bg-accent/22'
+  const cell = 'border-b border-divider px-2.5 py-1.5 text-left align-top'
+  const chip = 'mr-1 mb-1 inline-flex items-center gap-1 rounded bg-neutral-800 px-1.5 py-0.5 text-[0.85rem] text-neutral-100'
+
   function availableTagsFor(assetId: string): Tag[] {
     const assigned = new Set((assetTags[assetId] ?? []).map((t) => t.id))
     return tags.filter((t) => !assigned.has(t.id))
@@ -183,78 +194,78 @@
      These predate the design import and aren't part of it yet — fast-follow
      is to either restyle them to match or move them behind the account menu
      in the nav once real auth/roles land (Week 5, CLAUDE.md Section 7). -->
-<main class="admin-tools">
+<main class="mx-auto my-8 max-w-[1000px] px-4">
   {#if !loading}
-    <section>
-      <h2>Add asset</h2>
-      <form on:submit|preventDefault={handleCreateAsset}>
-        <input placeholder="asset_tag" bind:value={newAssetTag} required />
-        <input placeholder="name" bind:value={newAssetName} required />
-        <input placeholder="description (optional)" bind:value={newAssetDescription} />
-        <select bind:value={newAssetStatus}>
+    <section class="mb-8">
+      <h2 class="mb-2 text-2xl font-medium">Add asset</h2>
+      <form class="flex flex-wrap items-center gap-2" on:submit|preventDefault={handleCreateAsset}>
+        <input class={input} placeholder="asset_tag" bind:value={newAssetTag} required />
+        <input class={input} placeholder="name" bind:value={newAssetName} required />
+        <input class={input} placeholder="description (optional)" bind:value={newAssetDescription} />
+        <select class={input} bind:value={newAssetStatus}>
           {#each STATUSES as s}
             <option value={s}>{s}</option>
           {/each}
         </select>
-        <button type="submit">Add asset</button>
+        <button type="submit" class={buttonPrimary}>Add asset</button>
       </form>
     </section>
 
-    <section>
-      <h2>Edit / delete assets</h2>
-      <table>
+    <section class="mb-8">
+      <h2 class="mb-2 text-2xl font-medium">Edit / delete assets</h2>
+      <table class="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th>Tag</th>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th>Tags</th>
-            <th>Actions</th>
+            <th class={cell}>Tag</th>
+            <th class={cell}>Name</th>
+            <th class={cell}>Description</th>
+            <th class={cell}>Status</th>
+            <th class={cell}>Tags</th>
+            <th class={cell}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {#each assets as asset (asset.id)}
             <tr>
               {#if editingAssetId === asset.id}
-                <td><input bind:value={editAssetTag} /></td>
-                <td><input bind:value={editName} /></td>
-                <td><input bind:value={editDescription} /></td>
-                <td>
-                  <select bind:value={editStatus}>
+                <td class={cell}><input class={input} bind:value={editAssetTag} /></td>
+                <td class={cell}><input class={input} bind:value={editName} /></td>
+                <td class={cell}><input class={input} bind:value={editDescription} /></td>
+                <td class={cell}>
+                  <select class={input} bind:value={editStatus}>
                     {#each STATUSES as s}
                       <option value={s}>{s}</option>
                     {/each}
                   </select>
                 </td>
-                <td>—</td>
-                <td>
-                  <button on:click={() => saveEditAsset(asset.id)}>Save</button>
-                  <button on:click={cancelEditAsset}>Cancel</button>
+                <td class={cell}>—</td>
+                <td class="{cell} space-x-1 whitespace-nowrap">
+                  <button class={buttonPrimary} on:click={() => saveEditAsset(asset.id)}>Save</button>
+                  <button class={button} on:click={cancelEditAsset}>Cancel</button>
                 </td>
               {:else}
-                <td>{asset.asset_tag}</td>
-                <td>{asset.name}</td>
-                <td>{asset.description ?? ''}</td>
-                <td>{asset.status}</td>
-                <td>
+                <td class={cell}>{asset.asset_tag}</td>
+                <td class={cell}>{asset.name}</td>
+                <td class={cell}>{asset.description ?? ''}</td>
+                <td class={cell}>{asset.status}</td>
+                <td class={cell}>
                   {#each assetTags[asset.id] ?? [] as tag (tag.id)}
-                    <span class="chip">
+                    <span class={chip}>
                       {tag.name}
-                      <button on:click={() => handleRemoveTagFromAsset(asset.id, tag.id)}>x</button>
+                      <button class="cursor-pointer text-fg/60 hover:text-fg" on:click={() => handleRemoveTagFromAsset(asset.id, tag.id)}>x</button>
                     </span>
                   {/each}
-                  <select bind:value={addTagSelection[asset.id]}>
+                  <select class={input} bind:value={addTagSelection[asset.id]}>
                     <option value="">add tag…</option>
                     {#each availableTagsFor(asset.id) as tag (tag.id)}
                       <option value={tag.id}>{tag.name}</option>
                     {/each}
                   </select>
-                  <button on:click={() => handleAddTagToAsset(asset.id)}>Add</button>
+                  <button class={button} on:click={() => handleAddTagToAsset(asset.id)}>Add</button>
                 </td>
-                <td>
-                  <button on:click={() => startEditAsset(asset)}>Edit</button>
-                  <button on:click={() => handleDeleteAsset(asset.id, asset.name)}>Delete</button>
+                <td class="{cell} space-x-1 whitespace-nowrap">
+                  <button class={button} on:click={() => startEditAsset(asset)}>Edit</button>
+                  <button class={button} on:click={() => handleDeleteAsset(asset.id, asset.name)}>Delete</button>
                 </td>
               {/if}
             </tr>
@@ -263,23 +274,23 @@
       </table>
     </section>
 
-    <section>
-      <h2>Tags (global)</h2>
-      <form on:submit|preventDefault={handleCreateTag}>
-        <input placeholder="new tag name" bind:value={newTagName} required />
-        <button type="submit">Add tag</button>
+    <section class="mb-8">
+      <h2 class="mb-2 text-2xl font-medium">Tags (global)</h2>
+      <form class="mb-3 flex items-center gap-2" on:submit|preventDefault={handleCreateTag}>
+        <input class={input} placeholder="new tag name" bind:value={newTagName} required />
+        <button type="submit" class={buttonPrimary}>Add tag</button>
       </form>
-      <ul>
+      <ul class="space-y-1">
         {#each tags as tag (tag.id)}
-          <li>
+          <li class="flex items-center gap-2">
             {#if editingTagId === tag.id}
-              <input bind:value={editTagName} />
-              <button on:click={() => saveEditTag(tag.id)}>Save</button>
-              <button on:click={() => (editingTagId = null)}>Cancel</button>
+              <input class={input} bind:value={editTagName} />
+              <button class={buttonPrimary} on:click={() => saveEditTag(tag.id)}>Save</button>
+              <button class={button} on:click={() => (editingTagId = null)}>Cancel</button>
             {:else}
               {tag.name}
-              <button on:click={() => startEditTag(tag)}>Rename</button>
-              <button on:click={() => handleDeleteTag(tag.id, tag.name)}>Delete</button>
+              <button class={button} on:click={() => startEditTag(tag)}>Rename</button>
+              <button class={button} on:click={() => handleDeleteTag(tag.id, tag.name)}>Delete</button>
             {/if}
           </li>
         {/each}
@@ -287,37 +298,3 @@
     </section>
   {/if}
 </main>
-
-<style>
-  .admin-tools {
-    max-width: 1000px;
-    margin: 2rem auto;
-    padding: 0 1rem;
-    font-family: sans-serif;
-  }
-
-  section {
-    margin-bottom: 2rem;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th, td {
-    text-align: left;
-    padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid #ddd;
-    vertical-align: top;
-  }
-
-  .chip {
-    display: inline-block;
-    background: #eee;
-    border-radius: 4px;
-    padding: 0.1rem 0.4rem;
-    margin: 0 0.2rem 0.2rem 0;
-    font-size: 0.85rem;
-  }
-</style>

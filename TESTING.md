@@ -8,9 +8,9 @@ Three suites, one per layer. Run them all with:
 
 | Layer | Tool | Location | Count |
 |---|---|---|---|
-| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 268 assertions |
+| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 267 assertions |
 | Go (config, pool, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 74 cases |
-| Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 65 cases |
+| Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 92 cases |
 
 Everything here tests code that exists today. Nothing in `TODO.md` Phases 1–8 is
 tested ahead of being written.
@@ -103,6 +103,10 @@ trace in the local database.
   unwrapping (errors become thrown `Error`s carrying the database message, null
   data becomes an empty list), and the `listAllAssetTags` grouping including
   null embedded rows, ordering, and empty payloads.
+- **`src/lib/AssetBrowser.test.ts`** — the browse screen: category → subcategory
+  filtering (including the stale-subcategory reset and uncategorised assets),
+  empty/loading/error states, and the detail dialog (open by click or keyboard,
+  close by button, backdrop, or Escape).
 - **`src/App.test.ts`** — the admin screen: initial load, create/edit/delete
   asset flows, the edit/cancel state machine, delete confirmations (including
   declining), tag create trimming and blank rejection, and that the "add tag"
