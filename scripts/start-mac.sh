@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-step start for Stockroom on macOS: verifies dependencies, starts Docker +
 # the local Supabase stack, installs frontend packages, then launches the
-# desktop app and web app. Ctrl+C shuts everything down cleanly.
+# Go API server, the desktop app, and the web app. Ctrl+C shuts everything
+# down cleanly.
 set -uo pipefail
 set -m # each background job gets its own process group, so we can kill it and its children together
 
@@ -106,8 +107,19 @@ echo "== Installing frontend dependencies (if needed) =="
 (cd desktop-app/frontend && npm install)
 (cd web-app && npm install)
 
+if [ ! -f .env ]; then
+  echo ""
+  echo "== No .env found — creating one from .env.example =="
+  cp .env.example .env
+  echo "  Edit .env to set ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD (see CLAUDE.md §9)."
+fi
+
 echo ""
 echo "== Launching Stockroom =="
+echo "Starting Go API server..."
+(go run ./server) &
+PIDS+=($!)
+
 echo "Starting desktop app (Wails)..."
 (cd desktop-app && wails dev) &
 PIDS+=($!)
@@ -118,6 +130,7 @@ PIDS+=($!)
 
 echo ""
 echo "Stockroom is running."
+echo "  API server:  http://127.0.0.1:8080/health"
 echo "  Desktop app: a native window should open automatically"
 echo "  Web app:     see the URL printed above (usually http://localhost:5173)"
 echo "  Studio:      http://127.0.0.1:54323"

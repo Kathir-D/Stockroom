@@ -8,7 +8,7 @@ Install these before running Stockroom:
 
 | Dependency | Purpose | Download |
 |---|---|---|
-| Go | builds/runs the Wails desktop app | https://go.dev/dl/ |
+| Go | builds/runs the API server and the Wails desktop app | https://go.dev/dl/ |
 | Node.js (includes npm) | frontend tooling for both apps | https://nodejs.org/en/download |
 | Docker Desktop | runs the local Supabase stack | https://www.docker.com/products/docker-desktop/ |
 | Supabase CLI | manages the local Postgres/Auth/REST stack | https://supabase.com/docs/guides/cli/getting-started |
@@ -30,16 +30,18 @@ chmod +x ./scripts/start-mac.sh
 The script:
 1. Checks that every dependency above is installed (and installs the Wails CLI if it's missing)
 2. Starts Docker Desktop if it isn't already running
-3. Starts the local Supabase stack (Postgres + Auth + REST API + Studio)
+3. Starts the local Supabase stack (Postgres + Studio; the REST/Auth services are unused)
 4. Installs frontend packages if needed
-5. Launches the desktop app and the web app
+5. Creates `.env` from `.env.example` if it doesn't exist yet
+6. Launches the Go API server, the desktop app, and the web app
 
-Press **Ctrl+C** in the script's terminal window to shut everything down — it stops both frontend processes and the local Supabase stack cleanly. Your database data is preserved between runs.
+Press **Ctrl+C** in the script's terminal window to shut everything down — it stops the API server, both frontend processes, and the local Supabase stack cleanly. Your database data is preserved between runs.
 
 ### URLs once it's running
 
 | What | URL |
 |---|---|
+| Go API server (health check) | http://127.0.0.1:8080/health |
 | Supabase Studio (DB admin UI) | http://127.0.0.1:54323/project/default |
 | Web app | http://localhost:5173/ (Vite bumps to 5174, 5175, etc. if that port's busy — check the terminal output for the actual port) |
 | Stockroom admin (desktop app, in-browser) | http://localhost:34115/ |
@@ -48,10 +50,14 @@ The desktop app also opens as its own native window automatically — the `local
 
 ### Manual steps
 
-1. `supabase start` (from the repo root) — starts Postgres, Auth, REST API, and Studio (`http://127.0.0.1:54323`)
-2. `cd desktop-app && wails dev` — primary UI, opens a native window
-3. `cd web-app && npm run dev` — secondary UI, served on `http://localhost:5173`
-4. `supabase stop` — stop the local stack when done (data is preserved)
+1. `cp .env.example .env` (first time only) and fill in the values — see `CLAUDE.md` §9
+2. `supabase start` (from the repo root) — starts Postgres and Studio (`http://127.0.0.1:54323`)
+3. `go run ./server` (from the repo root) — the API; check `curl http://127.0.0.1:8080/health`
+4. `cd desktop-app && wails dev` — primary UI, opens a native window
+5. `cd web-app && npm run dev` — secondary UI, served on `http://localhost:5173`
+6. `supabase stop` — stop the local stack when done (data is preserved)
+
+The Go module lives at the repo root (`go.mod`), so `go build ./...` from the root builds the server, the desktop app's Go side, and `internal/stockroom` together.
 
 ## Adding/editing/removing assets and tags
 
