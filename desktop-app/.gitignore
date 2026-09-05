@@ -1,3 +1,6 @@
 build/bin
 node_modules
-frontend/dist
+# Built by `wails build`; only the placeholder is tracked so `go build ./...`
+# works on a fresh clone (main.go embeds all:frontend/dist).
+frontend/dist/*
+!frontend/dist/.gitkeep

@@ -149,7 +149,11 @@
     if (!tagId) return
     try {
       await db.addTagToAsset(assetId, tagId)
-      addTagSelection[assetId] = ''
+      // Replace the map rather than mutating it: Svelte 5's legacy compiler
+      // turns `addTagSelection[assetId] = ''` into an invalidation that
+      // references the `asset` each-block variable from outside its scope,
+      // which throws "asset is not defined" and swallows the refresh.
+      addTagSelection = {...addTagSelection, [assetId]: ''}
       await refreshAll()
     } catch (e) {
       error = (e as Error).message
