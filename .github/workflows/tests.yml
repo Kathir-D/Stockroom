@@ -1,0 +1,89 @@
+name: tests
+
+# Runs the whole suite on every pull request and on pushes to main.
+# Make the "tests" check required in branch protection so a PR cannot merge red
+# (see CI.md).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A new push to the same PR cancels the previous run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            desktop-app/frontend/package-lock.json
+            web-app/package-lock.json
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Brings up Postgres (plus the rest of the local stack) and applies every
+      # migration and the seed. The Go integration tests and the pgTAP suite
+      # both connect to it on 127.0.0.1:54322.
+      # If this step is ever too slow, unneeded services can be dropped with
+      # e.g. `supabase start -x realtime,storage-api,imgproxy,studio`.
+      - name: Start Supabase
+        run: supabase start
+
+      - name: go vet
+        run: go vet ./...
+
+      # STOCKROOM_REQUIRE_DB=1 turns "skip because Postgres is down" into a
+      # failure, so a broken database can never look like a green run.
+      - name: Go tests
+        run: go test ./... -count=1
+        env:
+          STOCKROOM_REQUIRE_DB: "1"
+
+      - name: Database tests (pgTAP)
+        run: supabase test db
+
+      - name: Install frontend dependencies
+        run: npm --prefix desktop-app/frontend ci
+
+      - name: Frontend type check
+        run: npm --prefix desktop-app/frontend run check
+
+      - name: Frontend tests (Vitest)
+        run: npm --prefix desktop-app/frontend test
+
+      # web-app has no tests yet (it is still a shell), but it must at least
+      # type-check and build so a broken PR can't merge.
+      - name: Install web-app dependencies
+        run: npm --prefix web-app ci
+
+      - name: web-app type check
+        run: npm --prefix web-app run check
+
+      - name: web-app build
+        run: npm --prefix web-app run build
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup
