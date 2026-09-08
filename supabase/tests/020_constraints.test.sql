@@ -35,12 +35,19 @@ select throws_ok(
   $$insert into tags (name) values ('fixture-tag')$$,
   '23505', null, 'tags.name is unique');
 
--- v1 will make serial_number unique (CLAUDE.md §6.2). It is deliberately NOT
--- unique yet; this test documents the current state so the migration that
--- changes it is a conscious step.
-select lives_ok(
+-- The serial is the scan key (CLAUDE.md §6.2): two stickers can never carry
+-- the same one. Units without a sticker yet have a null serial, and any
+-- number of those may coexist.
+select throws_ok(
   $$insert into assets (asset_tag, name, serial_number) values ('FIX-DUP', 'Same serial', 'FIXSN-001')$$,
-  'assets.serial_number is not unique yet (v1 migration adds the unique index)');
+  '23505', null, 'assets.serial_number is unique');
+select lives_ok(
+  $$insert into assets (asset_tag, name, serial_number) values ('FIX-NOSN-1', 'No sticker yet', null),
+                                                                ('FIX-NOSN-2', 'No sticker yet either', null)$$,
+  'many assets may have a null serial_number');
+select throws_ok(
+  $$insert into profiles (student_number) values ('123456'), ('123456')$$,
+  '23505', null, 'profiles.student_number is unique');
 
 -- NOT NULL -------------------------------------------------------------------
 select throws_ok(
@@ -49,17 +56,17 @@ select throws_ok(
 select throws_ok(
   $$insert into assets (name) values ('No tag')$$,
   '23502', null, 'assets.asset_tag is required');
-select throws_ok(
+select lives_ok(
   $$insert into profiles (full_name) values ('No email')$$,
-  '23502', null, 'profiles.email is required by the base schema (v1 relaxes it)');
+  'profiles.email is optional (the roster CSV carries none)');
 select throws_ok(
   $$insert into custody_events (asset_id, custodian_id) values ('11111111-0000-0000-0000-000000000030', null)$$,
   '23502', null, 'custody_events.custodian_id is required because custody always has an owner');
 
 -- Enum inputs ----------------------------------------------------------------
-select throws_ok(
-  $$insert into assets (asset_tag, name, status) values ('FIX-003', 'Bad status', 'unavailable')$$,
-  '22P02', null, '''unavailable'' is rejected until the v1 migration adds it to asset_status');
+select lives_ok(
+  $$insert into assets (asset_tag, name, status) values ('FIX-003', 'Broken unit', 'unavailable')$$,
+  '''unavailable'' is a valid asset_status (v1 catch-all for broken/missing/retired)');
 select throws_ok(
   $$insert into assets (asset_tag, name, status) values ('FIX-004', 'Bad status', 'broken')$$,
   '22P02', null, 'an arbitrary status string is rejected by the enum');
@@ -78,6 +85,8 @@ insert into profiles (id, email) values ('11111111-0000-0000-0000-000000000003',
 select is(role::text, 'member', 'a new profile defaults to the member role')
   from profiles where id = '11111111-0000-0000-0000-000000000003';
 select ok(password_hash is null, 'password_hash starts null (roster imports have no password)')
+  from profiles where id = '11111111-0000-0000-0000-000000000003';
+select is(is_admin, false, 'a new profile is not an admin')
   from profiles where id = '11111111-0000-0000-0000-000000000003';
 
 insert into locations (id, name) values ('11111111-0000-0000-0000-000000000021', 'Default type');

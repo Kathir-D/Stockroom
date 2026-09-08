@@ -16,12 +16,12 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] Update `scripts/start-mac.sh` and `scripts/start-windows.ps1` to also launch `go run ./server` and kill it on exit (Windows script still untested on real Windows)
 
 ## Phase 1: v1 schema migration + seed (Week 5)
-- [ ] New migration (CLAUDE.md §6.2): `profiles` += `student_number text unique`, `first_name`, `last_name`, `photo_path`, `is_admin bool not null default false`; `email` nullable
-- [ ] `assets` += `photo_path`; `create unique index idx_assets_serial on assets(serial_number)`
-- [ ] `alter type asset_status add value 'unavailable'`
-- [ ] Rewrite `supabase/seed.sql`: category tree from `Catagories.md` (Type → Category → Model, via `parent_id`), a handful of sample assets under Model nodes with serial numbers (incl. a `T7iBat-001`-style one), one admin + one non-admin profile with `student_number`
-- [ ] `EnsureFailsafeAdmin()`. On server start, upsert the `ADMIN_STUDENT_NUMBER` account with `is_admin = true` and bcrypt(`ADMIN_PASSWORD`)
-- [ ] `supabase db reset` and confirm via Studio/psql
+- [x] New migration (CLAUDE.md §6.2): `profiles` += `student_number text unique`, `first_name`, `last_name`, `photo_path`, `is_admin bool not null default false`; `email` nullable. `supabase/migrations/20260908100000_v1_flow.sql`
+- [x] `assets` += `photo_path`; `create unique index idx_assets_serial on assets(serial_number)`
+- [x] `alter type asset_status add value 'unavailable'`
+- [x] Rewrite `supabase/seed.sql`: category tree from `Catagories.md` (Type → Category → Model, via `parent_id`), a handful of sample assets under Model nodes with serial numbers (incl. a `T7iBat-001`-style one), one admin + one non-admin profile with `student_number`. Sections of `Catagories.md` that list models directly under a type got a middle level (e.g. Lights → Studio Lights / Light Modifiers) so every branch is three deep
+- [x] `EnsureFailsafeAdmin()`. On server start, upsert the `ADMIN_STUDENT_NUMBER` account with `is_admin = true` and bcrypt(`ADMIN_PASSWORD`). `internal/stockroom/failsafe.go`; bcrypt helpers in `password.go`
+- [x] `supabase db reset` and confirm via Studio/psql. pgTAP `080_seed` now pins the seeded tree, accounts and custody rows
 
 ## Phase 2: Auth, sessions, users (Week 5)
 - [ ] bcrypt helpers (`golang.org/x/crypto/bcrypt`) for `profiles.password_hash`
@@ -93,7 +93,7 @@ Bookings & double-booking prevention · locations · tags · saved filters · `c
 
 ## Already done (for reference)
 - [x] Postgres schema applied (12 tables, 2 views, 4 enums). `supabase/migrations/`
-- [x] Sample seed data (10 assets, 5 categories, 2 locations, 1 profile). `supabase/seed.sql` (to be rewritten in Phase 1)
+- [x] Sample seed data. `supabase/seed.sql` (rewritten in Phase 1: 63-node category tree, 12 assets, admin + student)
 - [x] Proof-of-chain admin screen via supabase-js in the Wails app (`desktop-app/frontend/src/lib/db.ts`). To be deleted in Phase 6
 - [x] `scripts/start-mac.sh` tested and working; `start-windows.ps1` written but untested on real Windows
 - [x] Product flow, auth model, roles, scope, and Go-backend architecture decided (CLAUDE.md §13, 2026-09-04)

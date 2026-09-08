@@ -1,30 +1,146 @@
--- Sample data for local development. Not meant for production use.
+-- Sample data for local development, loaded by `supabase db reset`. Not for
+-- production: the real inventory is entered through the admin panel and the
+-- real roster through the CSV import.
+--
+-- Category tree: Type -> Category -> Model, from Catagories.md. Every physical
+-- unit is an asset whose category_id points at a Model node. Names are unique
+-- across the whole table, so parents are looked up by name below. Where
+-- Catagories.md lists models directly under a type, a middle level is added
+-- here so every branch is the same depth.
+--
+-- Accounts: one admin and one student. Both sign in by scanning their student
+-- number. The admin also has the typed-login password "stockroom"; the
+-- student has no password yet and is prompted to set one on first scan login,
+-- which is the roster-import case.
 
-insert into locations (id, name, type) values
-  ('00000000-0000-0000-0000-000000000001', 'Media Building', 'building'),
-  ('00000000-0000-0000-0000-000000000002', 'Camera Closet', 'room');
+-- Types --------------------------------------------------------------------
+insert into categories (name) values
+  ('Cameras/Bodies'),
+  ('Lenses'),
+  ('Lights'),
+  ('Audio Stuff'),
+  ('Physical Bags, etc.'),
+  ('Tripods/Monopods'),
+  ('Batteries'),
+  ('Misc');
 
-update locations set parent_id = '00000000-0000-0000-0000-000000000001'
-  where id = '00000000-0000-0000-0000-000000000002';
+-- Categories ---------------------------------------------------------------
+insert into categories (name, parent_id) values
+  ('Camera Model',      (select id from categories where name = 'Cameras/Bodies')),
+  ('Zooms',             (select id from categories where name = 'Lenses')),
+  ('Primes',            (select id from categories where name = 'Lenses')),
+  ('Lens Accessories',  (select id from categories where name = 'Lenses')),
+  ('Studio Lights',     (select id from categories where name = 'Lights')),
+  ('Light Modifiers',   (select id from categories where name = 'Lights')),
+  ('Wireless Mics',     (select id from categories where name = 'Audio Stuff')),
+  ('Wired Mics',        (select id from categories where name = 'Audio Stuff')),
+  ('Bags',              (select id from categories where name = 'Physical Bags, etc.')),
+  ('Tripods',           (select id from categories where name = 'Tripods/Monopods')),
+  ('Gimbals',           (select id from categories where name = 'Tripods/Monopods')),
+  ('Camera Batteries',  (select id from categories where name = 'Batteries')),
+  ('Other',             (select id from categories where name = 'Misc'));
 
-insert into categories (id, name) values
-  ('00000000-0000-0000-0000-000000000010', 'Cameras'),
-  ('00000000-0000-0000-0000-000000000011', 'Lenses'),
-  ('00000000-0000-0000-0000-000000000012', 'Audio'),
-  ('00000000-0000-0000-0000-000000000013', 'Lighting'),
-  ('00000000-0000-0000-0000-000000000014', 'Tripods/Support');
+-- Models -------------------------------------------------------------------
+insert into categories (name, parent_id) values
+  -- Cameras/Bodies > Camera Model
+  ('T5',                                      (select id from categories where name = 'Camera Model')),
+  ('T5i',                                     (select id from categories where name = 'Camera Model')),
+  ('T7',                                      (select id from categories where name = 'Camera Model')),
+  ('T7i',                                     (select id from categories where name = 'Camera Model')),
+  ('T8',                                      (select id from categories where name = 'Camera Model')),
+  ('T8i',                                     (select id from categories where name = 'Camera Model')),
+  ('6D Mark II',                              (select id from categories where name = 'Camera Model')),
+  ('5D Mark IV',                              (select id from categories where name = 'Camera Model')),
+  ('R50',                                     (select id from categories where name = 'Camera Model')),
+  ('SL3',                                     (select id from categories where name = 'Camera Model')),
+  ('Blackmagic Pocket Cinema Camera 6K Pro',  (select id from categories where name = 'Camera Model')),
+  ('GoPro',                                   (select id from categories where name = 'Camera Model')),
+  ('DJI Drone',                               (select id from categories where name = 'Camera Model')),
+  -- Lenses > Zooms
+  ('Tamron 18-400mm',                         (select id from categories where name = 'Zooms')),
+  ('Tamron 150-600mm',                        (select id from categories where name = 'Zooms')),
+  ('Sigma 18-35mm f/1.8',                     (select id from categories where name = 'Zooms')),
+  ('Sigma 150-600mm f/5-6.3',                 (select id from categories where name = 'Zooms')),
+  ('Canon 70-200mm f/2.8',                    (select id from categories where name = 'Zooms')),
+  ('Canon 55-250mm',                          (select id from categories where name = 'Zooms')),
+  ('Canon 75-300mm',                          (select id from categories where name = 'Zooms')),
+  ('Canon 18-135mm',                          (select id from categories where name = 'Zooms')),
+  ('Canon 17-40mm f/1.4',                     (select id from categories where name = 'Zooms')),
+  ('Canon 18-55mm',                           (select id from categories where name = 'Zooms')),
+  -- Lenses > Primes: none in inventory yet; the Category node stays so the
+  -- filter shows it
+  -- Lenses > Lens Accessories
+  ('Sigma Teleconverter',                     (select id from categories where name = 'Lens Accessories')),
+  -- Lights > Studio Lights
+  ('Softbox Lights w/stand - Interfit',       (select id from categories where name = 'Studio Lights')),
+  ('LED light box w/stand - Neewer',          (select id from categories where name = 'Studio Lights')),
+  ('Ring Light w/stand - Neewer',             (select id from categories where name = 'Studio Lights')),
+  ('LED Wand Light - ICE Light',              (select id from categories where name = 'Studio Lights')),
+  -- Lights > Light Modifiers
+  ('Lighting Reflectors',                     (select id from categories where name = 'Light Modifiers')),
+  -- Audio Stuff > Wireless Mics
+  ('DJI Wireless Lavalier',                   (select id from categories where name = 'Wireless Mics')),
+  -- Audio Stuff > Wired Mics
+  ('Wired Rode Mics',                         (select id from categories where name = 'Wired Mics')),
+  ('Komika Phone Mics',                       (select id from categories where name = 'Wired Mics')),
+  ('Sennheiser Wired Lav Mics',               (select id from categories where name = 'Wired Mics')),
+  -- Physical Bags, etc. > Bags
+  ('Backpacks',                               (select id from categories where name = 'Bags')),
+  ('Canon Small Bags',                        (select id from categories where name = 'Bags')),
+  -- Tripods/Monopods > Tripods
+  ('Cell phone tripod',                       (select id from categories where name = 'Tripods')),
+  ('Large tripods',                           (select id from categories where name = 'Tripods')),
+  ('Monopods',                                (select id from categories where name = 'Tripods')),
+  -- Tripods/Monopods > Gimbals
+  ('Big Gimbal',                              (select id from categories where name = 'Gimbals')),
+  ('DJI phone gimbal',                        (select id from categories where name = 'Gimbals')),
+  -- Batteries > Camera Batteries
+  ('Canon Camera Batteries',                  (select id from categories where name = 'Camera Batteries')),
+  -- Misc > Other
+  ('Dolly',                                   (select id from categories where name = 'Other'));
 
-insert into profiles (id, email, full_name, role) values
-  ('00000000-0000-0000-0000-000000000020', 'admin@school.edu', 'Test Admin', 'owner');
+-- Accounts -----------------------------------------------------------------
+-- Fixed ids so tests and custody rows below can reference them.
+insert into profiles (id, student_number, first_name, last_name, full_name, email, is_admin, password_hash) values
+  -- typed-login password: stockroom
+  ('00000000-0000-0000-0000-000000000020', '100001', 'Sam', 'Admin', 'Sam Admin', 'admin@school.edu', true,
+   '$2a$10$RIHOh/Py/Duk4G21NWUEmeaQ3rYgkdFCG8QhtzxHcxFWVi22jxXdW'),
+  -- no password yet: first scan login asks for one
+  ('00000000-0000-0000-0000-000000000021', '200001', 'Jordan', 'Student', 'Jordan Student', null, false, null);
 
-insert into assets (asset_tag, name, description, category_id, location_id, status, serial_number, created_by) values
-  ('CAM-001', 'Sony A7S III', 'Full-frame mirrorless camera', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'available', 'SN-CAM001', '00000000-0000-0000-0000-000000000020'),
-  ('CAM-002', 'Canon C70', 'Cinema camera', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'available', 'SN-CAM002', '00000000-0000-0000-0000-000000000020'),
-  ('LEN-001', 'Sigma 24-70mm f/2.8', 'Standard zoom lens', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000002', 'available', 'SN-LEN001', '00000000-0000-0000-0000-000000000020'),
-  ('LEN-002', 'Canon 50mm f/1.8', 'Prime lens', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000002', 'checked_out', 'SN-LEN002', '00000000-0000-0000-0000-000000000020'),
-  ('AUD-001', 'Rode Wireless GO II', 'Wireless lav mic kit', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000002', 'available', 'SN-AUD001', '00000000-0000-0000-0000-000000000020'),
-  ('AUD-002', 'Zoom H6', 'Portable audio recorder', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000002', 'available', 'SN-AUD002', '00000000-0000-0000-0000-000000000020'),
-  ('LIT-001', 'Aputure 120D II', 'LED light with softbox', '00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000002', 'available', 'SN-LIT001', '00000000-0000-0000-0000-000000000020'),
-  ('LIT-002', 'Godox SL60W', 'LED continuous light', '00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000002', 'maintenance', 'SN-LIT002', '00000000-0000-0000-0000-000000000020'),
-  ('TRI-001', 'Manfrotto 546B', 'Video tripod with fluid head', '00000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000002', 'available', 'SN-TRI001', '00000000-0000-0000-0000-000000000020'),
-  ('TRI-002', 'DJI RS 3', 'Handheld gimbal stabilizer', '00000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000002', 'reserved', 'SN-TRI002', '00000000-0000-0000-0000-000000000020');
+-- Assets -------------------------------------------------------------------
+-- Serial numbers are what the barcode stickers encode. Linear items (batteries,
+-- bags) use model-prefixed serials.
+insert into assets (id, asset_tag, name, description, category_id, status, serial_number, created_by) values
+  ('00000000-0000-0000-0000-000000000101', 'CAM-001', 'Canon T7i #1', 'DSLR body, kit lens not included',
+   (select id from categories where name = 'T7i'), 'available', 'T7i-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000102', 'CAM-002', 'Canon T7i #2', 'DSLR body, kit lens not included',
+   (select id from categories where name = 'T7i'), 'checked_out', 'T7i-002', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000103', 'CAM-003', 'Canon 5D Mark IV', 'Full-frame DSLR body',
+   (select id from categories where name = '5D Mark IV'), 'available', '5D4-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000104', 'CAM-004', 'GoPro', 'Action camera with mount',
+   (select id from categories where name = 'GoPro'), 'unavailable', 'GOPRO-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000105', 'LEN-001', 'Canon 70-200mm f/2.8', 'Telephoto zoom',
+   (select id from categories where name = 'Canon 70-200mm f/2.8'), 'available', 'CN70200-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000106', 'LEN-002', 'Tamron 18-400mm', 'All-in-one zoom',
+   (select id from categories where name = 'Tamron 18-400mm'), 'available', 'TM18400-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000107', 'AUD-001', 'DJI Wireless Lavalier', 'Two transmitters, one receiver',
+   (select id from categories where name = 'DJI Wireless Lavalier'), 'available', 'DJIMIC-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000108', 'LIT-001', 'Ring Light w/stand', 'Neewer ring light with stand',
+   (select id from categories where name = 'Ring Light w/stand - Neewer'), 'available', 'RING-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000109', 'TRI-001', 'Large tripod #1', 'Video tripod with fluid head',
+   (select id from categories where name = 'Large tripods'), 'available', 'TRI-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000110', 'BAT-001', 'Canon battery (T7i) #1', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'available', 'T7iBat-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000111', 'BAT-002', 'Canon battery (T7i) #2', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'checked_out', 'T7iBat-002', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000112', 'BAG-001', 'Backpack #1', 'Padded camera backpack',
+   (select id from categories where name = 'Backpacks'), 'available', 'BAG-001', '00000000-0000-0000-0000-000000000020');
+
+-- Custody ------------------------------------------------------------------
+-- The two checked_out assets above are out with the student, due in three
+-- days, so the browse screen and the active-custody list have something to
+-- show without anyone being overdue.
+insert into custody_events (asset_id, custodian_id, checked_out_by, due_at) values
+  ('00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000020', now() + interval '3 days'),
+  ('00000000-0000-0000-0000-000000000111', '00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000020', now() + interval '3 days');

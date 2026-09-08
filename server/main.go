@@ -37,6 +37,16 @@ func main() {
 	}
 	defer db.Close()
 
+	// The failsafe admin (CLAUDE.md §7) is re-applied on every start so a
+	// forgotten password or a bad roster import can never lock out the admin
+	// panel. Unset values mean the operator has not configured one yet; that
+	// is allowed but worth a loud log line.
+	if cfg.AdminStudentNumber == "" || cfg.AdminPassword == "" {
+		log.Println("warning: ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD not set; no failsafe admin")
+	} else if err := db.EnsureFailsafeAdmin(ctx, cfg.AdminStudentNumber, cfg.AdminPassword); err != nil {
+		log.Fatalf("failsafe admin: %v", err)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
 		Handler:           newRouter(db),

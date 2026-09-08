@@ -6,11 +6,11 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
-| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 267 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
-| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 74 | config/`.env` loading, pool + ping failures, error→HTTP mapping, JSON decoding, `/health` |
+| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 296 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
+| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 90 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, error→HTTP mapping, JSON decoding, `/health` |
 | Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
 
-433 cases total. Run everything locally:
+478 cases total. Run everything locally:
 
 ```bash
 ./scripts/test-all.sh
@@ -29,7 +29,7 @@ npm --prefix desktop-app/frontend test
 
 **Database.** `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
 
-**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `server/json_test.go`, `server/router_test.go`.
+**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `server/json_test.go`, `server/router_test.go`.
 
 **Frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
 

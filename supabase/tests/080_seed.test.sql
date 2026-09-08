@@ -6,51 +6,101 @@ begin;
 create extension if not exists pgtap;
 select no_plan();
 
-select is(
-  (select count(*) from assets where asset_tag in
-    ('CAM-001','CAM-002','LEN-001','LEN-002','AUD-001','AUD-002','LIT-001','LIT-002','TRI-001','TRI-002')),
-  10::bigint,
-  'all ten seeded assets are present');
+-- Category tree: Type -> Category -> Model, from Catagories.md ---------------
+select set_eq(
+  $$select name from categories where parent_id is null$$,
+  array['Cameras/Bodies','Lenses','Lights','Audio Stuff','Physical Bags, etc.','Tripods/Monopods','Batteries','Misc'],
+  'the eight top-level types from Catagories.md are seeded');
 
-select ok(
-  (select bool_and(serial_number is not null and category_id is not null and location_id is not null)
-     from assets where asset_tag like 'CAM-%' or asset_tag like 'LEN-%' or asset_tag like 'AUD-%'
-                    or asset_tag like 'LIT-%' or asset_tag like 'TRI-%'),
-  'every seeded asset has a serial number, a category and a location');
-
-select is(
-  (select count(distinct serial_number) from assets where serial_number like 'SN-%'),
-  10::bigint,
-  'seeded serial numbers are distinct (they become the scan key in v1)');
+with recursive tree as (
+  select id, name, 1 as depth from categories where parent_id is null
+  union all
+  select c.id, c.name, tree.depth + 1 from categories c join tree on c.parent_id = tree.id
+)
+select is(max(depth), 3, 'the seeded tree is exactly three levels deep') from tree;
 
 select set_eq(
-  $$select name from categories$$,
-  array['Cameras','Lenses','Audio','Lighting','Tripods/Support'],
-  'the seeded category list');
+  $$select c.name from categories c join categories p on p.id = c.parent_id where p.name = 'Lenses'$$,
+  array['Zooms','Primes','Lens Accessories'],
+  'Lenses has the Zooms, Primes and Lens Accessories categories');
 
-select is((select count(*) from categories where parent_id is not null), 0::bigint,
-  'seeded categories are all top level (the 3-level tree arrives with the v1 seed rewrite)');
-
-select is((select name from locations where id = '00000000-0000-0000-0000-000000000002'), 'Camera Closet',
-  'the closet location is seeded');
 select is(
-  (select parent.name from locations child join locations parent on parent.id = child.parent_id
-    where child.id = '00000000-0000-0000-0000-000000000002'),
-  'Media Building',
-  'the closet is nested under the building');
+  (select count(*) from categories c join categories p on p.id = c.parent_id where p.name = 'Camera Model'),
+  13::bigint,
+  'all thirteen camera models are seeded under Camera Model');
 
-select is((select email from profiles where id = '00000000-0000-0000-0000-000000000020'), 'admin@school.edu',
-  'the seeded admin profile exists');
-select is((select role::text from profiles where id = '00000000-0000-0000-0000-000000000020'), 'owner',
-  'the seeded admin has the owner role');
-
--- The seed exercises several statuses on purpose so the UI has something to
--- render for each of them.
 select is(
-  (select count(distinct status::text) from assets
-    where status::text in ('available','checked_out','maintenance','reserved')),
-  4::bigint,
-  'the seed covers a spread of asset statuses');
+  (select count(*) from categories c join categories p on p.id = c.parent_id where p.name = 'Primes'),
+  0::bigint,
+  'Primes is seeded empty, as Catagories.md says');
+
+-- Every seeded asset hangs off a Model (depth 3) node, never a Type or
+-- Category, because that is the only level the browse filters resolve to.
+with recursive tree as (
+  select id, 1 as depth from categories where parent_id is null
+  union all
+  select c.id, tree.depth + 1 from categories c join tree on c.parent_id = tree.id
+)
+select is(
+  (select count(*) from assets a join tree on tree.id = a.category_id
+    where a.id::text like '00000000-0000-0000-0000-0000000001%' and tree.depth <> 3),
+  0::bigint,
+  'every seeded asset points at a Model node');
+
+-- Assets --------------------------------------------------------------------
+select is(
+  (select count(*) from assets where id::text like '00000000-0000-0000-0000-0000000001%'),
+  12::bigint,
+  'all twelve seeded assets are present');
+
+select ok(
+  (select bool_and(serial_number is not null and category_id is not null)
+     from assets where id::text like '00000000-0000-0000-0000-0000000001%'),
+  'every seeded asset has a serial number and a category');
+
+select ok(
+  (select count(*) > 0 from assets where serial_number = 'T7iBat-001'),
+  'a model-prefixed linear serial (T7iBat-001) is seeded');
+
+-- The seed covers each v1 status so the UI has something to render for all
+-- three, and nothing else.
+select set_eq(
+  $$select distinct status::text from assets where id::text like '00000000-0000-0000-0000-0000000001%'$$,
+  array['available','checked_out','unavailable'],
+  'the seed uses exactly the three v1 statuses');
+
+-- Accounts ------------------------------------------------------------------
+select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000020'), '100001',
+  'the seeded admin has a student number');
+select is((select is_admin from profiles where id = '00000000-0000-0000-0000-000000000020'), true,
+  'the seeded admin is an admin');
+select ok((select password_hash like '$2a$%' from profiles where id = '00000000-0000-0000-0000-000000000020'),
+  'the seeded admin has a bcrypt password hash (typed login works)');
+
+select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000021'), '200001',
+  'the seeded student has a student number');
+select is((select is_admin from profiles where id = '00000000-0000-0000-0000-000000000021'), false,
+  'the seeded student is not an admin');
+select ok((select password_hash is null and email is null from profiles where id = '00000000-0000-0000-0000-000000000021'),
+  'the seeded student has no password and no email (the roster-import shape)');
+
+-- Custody -------------------------------------------------------------------
+-- Every checked_out asset must have an open custody row, or the status and
+-- the custody trail disagree.
+select is(
+  (select count(*) from assets a
+    where a.status = 'checked_out' and a.id::text like '00000000-0000-0000-0000-0000000001%'
+      and not exists (select 1 from active_custody ac where ac.asset_id = a.id)),
+  0::bigint,
+  'every seeded checked_out asset has an open custody row');
+select is(
+  (select count(*) from active_custody where custodian_id = '00000000-0000-0000-0000-000000000021'),
+  2::bigint,
+  'the student holds the two checked-out items');
+select is(
+  (select count(*) from overdue_custody where custodian_id = '00000000-0000-0000-0000-000000000021'),
+  0::bigint,
+  'nothing seeded is overdue, so the student is not blocked from checking out');
 
 select * from finish();
 rollback;

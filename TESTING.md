@@ -8,11 +8,11 @@ Three suites, one per layer. Run them all with:
 
 | Layer | Tool | Location | Count |
 |---|---|---|---|
-| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 267 assertions |
-| Go (config, pool, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 74 cases |
+| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 296 assertions |
+| Go (config, pool, passwords, failsafe admin, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 90 cases |
 | Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 92 cases |
 
-Everything here tests code that exists today. Nothing in `TODO.md` Phases 1 to 8 is tested ahead of being written.
+Everything here tests code that exists today. Nothing in `TODO.md` Phases 2 to 8 is tested ahead of being written.
 
 ## Running individual suites
 
@@ -33,9 +33,9 @@ Frontend coverage report: `npm --prefix desktop-app/frontend run test:coverage`.
 
 The schema is the largest piece of real logic in the repo. Constraints, triggers and views enforce behaviour the Go code will depend on.
 
-**`010_structure`.** Every table, view, enum, primary key, index, trigger and function from the init migration. The column names and types that the Go row structs in `internal/stockroom/types.go` scan into. Nullability.
+**`010_structure`.** Every table, view, enum, primary key, index, trigger and function from the init migration and the v1 migration (`student_number`, `is_admin`, `photo_path`, the unique serial index, the `unavailable` label). The column names and types that the Go row structs in `internal/stockroom/types.go` scan into. Nullability, including that `email` is now optional.
 
-**`020_constraints`.** Uniqueness (`asset_tag`, `email`, category and tag names), NOT NULL, enum input rejection, column defaults, and the full set of foreign key behaviours. What cascades when an asset, tag or kit is deleted, what is set to null when a category or location is deleted, and that a profile with custody history cannot be deleted.
+**`020_constraints`.** Uniqueness (`asset_tag`, `serial_number`, `student_number`, `email`, category and tag names), that many assets may still have a null serial, NOT NULL, enum input rejection, column defaults (`is_admin` false), and the full set of foreign key behaviours. What cascades when an asset, tag or kit is deleted, what is set to null when a category or location is deleted, and that a profile with custody history cannot be deleted.
 
 **`030_bookings`.** The two CHECK constraints and the GiST exclusion constraint. Overlapping reservations are refused, back-to-back ones are allowed because the range is half-open, cancelled and returned bookings are exempt, and kit bookings sit outside the constraint.
 
@@ -47,7 +47,7 @@ The schema is the largest piece of real logic in the repo. Constraints, triggers
 
 **`070_privileges`.** `service_role` keeps full access. `anon` and `authenticated` have none, which matters because the Supabase REST API is still listening on 54321. Default privileges cover future tables for `service_role`. RLS is off by design.
 
-**`080_seed`.** `supabase/seed.sql` loads coherently. All ten assets with serials, categories and locations, the category list, the nested closet location, the admin profile, and a spread of statuses.
+**`080_seed`.** `supabase/seed.sql` loads coherently. The eight types from `Catagories.md`, a tree exactly three levels deep, every seeded asset attached to a Model node, the three v1 statuses, the admin (bcrypt hash, `is_admin`) and student (no password, no email) accounts, and an open custody row behind every `checked_out` asset with nothing overdue.
 
 Each file runs inside a transaction that is rolled back, so the suite leaves no trace in the local database.
 
@@ -60,6 +60,10 @@ Each file runs inside a transaction that is rolled back, so the suite leaves no 
 **`errors_test.go`.** The sentinels are distinct and survive both `fmt.Errorf("%w")` and `errors.Join`, which is what the HTTP mapping relies on.
 
 **`types_test.go`.** `Profile` JSON never contains the password hash. Nullable columns marshal as `null`. `ActiveCustody` flattens its embedded event. An integration test compares the Go enum constants against `pg_enum` so the two cannot drift.
+
+**`password_test.go`.** `HashPassword` produces a salted bcrypt hash and enforces the length limits (8 to 72). `CheckPassword` distinguishes a wrong password (`ErrBadCredentials`) from an account that has never set one (`ErrPasswordNotSet`) and from a corrupt hash. `NormalizeStudentNumber` trims, keeps leading zeros, and rejects anything that is not digits.
+
+**`failsafe_test.go`.** `EnsureFailsafeAdmin` creates the account on first run, and on later runs rotates the password, forces `is_admin` back on, and leaves the operator's name edits alone without duplicating the row. Bad config (`ErrInvalid`) is refused before touching the database.
 
 **`server/json_test.go`.** The sentinel to status mapping for all eight errors, wrapped and joined errors, an unknown error becoming a 500 whose body leaks nothing, request decoding (unknown fields, malformed JSON, wrong types, empty body) and the 1 MB size cap.
 
@@ -91,6 +95,6 @@ The "Add" tag button in `App.svelte` never worked. Svelte 5's legacy compiler tu
 
 The grant migration's `alter default privileges` for sequences and functions has nothing reading it yet; the tables case is covered.
 
-Everything in `TODO.md` Phases 1 to 8 (auth, sessions, checkout, check-in, scanning, the admin API, the backup CLI) does not exist yet.
+Everything in `TODO.md` Phases 2 to 8 (auth, sessions, checkout, check-in, scanning, the admin API, the backup CLI) does not exist yet.
 
 Barcode scanner input handling. `lib/scanner.ts` is not written, and the keystroke-timing threshold needs real hardware to pin down (CLAUDE.md §10).

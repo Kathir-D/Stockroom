@@ -11,7 +11,7 @@ insert into assets (id, asset_tag, name, description, serial_number) values
    'Telephoto zoom for interviews', 'SN-SR001'),
   -- the case the coalesce() protects: nothing but a name
   ('55555555-0000-0000-0000-000000000011', 'SR-002', 'Manfrotto tripod', null, null),
-  ('55555555-0000-0000-0000-000000000012', 'SR-003', 'Battery', null, 'T7iBat-001');
+  ('55555555-0000-0000-0000-000000000012', 'SR-003', 'Battery', null, 'T7iBat-901');
 
 -- The index is a GIN index over the tsvector expression.
 select is(
@@ -49,7 +49,7 @@ select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'manfrotto'),
 
 -- Serial numbers are part of the document, so a partial scan typed by hand
 -- still finds the item.
-select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'T7iBat-001'),
+select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'T7iBat-901'),
   'the serial number is searchable')
   from assets a where a.id = '55555555-0000-0000-0000-000000000012';
 

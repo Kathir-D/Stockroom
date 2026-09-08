@@ -95,7 +95,7 @@ Why this shape:
 
 ### 6.1 Base schema (applied)
 
-Applied via `supabase/migrations/20260826173006_init_schema.sql` and verified working (12 tables, 2 views, 4 enums). Followed by `20260826180000_grant_service_role.sql` (historical, see Section 4). Sample data in `supabase/seed.sql` loads on `supabase db reset`.
+Applied via `supabase/migrations/20260826173006_init_schema.sql` and verified working (12 tables, 2 views, 4 enums). Followed by `20260826180000_grant_service_role.sql` (historical, see Section 4) and `20260908100000_v1_flow.sql` (Section 6.2, applied). Sample data in `supabase/seed.sql` loads on `supabase db reset`.
 
 ```sql
 create extension if not exists "uuid-ossp";
@@ -278,7 +278,7 @@ select * from active_custody
 where due_at is not null and due_at < now();
 ```
 
-### 6.2 Schema changes for v1 (next migration, TODO Phase 1)
+### 6.2 Schema changes for v1 (applied, `20260908100000_v1_flow.sql`)
 
 The base schema was designed for a broader feature set than v1 ships. One additive migration brings it in line with the flow in Section 1; nothing is dropped.
 
@@ -296,7 +296,7 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 - `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
 **`categories`.** No change. Used as a strict 3-level tree via `parent_id`:
-`Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`.
+`Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`; where that file lists models straight under a type, the seed inserts a middle Category (Lights → Studio Lights, Audio Stuff → Wired Mics, and so on) so every branch is three deep. `categories.name` is unique across the whole table, not per parent.
 
 **Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
 
@@ -344,6 +344,8 @@ stockroom/
 │   ├── db.go                  # pgxpool setup
 │   ├── types.go               # structs for every table + views
 │   ├── errors.go              # ErrNotFound, ErrForbidden, ErrConflict, ErrOverdueBlocked, ...
+│   ├── password.go            # bcrypt helpers, student-number validation
+│   ├── failsafe.go            # EnsureFailsafeAdmin (run on every server start)
 │   ├── auth.go                # LoginByScan / LoginByPassword / sessions / RequireAdmin
 │   ├── assets.go, categories.go, users.go, custody.go, backup.go, ...
 ├── server/                    # Go net/http JSON API on localhost; thin handlers over internal/stockroom
@@ -364,7 +366,7 @@ stockroom/
 │   ├── migrations/
 │   │   ├── 20260826173006_init_schema.sql
 │   │   ├── 20260826180000_grant_service_role.sql   # historical, harmless
-│   │   └── <next>_v1_flow.sql                      # Section 6.2
+│   │   └── 20260908100000_v1_flow.sql              # Section 6.2
 │   └── seed.sql               # category tree from Catagories.md + sample assets + failsafe admin
 ├── scripts/
 │   ├── start-mac.sh           # start/stop everything on macOS (needs: also launch server/)
@@ -375,7 +377,7 @@ stockroom/
 └── README.md                  # dependencies + how to run
 ```
 
-Current state differs: `go.mod` lives in `desktop-app/`, `internal/`, `server/`, `cmd/` don't exist yet, and `desktop-app/frontend/src/lib/{supabase,db}.ts` still call PostgREST directly. TODO Phase 0 and Phase 6 close that gap.
+Current state differs: `cmd/` doesn't exist yet, and `desktop-app/frontend/src/lib/{supabase,db}.ts` still call PostgREST directly. TODO Phase 6 and Phase 7 close that gap.
 
 ---
 
@@ -391,13 +393,13 @@ Current state differs: `go.mod` lives in `desktop-app/`, `internal/`, `server/`,
    |---|---|---|
    | `DATABASE_URL` | direct Postgres connection | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
    | `SERVER_ADDR` | Go server listen address | `127.0.0.1:8080` |
-   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7) | (none) |
-   | `ADMIN_PASSWORD` | failsafe admin password | (none) |
+   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7); digits only | (none) |
+   | `ADMIN_PASSWORD` | failsafe admin password; at least 8 characters | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
    | `BACKUP_DIR` | CSV export target (Google Drive-synced folder) | (none) |
    | `SESSION_IDLE_MINUTES` | idle timeout | TBD |
 
-3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically.
+3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates an admin (student number `100001`, typed-login password `stockroom`) and a student (`200001`, no password yet).
 4. `go run ./server`. The API. Check `curl http://127.0.0.1:8080/health`.
 5. `cd desktop-app && wails dev`. Primary UI, native window.
 6. `cd web-app && npm run dev`. Secondary UI on `http://localhost:5173`.
