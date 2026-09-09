@@ -12,6 +12,12 @@ import (
 // this package is the only code in the repo that talks to Postgres.
 type DB struct {
 	Pool *pgxpool.Pool
+
+	// sessions is the live session store, wired by NewAuth. Account
+	// operations that have to invalidate sessions (an admin delete or
+	// password reset, CLAUDE.md §7) call dropSessions themselves, so the
+	// rule holds for every caller and not only the HTTP handlers.
+	sessions *SessionStore
 }
 
 // Open connects to Postgres at databaseURL and verifies the connection with a
@@ -56,4 +62,13 @@ func (db *DB) Ping(ctx context.Context) error {
 // Close releases the pool.
 func (db *DB) Close() {
 	db.Pool.Close()
+}
+
+// dropSessions ends every session belonging to profileID. It is a no-op
+// until NewAuth has wired a store, which keeps a bare DB (tests, one-off
+// commands with no HTTP server) usable.
+func (db *DB) dropSessions(profileID string) {
+	if db.sessions != nil {
+		db.sessions.DeleteForProfile(profileID)
+	}
 }

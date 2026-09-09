@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -14,8 +15,10 @@ import (
 const (
 	// MinPasswordLength and MaxPasswordLength are the 8-to-72 range CLAUDE.md
 	// §7 sets for every place a password is chosen: first-login setup, admin
-	// resets, and the failsafe admin. The upper bound is bcrypt's, not a
-	// policy: it only reads the first 72 bytes.
+	// resets, and the failsafe admin. The minimum counts characters, so an
+	// accented or non-Latin password is measured the way the person typing it
+	// would count it. The upper bound is bcrypt's, not a policy: it only reads
+	// the first 72 bytes.
 	MinPasswordLength = 8
 	MaxPasswordLength = 72
 
@@ -29,7 +32,7 @@ const (
 // HashPassword returns a bcrypt hash for storing in profiles.password_hash.
 // It enforces MinPasswordLength so every caller gets the same rule.
 func HashPassword(password string) (string, error) {
-	if len(password) < MinPasswordLength {
+	if utf8.RuneCountInString(password) < MinPasswordLength {
 		return "", fmt.Errorf("%w: password must be at least %d characters", ErrInvalid, MinPasswordLength)
 	}
 	// Refuse anything past bcrypt's limit rather than silently truncating it.
@@ -45,9 +48,7 @@ func HashPassword(password string) (string, error) {
 
 // CheckPassword compares a candidate against a stored hash. A nil hash means
 // the account has never set a password (ErrPasswordNotSet); a mismatch is
-// ErrBadCredentials. Until LoginByPassword lands in Phase 2 its only caller is
-// failsafe_test.go, which needs it to prove EnsureFailsafeAdmin stored and
-// rotated the right hash.
+// ErrBadCredentials.
 func CheckPassword(hash *string, password string) error {
 	if hash == nil || *hash == "" {
 		return ErrPasswordNotSet
