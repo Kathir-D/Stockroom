@@ -84,19 +84,21 @@ func TestCreateGetListUser(t *testing.T) {
 	}
 }
 
-func TestCreateUserWithPasswordAndConflicts(t *testing.T) {
+func TestCreateUserAndConflicts(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 	existing := insertTestProfile(t, db, false, "")
 	sn := testStudentNumber(t, db)
 
-	p, err := db.CreateUser(ctx, admin, UserInput{StudentNumber: sn, FirstName: "Pat", Password: str("pat's password")})
+	// A new account starts with no password and sets one at its first scan
+	// login, the same shape a roster import leaves behind.
+	p, err := db.CreateUser(ctx, admin, UserInput{StudentNumber: sn, FirstName: "Pat"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckPassword(p.PasswordHash, "pat's password"); err != nil {
-		t.Errorf("stored hash does not match: %v", err)
+	if p.PasswordHash != nil {
+		t.Errorf("CreateUser stored a password hash: %v", *p.PasswordHash)
 	}
 
 	cases := map[string]struct {
@@ -106,7 +108,6 @@ func TestCreateUserWithPasswordAndConflicts(t *testing.T) {
 		"duplicate student number": {UserInput{StudentNumber: *existing.StudentNumber, FirstName: "Dup"}, ErrConflict},
 		"bad student number":       {UserInput{StudentNumber: "12x", FirstName: "Bad"}, ErrInvalid},
 		"no name":                  {UserInput{StudentNumber: "912345601", FirstName: " ", LastName: ""}, ErrInvalid},
-		"short password":           {UserInput{StudentNumber: "912345602", FirstName: "S", Password: str("short")}, ErrInvalid},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -127,7 +128,7 @@ func TestUpdateUser(t *testing.T) {
 
 	got, err := db.UpdateUser(ctx, admin, p.ID, UserInput{
 		StudentNumber: newSN, FirstName: "Renamed", LastName: "Person", Email: str("r@school.edu"),
-		PhotoPath: str("profiles/x.jpg"), IsAdmin: true, Password: str("must be ignored"),
+		PhotoPath: str("profiles/x.jpg"), IsAdmin: true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateUser: %v", err)
@@ -192,6 +193,39 @@ func TestDeleteUser(t *testing.T) {
 	}
 	if err := db.DeleteUser(ctx, admin, "junk"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("DeleteUser(bad id) = %v, want ErrInvalid", err)
+	}
+}
+
+// An admin reset or delete drops that user's sessions, and it does so in
+// this package, so any caller gets the rule and not only the HTTP handlers.
+func TestPasswordResetAndDeleteDropSessions(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	auth := NewAuth(db, time.Hour)
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+
+	reset := insertTestProfile(t, db, false, "old password")
+	sess, err := auth.Sessions.Create(reset.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetUserPassword(ctx, admin, reset.ID, "reset password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := auth.Sessions.Get(sess.Token); ok {
+		t.Error("password reset left the user signed in")
+	}
+
+	deleted := insertTestProfile(t, db, false, "")
+	sess, err = auth.Sessions.Create(deleted.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteUser(ctx, admin, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := auth.Sessions.Get(sess.Token); ok {
+		t.Error("delete left the user signed in")
 	}
 }
 

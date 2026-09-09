@@ -7,7 +7,9 @@ import (
 )
 
 // UserInput is the admin-panel payload for creating or updating an account.
-// Password is honoured on create only; resets go through SetUserPassword.
+// It never carries a password: an account sets its first one at its first
+// scan login (Auth.SetInitialPassword) and an admin replaces it with
+// SetUserPassword.
 type UserInput struct {
 	StudentNumber string  `json:"student_number"`
 	FirstName     string  `json:"first_name"`
@@ -15,7 +17,6 @@ type UserInput struct {
 	Email         *string `json:"email"`
 	PhotoPath     *string `json:"photo_path"`
 	IsAdmin       bool    `json:"is_admin"`
-	Password      *string `json:"password,omitempty"`
 }
 
 // normalize trims every field and validates the student number. Blank
@@ -94,8 +95,8 @@ func (db *DB) GetUser(ctx context.Context, actor Actor, id string) (Profile, err
 }
 
 // CreateUser adds an account. A duplicate student number or email is
-// ErrConflict. If in.Password is given it is hashed; otherwise the account
-// starts with no password and sets one at its first scan login.
+// ErrConflict. The account starts with no password and sets one at its
+// first scan login, the same as a roster import.
 func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profile, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return Profile{}, err
@@ -103,20 +104,12 @@ func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profil
 	if err := in.normalize(); err != nil {
 		return Profile{}, err
 	}
-	var hash *string
-	if in.Password != nil {
-		h, err := HashPassword(*in.Password)
-		if err != nil {
-			return Profile{}, err
-		}
-		hash = &h
-	}
 	row := db.Pool.QueryRow(ctx, `
-		insert into profiles (student_number, first_name, last_name, full_name, email, photo_path, is_admin, password_hash)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)
+		insert into profiles (student_number, first_name, last_name, full_name, email, photo_path, is_admin)
+		values ($1, $2, $3, $4, $5, $6, $7)
 		returning `+profileColumns,
 		in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-		in.Email, in.PhotoPath, in.IsAdmin, hash)
+		in.Email, in.PhotoPath, in.IsAdmin)
 	p, err := scanProfile(row)
 	if err != nil {
 		return Profile{}, mapPgError("create user", err)
@@ -156,7 +149,8 @@ func (db *DB) UpdateUser(ctx context.Context, actor Actor, id string, in UserInp
 // has anything checked out, and Postgres refuses it for any user with
 // custody history at all because custody_events keeps its custodian
 // reference; that also comes back as ErrConflict. Deleting yourself is
-// refused too.
+// refused too. A successful delete drops the user's sessions, so a signed-in
+// window dies with the account.
 func (db *DB) DeleteUser(ctx context.Context, actor Actor, id string) error {
 	if err := RequireAdmin(actor); err != nil {
 		return err
@@ -180,13 +174,13 @@ func (db *DB) DeleteUser(ctx context.Context, actor Actor, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	db.dropSessions(id)
 	return nil
 }
 
 // SetUserPassword is the admin reset: it replaces the hash whether or not
-// one exists. The caller should also drop the user's sessions
-// (SessionStore.DeleteForProfile) so a stolen session dies with the old
-// password.
+// one exists, and drops the user's sessions so a session opened with the old
+// password cannot outlive it.
 func (db *DB) SetUserPassword(ctx context.Context, actor Actor, id, password string) error {
 	if err := RequireAdmin(actor); err != nil {
 		return err
@@ -202,5 +196,6 @@ func (db *DB) SetUserPassword(ctx context.Context, actor Actor, id, password str
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	db.dropSessions(id)
 	return nil
 }

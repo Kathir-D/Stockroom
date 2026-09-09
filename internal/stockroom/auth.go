@@ -39,9 +39,14 @@ type Auth struct {
 	Sessions *SessionStore
 }
 
-// NewAuth wires a session store with the given idle timeout to db.
+// NewAuth wires a session store with the given idle timeout to db. The
+// store is handed to db as well, because the account operations that live
+// there (an admin delete or password reset) drop the affected user's
+// sessions themselves rather than leaving it to the caller.
 func NewAuth(db *DB, idle time.Duration) *Auth {
-	return &Auth{db: db, Sessions: NewSessionStore(idle)}
+	a := &Auth{db: db, Sessions: NewSessionStore(idle)}
+	db.sessions = a.Sessions
+	return a
 }
 
 // LoginResult is what both login paths return. NeedsPassword is true for a
@@ -68,6 +73,9 @@ func (a *Auth) LoginByScan(ctx context.Context, studentNumber string) (LoginResu
 	if err != nil {
 		return LoginResult{}, err
 	}
+	// An empty hash counts as no password, the same way CheckPassword and
+	// SetInitialPassword read it, so a blank column can still be set from
+	// the first scan login instead of locking the account out.
 	limited := p.PasswordHash == nil || *p.PasswordHash == ""
 	return a.openSession(ctx, p, limited)
 }
@@ -110,7 +118,8 @@ func (a *Auth) openSession(ctx context.Context, p Profile, limited bool) (LoginR
 
 // SetInitialPassword stores the first password for the actor's account and
 // upgrades the session to a full one. It is only valid while the account has
-// no password (ErrConflict otherwise); admins reset existing passwords with
+// no password, null or blank, matching what LoginByScan calls a limited
+// session (ErrConflict otherwise); admins reset existing passwords with
 // SetUserPassword.
 func (a *Auth) SetInitialPassword(ctx context.Context, actor Actor, password string) error {
 	hash, err := HashPassword(password)
@@ -118,7 +127,8 @@ func (a *Auth) SetInitialPassword(ctx context.Context, actor Actor, password str
 		return err
 	}
 	tag, err := a.db.Pool.Exec(ctx,
-		`update profiles set password_hash = $2 where id = $1 and password_hash is null`,
+		`update profiles set password_hash = $2
+		 where id = $1 and (password_hash is null or password_hash = '')`,
 		actor.ID, hash)
 	if err != nil {
 		return fmt.Errorf("set initial password: %w", err)

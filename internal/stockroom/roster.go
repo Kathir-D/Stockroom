@@ -11,14 +11,34 @@ import (
 	"strings"
 )
 
+// RosterAction is what an import did with one CSV line. It is a named type
+// so the three outcomes are spelled once here rather than as literals at
+// every comparison.
+type RosterAction string
+
+const (
+	RosterCreated RosterAction = "created"
+	RosterUpdated RosterAction = "updated"
+	RosterError   RosterAction = "error"
+)
+
 // RosterRow is the outcome for one CSV line. Row is the 1-based line number
 // in the file, counting the header as line 1 and blank lines too, so it
 // matches what the admin sees in a spreadsheet.
 type RosterRow struct {
-	Row           int    `json:"row"`
-	StudentNumber string `json:"student_number"`
-	Action        string `json:"action"` // "created", "updated" or "error"
-	Error         string `json:"error,omitempty"`
+	Row           int          `json:"row"`
+	StudentNumber string       `json:"student_number"`
+	Action        RosterAction `json:"action"`
+	Error         string       `json:"error,omitempty"`
+}
+
+// photoStore is where roster photos come from and where they end up: a
+// source named in the CSV resolves against dir when it is relative, and the
+// copy lands under uploads/profiles. The pair travels through every step of
+// an import, so it travels as one value.
+type photoStore struct {
+	dir     string // photo_dir from the request; "" means the working directory
+	uploads string // UPLOADS_DIR, the root /files/ serves
 }
 
 // RosterResult summarises an import. Rows has one entry per data line in
@@ -35,8 +55,9 @@ type RosterResult struct {
 // in any order; other columns are ignored. Rows match existing accounts by
 // student number: names are replaced, is_admin and the password are left
 // alone. A photo_path is a file on this machine (absolute, or relative to
-// photoDir); it is copied to <uploadsDir>/profiles/<student_number><ext> and
-// the path relative to uploadsDir is stored.
+// photoDir); it must have a file extension, it is copied to
+// <uploadsDir>/profiles/<student_number>.<ext>, and the path relative to
+// uploadsDir is stored.
 //
 // Each row is applied on its own, so one bad line reports an error and the
 // rest still land. Only a malformed file (no header, missing required
@@ -46,8 +67,11 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 		return RosterResult{}, err
 	}
 	if uploadsDir == "" {
+		// A missing UPLOADS_DIR is a server misconfiguration, not something
+		// the caller sent, so this stays unwrapped and answers 500.
 		return RosterResult{}, errors.New("import roster: uploads dir is not configured")
 	}
+	photos := photoStore{dir: photoDir, uploads: uploadsDir}
 
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
@@ -83,7 +107,7 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 			if errors.As(err, &pe) {
 				line = pe.Line
 			}
-			res.Rows = append(res.Rows, RosterRow{Row: line, Action: "error", Error: err.Error()})
+			res.Rows = append(res.Rows, RosterRow{Row: line, Action: RosterError, Error: err.Error()})
 			res.Failed++
 			continue
 		}
@@ -101,13 +125,13 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 			photo = field(photoCol)
 		}
 		action, err := db.upsertRosterRow(ctx, field(col["first_name"]), field(col["last_name"]),
-			row.StudentNumber, photo, photoDir, uploadsDir)
+			row.StudentNumber, photo, photos)
 		if err != nil {
-			row.Action, row.Error = "error", err.Error()
+			row.Action, row.Error = RosterError, err.Error()
 			res.Failed++
 		} else {
 			row.Action = action
-			if action == "created" {
+			if action == RosterCreated {
 				res.Created++
 			} else {
 				res.Updated++
@@ -119,8 +143,8 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 }
 
 // upsertRosterRow validates one line, copies its photo if any, then upserts
-// the profile. Returns "created" or "updated".
-func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, photo, photoDir, uploadsDir string) (string, error) {
+// the profile. Returns RosterCreated or RosterUpdated.
+func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, photo string, photos photoStore) (RosterAction, error) {
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
 		return "", err
@@ -131,7 +155,7 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 
 	var photoPath *string
 	if photo != "" {
-		rel, err := copyProfilePhoto(photo, photoDir, uploadsDir, sn)
+		rel, err := photos.copyFor(photo, sn)
 		if err != nil {
 			return "", err
 		}
@@ -153,20 +177,27 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 		return "", mapPgError("import roster row", err)
 	}
 	if inserted {
-		return "created", nil
+		return RosterCreated, nil
 	}
-	return "updated", nil
+	return RosterUpdated, nil
 }
 
-// copyProfilePhoto copies src (absolute, or relative to photoDir) to
-// <uploadsDir>/profiles/<studentNumber><ext> and returns the path relative
-// to uploadsDir, which is what goes in the database and what /files/ serves.
-func copyProfilePhoto(src, photoDir, uploadsDir, studentNumber string) (string, error) {
+// copyFor copies src (absolute, or relative to the store's dir) to
+// <uploads>/profiles/<studentNumber>.<ext> and returns the path relative to
+// uploads, which is what goes in the database and what /files/ serves. The
+// extension is required: it is what tells a browser how to render the file,
+// and it is part of the stored path.
+func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
 	if !filepath.IsAbs(src) {
-		if photoDir == "" {
-			photoDir = "."
+		dir := ps.dir
+		if dir == "" {
+			dir = "."
 		}
-		src = filepath.Join(photoDir, src)
+		src = filepath.Join(dir, src)
+	}
+	ext := strings.ToLower(filepath.Ext(src))
+	if ext == "" {
+		return "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
 	}
 	in, err := os.Open(src)
 	if err != nil {
@@ -174,11 +205,20 @@ func copyProfilePhoto(src, photoDir, uploadsDir, studentNumber string) (string, 
 	}
 	defer in.Close()
 
-	ext := strings.ToLower(filepath.Ext(src))
 	rel := filepath.ToSlash(filepath.Join("profiles", studentNumber+ext))
-	dst := filepath.Join(uploadsDir, "profiles", studentNumber+ext)
+	dst := filepath.Join(ps.uploads, "profiles", studentNumber+ext)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", fmt.Errorf("create uploads dir: %w", err)
+	}
+	// Drop a copy stored under a different extension, so re-importing the
+	// same student with a new file type replaces the photo instead of
+	// leaving the old one orphaned. Student numbers are digits only, so the
+	// pattern carries no glob metacharacters.
+	stale, _ := filepath.Glob(filepath.Join(ps.uploads, "profiles", studentNumber+".*"))
+	for _, old := range stale {
+		if old != dst {
+			_ = os.Remove(old)
+		}
 	}
 	out, err := os.Create(dst)
 	if err != nil {

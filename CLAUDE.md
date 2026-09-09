@@ -321,7 +321,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 **Login rules**
 - **Scan** (student number arrives as a fast keystroke burst + Enter): sign in with no password.
 - **Typed** (same number entered by hand): password required, checked against `password_hash` with bcrypt.
-- Roster-imported users have `password_hash = null`. Their first **scan** login prompts them to set a password before continuing; typed login is impossible until then.
+- Roster-imported users have `password_hash = null` (a blank hash counts the same). Their first **scan** login prompts them to set a password before continuing; typed login is impossible until then. Creating a user in the admin panel leaves the account in that same state; the admin can set a password afterwards with the reset endpoint.
 - Admins can set or reset any user's password from the admin panel. Passwords are 8 to 72 characters everywhere they are set.
 - **Failsafe admin.** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password. A way back into the admin panel that doesn't depend on any UI. It is never a startup requirement: unset, malformed, or rejected values are logged as warnings and the server starts without a failsafe admin, because a typo in `.env` must not take the whole API down.
 
@@ -329,7 +329,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 - In-memory session map in the Go server. The login response returns the token and also sets it as an HttpOnly `stockroom_session` cookie; requests may send either `Authorization: Bearer <token>` or the cookie. Restarting the server signs everyone out; acceptable.
 - Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default 30; final length still open, Section 13). Every request refreshes the deadline. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
 - A scan login by an account with no password gets a **limited** session: it may only call `POST /auth/set-password`, `GET /me` and `POST /auth/logout`. Anything else answers `403 {"error":"password not set","needs_password":true}`. Setting the password upgrades the same token to a full session.
-- The actor's profile is reloaded on every request, so an admin-flag change or a deleted account takes effect immediately, and an admin password reset or delete drops that user's sessions.
+- The actor's profile is reloaded on every request, so an admin-flag change or a deleted account takes effect immediately. An admin password reset or delete drops that user's sessions, and `internal/stockroom` does that itself so the rule does not depend on the HTTP layer.
 
 **Overdue rule**
 - Signing in with any overdue item shows a warning. Attempting a checkout while overdue is refused by the server; an admin can override per checkout.

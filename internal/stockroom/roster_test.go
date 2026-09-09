@@ -71,7 +71,7 @@ func TestImportRosterCreatesUpdatesAndReportsRows(t *testing.T) {
 	if len(res.Rows) != 5 {
 		t.Fatalf("rows = %d, want 5 (blank line skipped)", len(res.Rows))
 	}
-	wantActions := []string{"created", "updated", "error", "error", "error"}
+	wantActions := []RosterAction{RosterCreated, RosterUpdated, RosterError, RosterError, RosterError}
 	wantRowNums := []int{2, 3, 5, 6, 7}
 	for i, r := range res.Rows {
 		if r.Action != wantActions[i] || r.Row != wantRowNums[i] {
@@ -144,6 +144,46 @@ func TestImportRosterKeepsPhotoWhenBlank(t *testing.T) {
 	p, _ := db.profileByStudentNumber(ctx, sn)
 	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+sn+".png" {
 		t.Errorf("photo_path = %v, want the first import's photo kept", p.PhotoPath)
+	}
+}
+
+// A photo named by the roster must have a file extension, and re-importing
+// the same student with a different one replaces the stored copy instead of
+// leaving the old file orphaned under uploads/profiles.
+func TestImportRosterPhotoExtensions(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	sn := testStudentNumber(t, db)
+	photoDir, uploads := t.TempDir(), t.TempDir()
+	for _, name := range []string{"p.png", "p.jpg", "noext"} {
+		if err := os.WriteFile(filepath.Join(photoDir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	header := "first_name,last_name,student_number,photo_path\n"
+
+	if _, err := db.ImportRoster(ctx, admin, strings.NewReader(header+"A,B,"+sn+",p.png\n"), photoDir, uploads); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ImportRoster(ctx, admin, strings.NewReader(header+"A,B,"+sn+",p.jpg\n"), photoDir, uploads)
+	if err != nil || res.Updated != 1 {
+		t.Fatalf("re-import = %+v, %v", res, err)
+	}
+	p, _ := db.profileByStudentNumber(ctx, sn)
+	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+sn+".jpg" {
+		t.Errorf("photo_path = %v, want the new extension", p.PhotoPath)
+	}
+	if _, err := os.Stat(filepath.Join(uploads, "profiles", sn+".png")); !os.IsNotExist(err) {
+		t.Errorf("the old .png copy was left behind: %v", err)
+	}
+
+	res, err = db.ImportRoster(ctx, admin, strings.NewReader(header+"A,B,"+sn+",noext\n"), photoDir, uploads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 || res.Rows[0].Action != RosterError || !strings.Contains(res.Rows[0].Error, "extension") {
+		t.Errorf("extension-less photo = %+v", res.Rows)
 	}
 }
 

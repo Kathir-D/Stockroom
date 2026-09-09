@@ -29,7 +29,7 @@ npm --prefix desktop-app/frontend test
 
 **Database.** `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
 
-**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `sessions_test.go`, `auth_test.go`, `users_test.go`, `roster_test.go`, `server/json_test.go`, `server/router_test.go`, `server/auth_test.go`.
+**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `sessions_test.go`, `auth_test.go`, `users_test.go`, `roster_test.go`, `testdb_test.go`, `server/json_test.go`, `server/router_test.go`, `server/auth_test.go`.
 
 **Frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
 

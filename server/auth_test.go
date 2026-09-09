@@ -76,14 +76,14 @@ func call(t *testing.T, h http.Handler, method, path, token string, body any) (i
 	h.ServeHTTP(rec, req)
 	out := map[string]any{}
 	if rec.Body.Len() > 0 {
-		var any_ any
-		if err := json.Unmarshal(rec.Body.Bytes(), &any_); err != nil {
+		var decoded any
+		if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
 			t.Fatalf("%s %s: body is not JSON: %q", method, path, rec.Body.String())
 		}
-		if m, ok := any_.(map[string]any); ok {
+		if m, ok := decoded.(map[string]any); ok {
 			out = m
 		} else {
-			out["_list"] = any_
+			out["_list"] = decoded
 		}
 	}
 	return rec.Code, out
@@ -208,6 +208,17 @@ func TestSessionTokenSources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /me via cookie = %d", rec.Code)
 	}
+	// An Authorization header the server does not understand must not shadow
+	// the cookie, so a client that always sends one still signs in.
+	req = httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /me with a non-Bearer header and a cookie = %d, want 200", rec.Code)
+	}
+
 	// No credentials at all is a 401, as is a garbage bearer.
 	if code, _ := call(t, h, http.MethodGet, "/me", "", nil); code != http.StatusUnauthorized {
 		t.Errorf("GET /me anonymous = %d, want 401", code)
@@ -365,8 +376,11 @@ func TestImportRosterOverHTTP(t *testing.T) {
 		t.Errorf("photo not copied into the configured uploads dir: %v", err)
 	}
 
-	// Raw text/csv body, re-import updates.
-	req = httptest.NewRequest(http.MethodPost, "/users/import?photo_dir="+photoDir, strings.NewReader(csv))
+	// Raw text/csv body, re-import updates. Photos travel with the multipart
+	// form, so this one leaves photo_path blank, which keeps the copy the
+	// first import made.
+	blankPhotos := "first_name,last_name,student_number,photo_path\nRoster,Kid," + sn + ",\nbad,row,xx,\n"
+	req = httptest.NewRequest(http.MethodPost, "/users/import", strings.NewReader(blankPhotos))
 	req.Header.Set("Content-Type", "text/csv")
 	req.Header.Set("Authorization", "Bearer "+admin)
 	rec = httptest.NewRecorder()
@@ -379,14 +393,16 @@ func TestImportRosterOverHTTP(t *testing.T) {
 		t.Errorf("re-import result = %+v, want 1 updated", res)
 	}
 
-	// Wrong content type and a missing header row are 400s.
-	req = httptest.NewRequest(http.MethodPost, "/users/import", strings.NewReader("{}"))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+admin)
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("JSON body import = %d, want 400", rec.Code)
+	// Anything but multipart or text/csv is a 400, as is a missing header row.
+	for _, ct := range []string{"application/json", "text/plain", "application/octet-stream"} {
+		req = httptest.NewRequest(http.MethodPost, "/users/import", strings.NewReader(csv))
+		req.Header.Set("Content-Type", ct)
+		req.Header.Set("Authorization", "Bearer "+admin)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("import as %s = %d, want 400", ct, rec.Code)
+		}
 	}
 	req = httptest.NewRequest(http.MethodPost, "/users/import", strings.NewReader("first_name\nx\n"))
 	req.Header.Set("Content-Type", "text/csv")

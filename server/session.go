@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -13,8 +12,6 @@ import (
 // Authorization header instead. Both are accepted on every request.
 const sessionCookie = "stockroom_session"
 
-type actorKey struct{}
-
 // sessionMode says whether a route accepts a limited session (scan login by
 // an account with no password yet, see stockroom.Session.Limited).
 type sessionMode int
@@ -24,10 +21,10 @@ const (
 	allowLimited
 )
 
-// withSession resolves the session token into an Actor and stores it in the
-// request context. A missing or expired token is a 401; a limited session
-// on a fullOnly route is a 403 with a message the UI can key on to send the
-// user to the set-password screen.
+// withSession resolves the session token into an Actor and passes it to the
+// handler. A missing or expired token is a 401; a limited session on a
+// fullOnly route is a 403 with a message the UI can key on to send the user
+// to the set-password screen.
 func (d deps) withSession(next func(http.ResponseWriter, *http.Request, stockroom.Actor), mode sessionMode) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		actor, err := d.auth.Resolve(r.Context(), tokenFrom(r))
@@ -42,19 +39,19 @@ func (d deps) withSession(next func(http.ResponseWriter, *http.Request, stockroo
 			})
 			return
 		}
-		r = r.WithContext(context.WithValue(r.Context(), actorKey{}, actor))
 		next(w, r, actor)
 	})
 }
 
 // tokenFrom reads the session token from "Authorization: Bearer <token>"
-// first, then the cookie.
+// first, then the cookie. An Authorization header in some other scheme is
+// ignored rather than fatal, so a browser that always sends one still signs
+// in on its cookie.
 func tokenFrom(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); h != "" {
-		if tok, ok := strings.CutPrefix(h, "Bearer "); ok {
-			return strings.TrimSpace(tok)
+	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		if tok = strings.TrimSpace(tok); tok != "" {
+			return tok
 		}
-		return ""
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		return c.Value

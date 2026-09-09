@@ -84,6 +84,36 @@ func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	}
 }
 
+// A blank password_hash means the same as null everywhere: the scan login
+// is limited and SetInitialPassword can still upgrade it. If the two
+// disagreed, such an account could sign in but never finish doing so.
+func TestScanLoginWithBlankHashCanStillSetPassword(t *testing.T) {
+	auth, db := newTestAuth(t)
+	ctx := context.Background()
+	p := insertTestProfile(t, db, false, "")
+	if _, err := db.Pool.Exec(ctx, `update profiles set password_hash = '' where id = $1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := auth.LoginByScan(ctx, *p.StudentNumber)
+	if err != nil {
+		t.Fatalf("LoginByScan: %v", err)
+	}
+	if !res.NeedsPassword {
+		t.Fatal("a blank hash did not read as needs_password")
+	}
+	actor, err := auth.Resolve(ctx, res.Token)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := auth.SetInitialPassword(ctx, actor, "first password"); err != nil {
+		t.Fatalf("SetInitialPassword on a blank hash: %v", err)
+	}
+	if _, err := auth.LoginByPassword(ctx, *p.StudentNumber, "first password"); err != nil {
+		t.Errorf("LoginByPassword after setting it: %v", err)
+	}
+}
+
 func TestScanLoginWithPasswordIsFull(t *testing.T) {
 	auth, db := newTestAuth(t)
 	ctx := context.Background()

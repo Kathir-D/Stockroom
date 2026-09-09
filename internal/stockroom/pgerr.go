@@ -12,8 +12,8 @@ import (
 // unique_violation and foreign_key_violation are conflicts (a duplicate
 // student number, a user with custody history), invalid_text_representation
 // is a malformed id or enum value from the client. Everything else passes
-// through wrapped with the context string.
-func mapPgError(context string, err error) error {
+// through wrapped with op, the name of the operation that failed.
+func mapPgError(op string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -28,7 +28,7 @@ func mapPgError(context string, err error) error {
 			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
 		}
 	}
-	return fmt.Errorf("%s: %w", context, err)
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 // constraintMessage names the constraint in plain words where one is known,
@@ -40,12 +40,6 @@ func constraintMessage(e *pgconn.PgError) string {
 		return "student number already in use"
 	case "profiles_email_key":
 		return "email already in use"
-	case "idx_assets_serial":
-		return "serial number already in use"
-	case "assets_asset_tag_key":
-		return "asset tag already in use"
-	case "categories_name_key":
-		return "category name already in use"
 	case "custody_events_custodian_id_fkey", "custody_events_checked_out_by_fkey", "custody_events_checked_in_by_fkey":
 		return "user has custody history"
 	}

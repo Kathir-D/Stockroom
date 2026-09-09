@@ -31,6 +31,8 @@ func (d deps) handleGetUser(w http.ResponseWriter, r *http.Request, actor stockr
 }
 
 // POST /users  body: stockroom.UserInput
+// The account starts with no password; it sets one at its first scan login,
+// or an admin sets one with POST /users/{id}/password.
 func (d deps) handleCreateUser(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in stockroom.UserInput
 	if err := decodeJSON(w, r, &in); err != nil {
@@ -45,7 +47,7 @@ func (d deps) handleCreateUser(w http.ResponseWriter, r *http.Request, actor sto
 	writeJSON(w, http.StatusCreated, p)
 }
 
-// PUT /users/{id}  body: stockroom.UserInput (password ignored)
+// PUT /users/{id}  body: stockroom.UserInput
 func (d deps) handleUpdateUser(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in stockroom.UserInput
 	if err := decodeJSON(w, r, &in); err != nil {
@@ -62,18 +64,16 @@ func (d deps) handleUpdateUser(w http.ResponseWriter, r *http.Request, actor sto
 
 // DELETE /users/{id}
 func (d deps) handleDeleteUser(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	id := r.PathValue("id")
-	if err := d.db.DeleteUser(r.Context(), actor, id); err != nil {
+	if err := d.db.DeleteUser(r.Context(), actor, r.PathValue("id")); err != nil {
 		writeError(w, err)
 		return
 	}
-	d.auth.Sessions.DeleteForProfile(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // POST /users/{id}/password {"password": "..."}
-// Admin reset. The user's other sessions are dropped so the old password
-// cannot keep a session alive.
+// Admin reset. SetUserPassword drops that user's sessions itself, so an old
+// password cannot keep one alive.
 func (d deps) handleSetUserPassword(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in struct {
 		Password string `json:"password"`
@@ -82,12 +82,10 @@ func (d deps) handleSetUserPassword(w http.ResponseWriter, r *http.Request, acto
 		writeError(w, err)
 		return
 	}
-	id := r.PathValue("id")
-	if err := d.db.SetUserPassword(r.Context(), actor, id, in.Password); err != nil {
+	if err := d.db.SetUserPassword(r.Context(), actor, r.PathValue("id"), in.Password); err != nil {
 		writeError(w, err)
 		return
 	}
-	d.auth.Sessions.DeleteForProfile(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -99,7 +97,8 @@ const maxRosterBytes = 8 << 20
 // Accepts either a multipart form with a "file" part (the CSV) and an
 // optional "photo_dir" field, or the CSV itself as the body with
 // Content-Type text/csv. Relative photo paths in the CSV resolve against
-// photo_dir; absolute paths are used as they are.
+// photo_dir, so a roster with photos comes in as multipart; absolute paths
+// are used as they are.
 func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRosterBytes)
 
@@ -121,9 +120,8 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 		defer f.Close()
 		csvBody = f
 		photoDir = strings.TrimSpace(r.FormValue("photo_dir"))
-	case ct == "text/csv" || ct == "text/plain" || ct == "application/octet-stream":
+	case ct == "text/csv":
 		csvBody = r.Body
-		photoDir = strings.TrimSpace(r.URL.Query().Get("photo_dir"))
 	default:
 		writeError(w, errors.Join(stockroom.ErrInvalid, errors.New("send the roster as multipart/form-data or text/csv")))
 		return
