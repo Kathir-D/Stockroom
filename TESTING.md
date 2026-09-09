@@ -9,10 +9,10 @@ Three suites, one per layer. Run them all with:
 | Layer | Tool | Location | Count |
 |---|---|---|---|
 | Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 297 assertions |
-| Go (config, pool, passwords, failsafe admin, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 105 cases |
+| Go (config, pool, auth, sessions, users, roster, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 139 cases |
 | Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 92 cases |
 
-Everything here tests code that exists today. Nothing in `TODO.md` Phases 2 to 8 is tested ahead of being written.
+Everything here tests code that exists today. Nothing in `TODO.md` Phases 3 to 8 is tested ahead of being written.
 
 ## Running individual suites
 
@@ -65,9 +65,19 @@ Each file runs inside a transaction that is rolled back, so the suite leaves no 
 
 **`failsafe_test.go`.** `EnsureFailsafeAdmin` creates the account on first run, and on later runs rotates the password, forces `is_admin` back on, and leaves the operator's name edits alone without duplicating the row. Bad config (`ErrInvalid`) is refused before touching the database, and blank config is reported separately as `ErrFailsafeNotConfigured` — the case the server logs and starts through, rather than a failure.
 
+**`sessions_test.go`.** Unit tests with an injected clock. Tokens are 64 hex characters and unique. A session expires after the idle period with no requests and every request extends it; a zero idle time never expires. `Upgrade` clears the limited flag, `Delete` and `DeleteForProfile` end the right sessions, and expired entries are swept on every `Create` so the map stays bounded.
+
+**`auth_test.go`.** Against the database. A scan by an unknown number is `ErrNotFound`. A scan by an account with no password yields a limited session: `RequireAdmin` refuses it even for an admin, `SetInitialPassword` upgrades it, works only once, and enables typed login. Typed login covers right password, wrong password, unknown number (same error as wrong, so numbers are not enumerable) and no password set. Logout kills the token. `Resolve` reflects a promotion or a deletion on the next request. `Me` and the login response report `has_overdue` once something is past due.
+
+**`users_test.go`.** Every user function refuses a non-admin. Create trims fields, derives `full_name`, nulls blank optionals, hashes an optional password, and maps duplicate student numbers to `ErrConflict`. Update never touches the password and refuses self-demotion. Delete works for a plain account, is refused while items are checked out, is refused (as `ErrConflict`, not a 500) for anyone with custody history, and refuses self-delete. `SetUserPassword` replaces the hash.
+
+**`roster_test.go`.** Non-admins are refused. A file with no header or without the required columns is `ErrInvalid`. A mixed file (BOM, Windows line endings, reordered and extra columns, a blank line, a bad number, a missing photo, a nameless row) reports the right action and line number per row, writes the good rows, copies the photo to `uploads/profiles/<number>.jpg`, and leaves `is_admin` and the password of an updated account alone. Re-importing with a blank photo keeps the old one; absolute photo paths work.
+
+**`server/auth_test.go`.** The routes end to end with a live database: scan login returning a limited token that can reach `/me` but gets `403 needs_password` elsewhere, set-password (too short is 400, second time is 409), then a full session. Login error statuses. The token is accepted from the bearer header or the cookie, logout clears both, and bad or missing credentials are 401. User CRUD over HTTP including 409 on duplicates, 400 on a malformed id, that a password reset or delete signs the user out, and that every user route is 403 for a non-admin. Roster import as multipart with `photo_dir` and as a raw `text/csv` body, plus the 400 cases.
+
 **`server/json_test.go`.** The sentinel to status mapping for all eight errors, wrapped and joined errors, an unknown error becoming a 500 whose body leaks nothing, request decoding (unknown fields, malformed JSON, wrong types, empty body) and the 1 MB size cap.
 
-**`server/router_test.go`.** `/health` returns the documented body against a live database, returns 500 when the database is gone, answers HEAD, and the router 405s the wrong method and 404s unknown paths.
+**`server/router_test.go`.** `/health` returns the documented body against a live database, returns 500 when the database is gone, answers HEAD, and the router 405s the wrong method and 404s unknown paths. `server/auth_test.go` adds the same method checks for the auth routes.
 
 ### Desktop frontend
 
@@ -95,6 +105,6 @@ The "Add" tag button in `App.svelte` never worked. Svelte 5's legacy compiler tu
 
 The grant migration's `alter default privileges` for sequences and functions has nothing reading it yet; the tables case is covered.
 
-Everything in `TODO.md` Phases 2 to 8 (auth, sessions, checkout, check-in, scanning, the admin API, the backup CLI) does not exist yet.
+Everything in `TODO.md` Phases 3 to 8 (browse, checkout, check-in, scanning, the admin asset and category API, the backup CLI) does not exist yet.
 
 Barcode scanner input handling. `lib/scanner.ts` is not written, and the keystroke-timing threshold needs real hardware to pin down (CLAUDE.md §10).

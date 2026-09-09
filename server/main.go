@@ -49,9 +49,11 @@ func main() {
 		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
 	}
 
+	auth := stockroom.NewAuth(db, time.Duration(cfg.SessionIdleMinutes)*time.Minute)
+
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
-		Handler:           newRouter(db),
+		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
