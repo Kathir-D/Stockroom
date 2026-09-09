@@ -12,7 +12,7 @@ Written 2026-09-09. Direction chosen from `docs/design/mood-board.html` (open it
 Bits UI · shared **npm workspace package** · cart as a **dock that expands into a drawer** · status as
 **dot + label** · **Inter + mono for identifiers**.
 
-**Not settled:** six user-flow questions in §15. Everything in §1 to §14 holds regardless of how they
+**Not settled:** seven user-flow questions in §15. Everything in §1 to §14 holds regardless of how they
 land; where a section depends on one, it says so.
 
 ---
@@ -531,14 +531,23 @@ Other rules:
 ### 8.3 Asset detail
 
 `dialog`, 560px. Photo left (or `<PhotoFrame>` fallback), facts right: name, full category path, `<Serial>`,
-status as a filled chip, condition, and, when checked out, custodian name, student number, checked-out
-date and due date. Below, the custody history from `GetAssetHistory` as a compact list, newest first.
+status as a filled chip, condition, and, when checked out, the checked-out date and due date. Custodian
+name and student number are **admin-only**, per the rule below. Under that, the custody history from
+`GetAssetHistory` as a compact list, newest first.
 
 Footer: **Add to cart** (primary) or **Check in** if checked out and the viewer may do it. Admins also get
 **Edit** and **Mark unavailable**.
 
-Non-admins see the current custodian's name. That is intentional. It lets a student find who has the lens
-they need. Confirm it's acceptable with whoever owns student privacy at the school before shipping.
+**Custodian identity is admin-only until peer disclosure is approved.** Approved audience: admins
+(`profiles.is_admin`) and the custodian themselves. A non-admin viewing someone else's item sees only that
+it is checked out and when it is due, never who holds it. Letting a student find who has the lens they want
+is worth having, but student custody records are personal data and nobody has yet been named who can
+approve the wider audience, so the narrow rule is the default. ⚠ §15 Q7.
+
+**Enforce it in the Go API, not the UI.** The asset-detail, scan and history responses must omit the
+custodian fields for a non-admin actor rather than returning them for the frontend to hide; a hidden field
+is still sent over the wire and the web app is a `fetch` call away. `TODO.md` Phase 3 owns that response
+shape. If Q7 later approves peer disclosure, widening it is a change in that one place.
 
 ### 8.4 Cart: dock + expanding drawer
 
@@ -592,7 +601,7 @@ cancel, Escape, or a fresh scan.
 | Scan result | Surface |
 |---|---|
 | `available` | Large photo, name, `<Serial>`, `Available` chip. Buttons: **Add to cart** (primary, autofocused) · **Cancel**. |
-| `checked_out` | Name, `<Serial>`, custodian, days out. Buttons: **Check in** (primary) · **Cancel**. An optional damage-note field is collapsed under **Add a note**, expanded inline. |
+| `checked_out` | Name, `<Serial>`, days out, and the custodian **for admins only** (§8.3). Buttons: **Check in** (primary) · **Cancel**. An optional damage-note field is collapsed under **Add a note**, expanded inline. |
 | `unavailable` | Name, `<Serial>`, `Unavailable` chip, reason. Single **Close**. No path to the cart. |
 | unknown serial (`ErrNotFound`) | The scanned string in mono, "Not a Stockroom item." Single **Close**. |
 
@@ -780,6 +789,9 @@ These block specific sections, not the whole document. Recorded from the grillin
 - **Q5. How does the cart die?** Sign-out, idle timeout, reload. *Blocks:* 8.4.
 - **Q6. Where does the overdue block bite?** At sign-in with the cart disabled throughout, or at the
   checkout press. *Blocks:* 8.4, 8.5.
+- **Q7. Who may see who holds an item?** Admins and the custodian only, or any signed-in student? Needs
+  whoever owns student privacy at the school to decide. Until then §8.3 ships the admin-only default and
+  the API withholds the field. *Blocks:* 8.3, 8.6.
 - **Q-B. `B1` vs `B1 + B3`.** Unit-level or model-level browsing. If `B1 + B3`, `TODO.md` Phase 3 needs a
   per-model availability count. *Blocks:* 8.2.
 
