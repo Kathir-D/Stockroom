@@ -6,12 +6,16 @@ begin;
 create extension if not exists pgtap;
 select no_plan();
 
+-- Serials are unique across assets now (idx_assets_serial), so fixtures need
+-- their own namespace the way the UUIDs do: everything here is prefixed SR060,
+-- never a value the seed or another test file could also use.
 insert into assets (id, asset_tag, name, description, serial_number) values
   ('55555555-0000-0000-0000-000000000010', 'SR-001', 'Canon 70-200mm f/2.8 zoom lens',
-   'Telephoto zoom for interviews', 'SN-SR001'),
+   'Telephoto zoom for interviews', 'SN-SR060-001'),
   -- the case the coalesce() protects: nothing but a name
   ('55555555-0000-0000-0000-000000000011', 'SR-002', 'Manfrotto tripod', null, null),
-  ('55555555-0000-0000-0000-000000000012', 'SR-003', 'Battery', null, 'T7iBat-001');
+  -- a linear item's model-prefixed serial, the shape hardest to tokenise
+  ('55555555-0000-0000-0000-000000000012', 'SR-003', 'Battery', null, 'SR060Bat-001');
 
 -- The index is a GIN index over the tsvector expression.
 select is(
@@ -49,7 +53,7 @@ select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'manfrotto'),
 
 -- Serial numbers are part of the document, so a partial scan typed by hand
 -- still finds the item.
-select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'T7iBat-001'),
+select ok(pg_temp.doc(a) @@ plainto_tsquery('english', 'SR060Bat-001'),
   'the serial number is searchable')
   from assets a where a.id = '55555555-0000-0000-0000-000000000012';
 

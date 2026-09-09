@@ -102,11 +102,9 @@ func TestEnumConstantsMatchDatabase(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
 
-	// Values that exist in Go ahead of the migration that adds them (see
-	// CLAUDE.md §6.2). Once Phase 1 lands this set should shrink to empty.
-	pendingInDB := map[string]map[string]bool{
-		"asset_status": {"unavailable": true},
-	}
+	// Values that exist in Go ahead of a migration that adds them. Empty since
+	// the v1 migration landed; add to it only while a new label is in flight.
+	pendingInDB := map[string]map[string]bool{}
 
 	cases := []struct {
 		enum string

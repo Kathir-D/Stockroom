@@ -26,8 +26,8 @@ select enum_has_labels('public', 'user_role',
   array['owner','executive_producer','producer','member'],
   'user_role labels');
 select enum_has_labels('public', 'asset_status',
-  array['available','checked_out','reserved','maintenance','retired','lost'],
-  'asset_status labels (v1 adds ''unavailable'' in a later migration)');
+  array['available','checked_out','reserved','maintenance','retired','lost','unavailable'],
+  'asset_status labels (''unavailable'' arrived with the v1 migration)');
 select enum_has_labels('public', 'booking_status',
   array['reserved','active','returned','overdue','cancelled'],
   'booking_status labels');
@@ -59,7 +59,11 @@ from unnest(array[
 ]) as c;
 
 select has_column('public', 'profiles', c, format('profiles.%I exists', c))
-from unnest(array['id','email','password_hash','full_name','role','created_at']) as c;
+from unnest(array[
+  'id','email','password_hash','full_name','role','created_at',
+  'student_number','first_name','last_name','photo_path','is_admin'
+]) as c;
+select has_column('public', 'assets', 'photo_path', 'assets.photo_path exists (v1)');
 
 -- Types that would silently mis-scan if they changed --------------------------
 select col_type_is('public', 'assets', 'status', 'asset_status', 'assets.status is the enum, not text');
@@ -70,6 +74,8 @@ select col_type_is('public', 'custody_events', 'checked_out_at', 'timestamp with
 select col_type_is('public', 'custody_events', 'due_at', 'timestamp with time zone', 'due_at is timestamptz');
 select col_type_is('public', 'activity_log', 'details', 'jsonb', 'activity_log.details is jsonb');
 select col_type_is('public', 'profiles', 'role', 'user_role', 'profiles.role is the enum');
+select col_type_is('public', 'profiles', 'is_admin', 'boolean', 'profiles.is_admin is a boolean');
+select col_type_is('public', 'profiles', 'student_number', 'text', 'profiles.student_number is text (leading zeros survive)');
 
 -- Nullability ----------------------------------------------------------------
 select col_not_null('public', 'assets', c, format('assets.%I is NOT NULL', c))
@@ -81,9 +87,14 @@ select col_not_null('public', 'custody_events', c, format('custody_events.%I is 
 from unnest(array['asset_id','custodian_id','checked_out_by','checked_out_at']) as c;
 select col_is_null('public', 'custody_events', 'checked_in_at', 'custody_events.checked_in_at is nullable (open custody)');
 
+select col_not_null('public', 'profiles', 'is_admin', 'profiles.is_admin is NOT NULL');
+select col_is_null('public', 'profiles', c, format('profiles.%I is nullable', c))
+from unnest(array['email','student_number','first_name','last_name','photo_path','password_hash']) as c;
+
 -- Indexes that queries in later phases depend on ------------------------------
 select has_index('public', 'assets', i, format('index %I exists', i))
-from unnest(array['idx_assets_status','idx_assets_category','idx_assets_location','idx_assets_custom_fields','idx_assets_search']) as i;
+from unnest(array['idx_assets_status','idx_assets_category','idx_assets_location','idx_assets_custom_fields','idx_assets_search','idx_assets_serial']) as i;
+select index_is_unique('public', 'assets', 'idx_assets_serial', 'idx_assets_serial is unique (the serial is the scan key)');
 select has_index('public', 'custody_events', i, format('index %I exists', i))
 from unnest(array['idx_custody_asset','idx_custody_open']) as i;
 select has_index('public', 'activity_log', 'idx_activity_asset', 'index idx_activity_asset exists');
