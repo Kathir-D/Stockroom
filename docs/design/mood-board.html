@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stockroom design directions, pick by code</title>
+<style>
+/* ============================================================
+   Scratch mood board. NOT the app, NOT the design system.
+   Hand-written CSS on purpose so it runs with zero build.
+   The real system will be Tailwind v4 @theme + shadcn-svelte.
+   Every screen below uses real Stockroom data.
+   ============================================================ */
+
+:root{
+  --page-bg:#EFEFEC; --page-fg:#1a1a19; --page-muted:#6b6a65; --page-line:#d6d5cf;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--sans);
+     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1500px;margin:0 auto;padding:32px 28px 120px}
+h1{font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
+h2{font-size:15px;letter-spacing:.10em;text-transform:uppercase;margin:56px 0 4px;
+   padding-bottom:8px;border-bottom:2px solid var(--page-fg)}
+h2 .n{font-family:var(--mono);opacity:.45;margin-right:10px}
+.lede{color:var(--page-muted);max-width:78ch;margin:0 0 8px}
+.q{color:var(--page-muted);margin:0 0 20px;font-style:italic}
+.grid{display:grid;gap:20px}
+.g1{grid-template-columns:1fr}
+.g1 .app{grid-template-columns:236px 1fr;min-height:330px}
+.g1 .note{max-width:104ch}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:1100px){.g3,.g2{grid-template-columns:1fr}}
+
+.opt{min-width:0}
+.tag{display:flex;align-items:baseline;gap:9px;margin:0 0 8px}
+.code{font-family:var(--mono);font-size:12px;font-weight:700;background:var(--page-fg);
+      color:var(--page-bg);padding:2px 7px;border-radius:3px;letter-spacing:.04em}
+.name{font-weight:650}
+.note{color:var(--page-muted);font-size:12.5px;margin:9px 2px 0;line-height:1.5}
+.note b{color:var(--page-fg);font-weight:600}
+
+/* ---------- the demo frame ---------- */
+.frame{border-radius:8px;overflow:hidden;border:1px solid var(--page-line);
+       box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)}
+
+/* ============ GROUNDS: same markup, different variables ============ */
+.G{ --radius:7px; --font:var(--sans); font-family:var(--font);
+    background:var(--bg); color:var(--fg); }
+
+.ground-manual{                       /* A1 Field Manual, warm light */
+  --bg:#FAFAF9; --surface:#FFFFFF; --raised:#F5F5F4; --line:#E7E5E4; --line-strong:#D6D3D1;
+  --fg:#1C1917; --muted:#78716C; --faint:#A8A29E;
+  --btn-bg:#1C1917; --btn-fg:#FAFAF9; --focus:#1C1917;
+  --ok:#047857;   --ok-bg:#ECFDF5;  --out:#1D4ED8; --out-bg:#EFF6FF;
+  --soon:#B45309; --soon-bg:#FFFBEB; --late:#B91C1C; --late-bg:#FEF2F2;
+  --off:#57534E;  --off-bg:#F5F5F4;
+}
+.ground-ops{                          /* A2 Studio Ops, warm charcoal dark */
+  --bg:#17191A; --surface:#1E2122; --raised:#262A2B; --line:#2F3435; --line-strong:#414748;
+  --fg:#E9E9E7; --muted:#9A9F9E; --faint:#6E7473;
+  --btn-bg:#E9E9E7; --btn-fg:#17191A; --focus:#E9E9E7;
+  --ok:#4ADE80;   --ok-bg:#0E2B1C;  --out:#7DB3FF; --out-bg:#12233D;
+  --soon:#FBBF24; --soon-bg:#33260A; --late:#FF7A70; --late-bg:#3A1614;
+  --off:#9A9F9E;  --off-bg:#232727;
+}
+.ground-press{                        /* A3 Letterpress, pure white, black rules */
+  --bg:#FFFFFF; --surface:#FFFFFF; --raised:#F2F2F2; --line:#111111; --line-strong:#111111;
+  --fg:#111111; --muted:#555555; --faint:#888888;
+  --btn-bg:#111111; --btn-fg:#FFFFFF; --focus:#111111;
+  --ok:#046A38;   --ok-bg:#FFFFFF;  --out:#0B3EA8; --out-bg:#FFFFFF;
+  --soon:#8A5200; --soon-bg:#FFFFFF; --late:#A50E0E; --late-bg:#FFFFFF;
+  --off:#555555;  --off-bg:#FFFFFF;
+  --radius:0px;
+}
+.ground-press .row,.ground-press .card,.ground-press .side,.ground-press .topbar{border-color:#111}
+
+/* ---------- shared chrome ---------- */
+.app{display:grid;grid-template-columns:196px 1fr;min-height:392px}
+.side{background:var(--surface);border-right:1px solid var(--line);padding:12px 10px}
+.brand{display:flex;align-items:center;gap:8px;padding:5px 6px 14px;font-weight:700;letter-spacing:-.01em}
+.mark{width:19px;height:19px;border-radius:4px;background:var(--fg);color:var(--bg);
+      display:grid;place-items:center;font-size:11px;font-weight:800}
+.ground-press .mark{border-radius:0}
+.navlabel{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);
+          padding:12px 6px 5px;font-weight:650}
+.nav{display:block;padding:6px 8px;border-radius:5px;color:var(--muted);font-size:13px;
+     text-decoration:none;margin-bottom:1px}
+.nav.on{background:var(--raised);color:var(--fg);font-weight:600}
+.nav .ct{float:right;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.ground-press .nav.on{background:#111;color:#fff}
+.ground-press .nav.on .ct{color:#fff}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{display:flex;align-items:center;gap:10px;padding:10px 14px;
+        border-bottom:1px solid var(--line);background:var(--surface)}
+.crumb{font-size:13px;color:var(--muted)}
+.crumb b{color:var(--fg);font-weight:600}
+.search{flex:1;max-width:300px;margin-left:auto;display:flex;align-items:center;gap:7px;
+        border:1px solid var(--line-strong);border-radius:var(--radius);padding:5px 9px;
+        background:var(--bg);color:var(--faint);font-size:12.5px}
+.kbd{font-family:var(--mono);font-size:10px;border:1px solid var(--line-strong);
+     border-radius:3px;padding:1px 4px;color:var(--faint);margin-left:auto}
+.btn{border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);
+     border-radius:var(--radius);padding:5px 11px;font-size:12.5px;font-weight:600;
+     font-family:inherit;cursor:pointer}
+.btn.pri{background:var(--btn-bg);color:var(--btn-fg);border-color:var(--btn-bg)}
+.body{padding:14px;flex:1;min-width:0}
+
+/* ---------- status expression ---------- */
+.st{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:650;
+    white-space:nowrap}
+.st .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.st.chip{padding:2px 8px;border-radius:999px;border:1px solid currentColor}
+.ground-press .st.chip{border-radius:0}
+.s-ok{color:var(--ok)}   .s-ok.chip{background:var(--ok-bg)}
+.s-out{color:var(--out)} .s-out.chip{background:var(--out-bg)}
+.s-soon{color:var(--soon)} .s-soon.chip{background:var(--soon-bg)}
+.s-late{color:var(--late)} .s-late.chip{background:var(--late-bg)}
+.s-off{color:var(--off)} .s-off.chip{background:var(--off-bg)}
+
+/* ---------- table form ---------- */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+        color:var(--faint);font-weight:650;padding:0 10px 7px;border-bottom:1px solid var(--line)}
+.tbl td{padding:0 10px;border-bottom:1px solid var(--line);height:38px;vertical-align:middle}
+.tbl tr:hover td{background:var(--raised)}
+.mono{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.thumb{width:26px;height:26px;border-radius:4px;background:var(--raised);
+       border:1px solid var(--line);display:inline-grid;place-items:center;
+       font-size:11px;color:var(--faint);flex:none}
+.ground-press .thumb{border-radius:0}
+.cellname{display:flex;align-items:center;gap:9px;min-width:0}
+.cellname span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{border-left:3px solid transparent}
+.bar.s-ok{border-left-color:var(--ok)} .bar.s-out{border-left-color:var(--out)}
+.bar.s-late{border-left-color:var(--late)} .bar.s-off{border-left-color:var(--off)}
+
+/* ---------- card form ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:11px}
+.card{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+      background:var(--surface)}
+.shot{aspect-ratio:4/3;background:var(--raised);display:grid;place-items:center;
+      color:var(--faint);font-size:19px;position:relative}
+.shot .st{position:absolute;top:6px;left:6px;background:var(--surface);padding:2px 7px;
+          border-radius:999px;font-size:10px;border:1px solid var(--line)}
+.ground-press .shot .st{border-radius:0}
+.cbody{padding:8px 9px}
+.cname{font-size:12.5px;font-weight:600;line-height:1.3;margin-bottom:3px;
+       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* ---------- kiosk scan ---------- */
+.kiosk{height:392px;display:grid;place-items:center;text-align:center;padding:24px;position:relative}
+.kbig{font-size:42px;font-weight:750;letter-spacing:-.03em;line-height:1.05;margin:14px 0 6px}
+.ksub{font-size:15px;color:var(--muted)}
+.kser{font-family:var(--mono);font-size:15px;margin-top:14px;color:var(--fg);
+      border:1px solid var(--line-strong);border-radius:var(--radius);padding:5px 13px;display:inline-block}
+.flash-ok{background:var(--ok-bg)}
+.flash-late{background:var(--late-bg)}
+.bigicon{width:74px;height:74px;border-radius:50%;display:grid;place-items:center;
+         font-size:36px;color:var(--bg);margin:0 auto}
+.ground-press .bigicon{border-radius:0}
+.toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);
+       display:flex;align-items:center;gap:10px;background:var(--surface);
+       border:1px solid var(--line-strong);border-radius:var(--radius);
+       padding:10px 15px;box-shadow:0 10px 30px rgba(0,0,0,.22);font-size:13px;white-space:nowrap}
+
+/* ---------- cart dock ---------- */
+.dock{display:flex;align-items:center;gap:12px;padding:10px 14px;
+      border-top:1px solid var(--line);background:var(--surface)}
+.dock .n{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.avatars{display:flex}
+.av{width:23px;height:23px;border-radius:5px;background:var(--raised);border:1px solid var(--line);
+    margin-right:-6px;display:grid;place-items:center;font-size:10px;color:var(--faint)}
+.ground-press .av{border-radius:0}
+
+.legend{position:sticky;top:0;z-index:5;background:var(--page-bg);
+        border-bottom:2px solid var(--page-fg);padding:14px 0 12px;margin-bottom:4px}
+.pill{display:inline-block;font-family:var(--mono);font-size:11.5px;border:1px solid var(--page-fg);
+      border-radius:999px;padding:2px 10px;margin:0 6px 6px 0}
+.warn{border-left:3px solid #B91C1C;background:#fff;padding:11px 14px;margin:18px 0 0;
+      border-radius:0 5px 5px 0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="legend">
+  <h1>Stockroom design directions</h1>
+  <p class="lede">Every panel below is a real Stockroom screen (real category tree, real serials, real
+  statuses) rendered in a different style. <b>Pick one code per section</b> and I'll write the full spec
+  against your combination. For example <span class="pill">A2 · B1 · C1 · D1 · E1 · F2</span></p>
+</div>
+
+<!-- ============================== A: GROUND ============================== -->
+<h2><span class="n">A</span>Ground &amp; palette</h2>
+<p class="q">Same asset-browser screen, three grounds, each at full width so the proportions are honest.
+This is the single biggest choice. Everything else inherits from it.</p>
+<div class="grid g1">
+
+  <div class="opt">
+    <div class="tag"><span class="code">A1</span><span class="name">Field Manual</span></div>
+    <div class="frame G ground-manual">
+      <div class="app">
+        <div class="side">
+          <div class="brand"><span class="mark">S</span>Stockroom</div>
+          <div class="navlabel">Browse</div>
+          <a class="nav on">Cameras/Bodies <span class="ct">13</span></a>
+          <a class="nav">Lenses <span class="ct">11</span></a>
+          <a class="nav">Lights <span class="ct">8</span></a>
+          <a class="nav">Audio Stuff <span class="ct">6</span></a>
+          <div class="navlabel">Admin</div>
+          <a class="nav">Overdue <span class="ct">2</span></a>
+          <a class="nav">Users</a>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="crumb">Cameras/Bodies › <b>Camera Model</b></div>
+            <div class="search">Search assets<span class="kbd">/</span></div>
+            <button class="btn pri">Check out</button>
+          </div>
+          <div class="body">
+            <table class="tbl">
+              <tr><th>Asset</th><th>Serial</th><th>Status</th><th>Due</th></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon T7i</span></div></td>
+                  <td class="mono">T7i-004</td>
+                  <td><span class="st s-ok"><span class="dot"></span>Available</span></td><td class="mono">—</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 5D Mark IV</span></div></td>
+                  <td class="mono">5D4-001</td>
+                  <td><span class="st s-out"><span class="dot"></span>Checked out</span></td>
+                  <td class="mono">Sep 12</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>BMPCC 6K Pro</span></div></td>
+                  <td class="mono">BM6K-002</td>
+                  <td><span class="st s-late"><span class="dot"></span>Overdue 3d</span></td>
+                  <td class="mono">Sep 06</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>T7i Battery</span></div></td>
+                  <td class="mono">T7iBat-001</td>
+                  <td><span class="st s-off"><span class="dot"></span>Unavailable</span></td><td class="mono">—</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>Warm stone light.</b> Ink-black buttons, hairline borders, no shadows below modal
+    level. Reads like Linear-light / Ramp. Best for dense admin tables, printing, and your presentation
+    projector.</p>
+  </div>
+
+  <div class="opt">
+    <div class="tag"><span class="code">A2</span><span class="name">Studio Ops</span></div>
+    <div class="frame G ground-ops">
+      <div class="app">
+        <div class="side">
+          <div class="brand"><span class="mark">S</span>Stockroom</div>
+          <div class="navlabel">Browse</div>
+          <a class="nav on">Cameras/Bodies <span class="ct">13</span></a>
+          <a class="nav">Lenses <span class="ct">11</span></a>
+          <a class="nav">Lights <span class="ct">8</span></a>
+          <a class="nav">Audio Stuff <span class="ct">6</span></a>
+          <div class="navlabel">Admin</div>
+          <a class="nav">Overdue <span class="ct">2</span></a>
+          <a class="nav">Users</a>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="crumb">Cameras/Bodies › <b>Camera Model</b></div>
+            <div class="search">Search assets<span class="kbd">/</span></div>
+            <button class="btn pri">Check out</button>
+          </div>
+          <div class="body">
+            <table class="tbl">
+              <tr><th>Asset</th><th>Serial</th><th>Status</th><th>Due</th></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon T7i</span></div></td>
+                  <td class="mono">T7i-004</td>
+                  <td><span class="st s-ok"><span class="dot"></span>Available</span></td><td class="mono">—</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 5D Mark IV</span></div></td>
+                  <td class="mono">5D4-001</td>
+                  <td><span class="st s-out"><span class="dot"></span>Checked out</span></td>
+                  <td class="mono">Sep 12</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>BMPCC 6K Pro</span></div></td>
+                  <td class="mono">BM6K-002</td>
+                  <td><span class="st s-late"><span class="dot"></span>Overdue 3d</span></td>
+                  <td class="mono">Sep 06</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>T7i Battery</span></div></td>
+                  <td class="mono">T7iBat-001</td>
+                  <td><span class="st s-off"><span class="dot"></span>Unavailable</span></td><td class="mono">—</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>Warm charcoal dark.</b> Evolves the Nocturne theme already in the desktop app, but
+    green is demoted from brand accent to <i>status only</i> and primary buttons go near-white. Broadcast-gear
+    feel. Easiest on eyes in the camera closet.</p>
+  </div>
+
+  <div class="opt">
+    <div class="tag"><span class="code">A3</span><span class="name">Letterpress</span></div>
+    <div class="frame G ground-press">
+      <div class="app">
+        <div class="side">
+          <div class="brand"><span class="mark">S</span>Stockroom</div>
+          <div class="navlabel">Browse</div>
+          <a class="nav on">Cameras/Bodies <span class="ct">13</span></a>
+          <a class="nav">Lenses <span class="ct">11</span></a>
+          <a class="nav">Lights <span class="ct">8</span></a>
+          <a class="nav">Audio Stuff <span class="ct">6</span></a>
+          <div class="navlabel">Admin</div>
+          <a class="nav">Overdue <span class="ct">2</span></a>
+          <a class="nav">Users</a>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="crumb">Cameras/Bodies › <b>Camera Model</b></div>
+            <div class="search">Search assets<span class="kbd">/</span></div>
+            <button class="btn pri">Check out</button>
+          </div>
+          <div class="body">
+            <table class="tbl">
+              <tr><th>Asset</th><th>Serial</th><th>Status</th><th>Due</th></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon T7i</span></div></td>
+                  <td class="mono">T7i-004</td>
+                  <td><span class="st s-ok"><span class="dot"></span>Available</span></td><td class="mono">—</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 5D Mark IV</span></div></td>
+                  <td class="mono">5D4-001</td>
+                  <td><span class="st s-out"><span class="dot"></span>Checked out</span></td>
+                  <td class="mono">Sep 12</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>BMPCC 6K Pro</span></div></td>
+                  <td class="mono">BM6K-002</td>
+                  <td><span class="st s-late"><span class="dot"></span>Overdue 3d</span></td>
+                  <td class="mono">Sep 06</td></tr>
+              <tr><td><div class="cellname"><span class="thumb">▣</span><span>T7i Battery</span></div></td>
+                  <td class="mono">T7iBat-001</td>
+                  <td><span class="st s-off"><span class="dot"></span>Unavailable</span></td><td class="mono">—</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>Pure white, black rules, zero radius.</b> Editorial/Swiss. Highest possible contrast
+    and the most distinctive of the three, but unforgiving. Every misalignment shows, and it's harsh for
+    long sessions.</p>
+  </div>
+</div>
+
+<!-- ============================== B: LIST FORM ============================== -->
+<h2><span class="n">B</span>How the asset list is shaped</h2>
+<p class="q">You have photos per asset, but also 200+ near-identical units (ten T7i bodies). Scanning a list
+of names and recognising a picture are different jobs.</p>
+<div class="grid g3">
+
+  <div class="opt">
+    <div class="tag"><span class="code">B1</span><span class="name">Dense table</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <table class="tbl">
+        <tr><th>Asset</th><th>Serial</th><th>Status</th><th>Custodian</th></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 70-200mm f/2.8</span></div></td>
+            <td class="mono">C70200-001</td><td><span class="st s-ok"><span class="dot"></span>Available</span></td><td>—</td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Sigma 18-35mm f/1.8</span></div></td>
+            <td class="mono">S1835-002</td><td><span class="st s-out"><span class="dot"></span>Checked out</span></td><td>A. Rivera</td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Tamron 150-600mm</span></div></td>
+            <td class="mono">T150600-001</td><td><span class="st s-late"><span class="dot"></span>Overdue 3d</span></td><td>J. Chen</td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 18-135mm</span></div></td>
+            <td class="mono">C18135-003</td><td><span class="st s-ok"><span class="dot"></span>Available</span></td><td>—</td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Sigma Teleconverter</span></div></td>
+            <td class="mono">SGTC-001</td><td><span class="st s-off"><span class="dot"></span>Unavailable</span></td><td>—</td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span>Canon 55-250mm</span></div></td>
+            <td class="mono">C55250-002</td><td><span class="st s-ok"><span class="dot"></span>Available</span></td><td>—</td></tr>
+      </table>
+    </div></div>
+    <p class="note">~9 rows per screen. Sortable columns, keyboard nav, multi-select for cart. <b>The admin
+    panel wants this.</b> Photo is a 26px thumbnail, present but not the point.</p>
+  </div>
+
+  <div class="opt">
+    <div class="tag"><span class="code">B2</span><span class="name">Photo card grid</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <div class="cards">
+        <div class="card"><div class="shot">▣<span class="st s-ok chip">Available</span></div>
+          <div class="cbody"><div class="cname">Canon 70-200mm f/2.8</div><div class="mono">C70200-001</div></div></div>
+        <div class="card"><div class="shot">▣<span class="st s-out chip">Out</span></div>
+          <div class="cbody"><div class="cname">Sigma 18-35mm f/1.8</div><div class="mono">S1835-002</div></div></div>
+        <div class="card"><div class="shot">▣<span class="st s-late chip">Overdue</span></div>
+          <div class="cbody"><div class="cname">Tamron 150-600mm</div><div class="mono">T150600-001</div></div></div>
+        <div class="card"><div class="shot">▣<span class="st s-ok chip">Available</span></div>
+          <div class="cbody"><div class="cname">Canon 18-135mm</div><div class="mono">C18135-003</div></div></div>
+      </div>
+    </div></div>
+    <p class="note">~8 per screen. Best when the student doesn't know the model name and is shopping by
+    sight, the way Cheqroom and Sortly do it. <b>Costs you density</b> and needs every asset photographed
+    to not look broken.</p>
+  </div>
+
+  <div class="opt">
+    <div class="tag"><span class="code">B3</span><span class="name">Grouped by model</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <table class="tbl">
+        <tr><th>Model</th><th>Available</th><th>Out</th><th></th></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span><b>Canon T7i</b></span></div></td>
+            <td><span class="st s-ok"><span class="dot"></span>4 of 6</span></td>
+            <td class="mono">2 out</td><td style="text-align:right"><button class="btn">Add</button></td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span><b>Canon T7i Battery</b></span></div></td>
+            <td><span class="st s-ok"><span class="dot"></span>9 of 12</span></td>
+            <td class="mono">3 out</td><td style="text-align:right"><button class="btn">Add</button></td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span><b>Canon 5D Mark IV</b></span></div></td>
+            <td><span class="st s-late"><span class="dot"></span>0 of 2</span></td>
+            <td class="mono">2 out</td><td style="text-align:right"><button class="btn" disabled style="opacity:.4">Add</button></td></tr>
+        <tr><td><div class="cellname"><span class="thumb">▣</span><span><b>SD Card 128GB</b></span></div></td>
+            <td><span class="st s-ok"><span class="dot"></span>14 of 20</span></td>
+            <td class="mono">6 out</td><td style="text-align:right"><button class="btn">Add</button></td></tr>
+      </table>
+    </div></div>
+    <p class="note"><b>Collapses your 3rd category level into counts.</b> A student wants "a T7i battery",
+    not <span class="mono">T7iBat-007</span> specifically, so the system assigns a free unit. Massively
+    reduces list length; expand a row to see individual serials.</p>
+  </div>
+</div>
+<div class="warn"><b>Worth knowing:</b> B3 changes behaviour, not just looks. It implies the server picks
+which physical unit gets checked out. That's a real product decision and it doesn't exist in
+<span class="mono">TODO.md</span> Phase 3 or 4 yet. B1 and B3 can coexist (grouped by default, "show units" toggle).</div>
+
+<!-- ============================== C: STATUS ============================== -->
+<h2><span class="n">C</span>How status reads</h2>
+<p class="q">Status is the most-read thing in the whole app. Colour alone fails for colour-blind users and
+under the closet's fluorescent light.</p>
+<div class="grid g3">
+  <div class="opt">
+    <div class="tag"><span class="code">C1</span><span class="name">Dot + label</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface);display:flex;flex-direction:column;gap:11px">
+      <span class="st s-ok"><span class="dot"></span>Available</span>
+      <span class="st s-out"><span class="dot"></span>Checked out · due Sep 12</span>
+      <span class="st s-soon"><span class="dot"></span>Due tomorrow</span>
+      <span class="st s-late"><span class="dot"></span>Overdue 3 days</span>
+      <span class="st s-off"><span class="dot"></span>Unavailable</span>
+    </div></div>
+    <p class="note">Quietest. Never competes with the row text. <b>Always carries the word</b>, so colour reinforces rather than informs. This is Linear's approach.</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">C2</span><span class="name">Filled chip</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface);display:flex;flex-direction:column;gap:11px;align-items:flex-start">
+      <span class="st s-ok chip">Available</span>
+      <span class="st s-out chip">Checked out · due Sep 12</span>
+      <span class="st s-soon chip">Due tomorrow</span>
+      <span class="st s-late chip">Overdue 3 days</span>
+      <span class="st s-off chip">Unavailable</span>
+    </div></div>
+    <p class="note">Loudest, easiest to spot from a metre away. <b>Gets noisy in a 40-row table</b> where
+    most rows say the same thing. Good on cards and detail popups.</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">C3</span><span class="name">Edge bar on the row</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <table class="tbl">
+        <tr><td class="bar s-ok"><div class="cellname"><span>Canon T7i</span></div></td><td class="mono">T7i-004</td><td>Available</td></tr>
+        <tr><td class="bar s-out"><div class="cellname"><span>Canon 5D Mark IV</span></div></td><td class="mono">5D4-001</td><td>Out · Sep 12</td></tr>
+        <tr><td class="bar s-late"><div class="cellname"><span>BMPCC 6K Pro</span></div></td><td class="mono">BM6K-002</td><td>Overdue 3d</td></tr>
+        <tr><td class="bar s-off"><div class="cellname"><span>T7i Battery</span></div></td><td class="mono">T7iBat-001</td><td>Unavailable</td></tr>
+      </table>
+    </div></div>
+    <p class="note">Colour lives on the row edge, text stays plain. <b>Scans fastest vertically.</b> You see
+    the shape of the whole list at once. Weakest for a single item out of context.</p>
+  </div>
+</div>
+
+<!-- ============================== D: SCAN FEEDBACK ============================== -->
+<h2><span class="n">D</span>Scan feedback, the moment that matters</h2>
+<p class="q">A student scans <span class="mono">T7iBat-001</span> and walks away in about two seconds.
+They must know it worked without reading anything.</p>
+<div class="grid g3">
+  <div class="opt">
+    <div class="tag"><span class="code">D1</span><span class="name">Full-screen flash</span></div>
+    <div class="frame G ground-manual"><div class="kiosk flash-ok">
+      <div>
+        <div class="bigicon" style="background:var(--ok)">✓</div>
+        <div class="kbig">Checked in</div>
+        <div class="ksub">Canon T7i Battery · returned by Alex Rivera</div>
+        <div class="kser">T7iBat-001</div>
+      </div>
+    </div></div>
+    <p class="note">Whole screen becomes the answer for ~2s, then returns to browse. <b>Readable across the
+    room.</b> Same treatment in red for "Overdue, see an admin".</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">D2</span><span class="name">Toast over context</span></div>
+    <div class="frame G ground-manual"><div class="kiosk" style="align-items:stretch;padding:0">
+      <div class="body" style="width:100%">
+        <table class="tbl">
+          <tr><th>Asset</th><th>Serial</th><th>Status</th></tr>
+          <tr><td>Canon T7i</td><td class="mono">T7i-004</td><td><span class="st s-ok"><span class="dot"></span>Available</span></td></tr>
+          <tr><td>T7i Battery</td><td class="mono">T7iBat-001</td><td><span class="st s-ok"><span class="dot"></span>Available</span></td></tr>
+          <tr><td>Canon 5D Mark IV</td><td class="mono">5D4-001</td><td><span class="st s-out"><span class="dot"></span>Checked out</span></td></tr>
+        </table>
+      </div>
+      <div class="toast"><span class="st s-ok"><span class="dot"></span></span>
+        <span><b>Checked in</b> · T7i Battery</span>
+        <span class="mono">T7iBat-001</span>
+        <button class="btn">Undo</button></div>
+    </div></div>
+    <p class="note">Never loses your place. You can scan five items back to back and watch them stack.
+    <b>Supports Undo.</b> Much easier to miss from a distance.</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">D3</span><span class="name">Flash + persistent log</span></div>
+    <div class="frame G ground-manual"><div class="kiosk flash-ok" style="align-items:stretch">
+      <div style="width:100%;display:flex;flex-direction:column;justify-content:center">
+        <div style="text-align:center"><div class="bigicon" style="background:var(--ok)">✓</div>
+        <div class="kbig" style="font-size:32px">Checked in</div>
+        <div class="ksub">Canon T7i Battery</div></div>
+        <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:10px">
+          <table class="tbl" style="font-size:12px">
+            <tr><td class="mono">14:32</td><td>T7i Battery</td><td class="mono">T7iBat-001</td><td><span class="st s-ok">in</span></td></tr>
+            <tr><td class="mono">14:31</td><td>Canon T7i</td><td class="mono">T7i-004</td><td><span class="st s-ok">in</span></td></tr>
+            <tr><td class="mono">14:29</td><td>Sigma 18-35mm</td><td class="mono">S1835-002</td><td><span class="st s-out">out</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </div></div>
+    <p class="note">Big confirmation <i>and</i> a running session log underneath. <b>Best for returning a
+    whole kit.</b> You can verify all six items landed without leaving the screen.</p>
+  </div>
+</div>
+
+<!-- ============================== E: CART ============================== -->
+<h2><span class="n">E</span>Where the cart lives</h2>
+<p class="q">The cart is frontend-only state until checkout. It has to be visible enough that nobody walks
+off with an uncommitted cart.</p>
+<div class="grid g2">
+  <div class="opt">
+    <div class="tag"><span class="code">E1</span><span class="name">Bottom dock</span></div>
+    <div class="frame G ground-manual">
+      <div class="main">
+        <div class="body" style="background:var(--surface);min-height:230px">
+          <table class="tbl">
+            <tr><th>Asset</th><th>Serial</th><th>Status</th></tr>
+            <tr><td>Canon T7i</td><td class="mono">T7i-004</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+            <tr><td>Canon 70-200mm</td><td class="mono">C70200-001</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+            <tr><td>T7i Battery</td><td class="mono">T7iBat-001</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+          </table>
+        </div>
+        <div class="dock">
+          <div class="avatars"><span class="av">▣</span><span class="av">▣</span><span class="av">▣</span></div>
+          <span class="n" style="margin-left:14px">3 items</span>
+          <span class="n">Due Sep 16 · 7 days max</span>
+          <button class="btn" style="margin-left:auto">Clear</button>
+          <button class="btn pri">Check out 3</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">Always visible, never covers the list, and the due-date picker lives right next to the
+    commit button. <b>Impossible to forget.</b> Costs ~48px of vertical space permanently.</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">E2</span><span class="name">Right drawer</span></div>
+    <div class="frame G ground-manual">
+      <div class="app" style="grid-template-columns:1fr 232px;min-height:278px">
+        <div class="main">
+          <div class="body" style="background:var(--surface)">
+            <table class="tbl">
+              <tr><th>Asset</th><th>Serial</th></tr>
+              <tr><td>Canon T7i</td><td class="mono">T7i-004</td></tr>
+              <tr><td>Canon 70-200mm</td><td class="mono">C70200-001</td></tr>
+              <tr><td>T7i Battery</td><td class="mono">T7iBat-001</td></tr>
+              <tr><td>Sigma 18-35mm</td><td class="mono">S1835-002</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="side" style="border-right:0;border-left:1px solid var(--line)">
+          <div style="font-weight:650;padding:4px 6px 10px">Cart · 3</div>
+          <a class="nav on">Canon T7i <span class="ct">✕</span></a>
+          <a class="nav on">Canon 70-200mm <span class="ct">✕</span></a>
+          <a class="nav on">T7i Battery <span class="ct">✕</span></a>
+          <div class="navlabel">Due date</div>
+          <div class="search" style="max-width:none;margin:0 0 10px">Sep 16, 2026</div>
+          <button class="btn pri" style="width:100%">Check out</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">Room to show each item, remove individually, pick the custodian for the admin flow, and set the
+    date. <b>Eats horizontal width</b>, which hurts in the Wails window at 1024px unless it collapses.</p>
+  </div>
+</div>
+
+<!-- ============================== F: TYPE ============================== -->
+<h2><span class="n">F</span>Typography</h2>
+<p class="q">Serials, student numbers and dates are all scanned by eye and compared character by character.</p>
+<div class="grid g2">
+  <div class="opt">
+    <div class="tag"><span class="code">F1</span><span class="name">Inter everywhere</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <div style="font-size:22px;font-weight:700;letter-spacing:-.02em">Canon 70-200mm f/2.8</div>
+      <div style="color:var(--muted);margin:3px 0 14px">Lenses › Zooms › Canon 70-200mm f/2.8</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 18px;font-size:13px">
+        <span style="color:var(--muted)">Serial</span><span style="font-variant-numeric:tabular-nums">C70200-001</span>
+        <span style="color:var(--muted)">Custodian</span><span>Alex Rivera · 200481</span>
+        <span style="color:var(--muted)">Checked out</span><span>Sep 05, 2026 14:32</span>
+        <span style="color:var(--muted)">Due</span><span>Sep 12, 2026</span>
+      </div>
+    </div></div>
+    <p class="note">One family, already bundled offline in the desktop app. Tabular figures keep numbers
+    aligned. <b>Simplest, one font file.</b></p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">F2</span><span class="name">Inter + mono for identifiers</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <div style="font-size:22px;font-weight:700;letter-spacing:-.02em">Canon 70-200mm f/2.8</div>
+      <div style="color:var(--muted);margin:3px 0 14px">Lenses › Zooms › Canon 70-200mm f/2.8</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:5px 18px;font-size:13px">
+        <span style="color:var(--muted)">Serial</span><span class="mono" style="color:var(--fg);font-size:13px">C70200-001</span>
+        <span style="color:var(--muted)">Custodian</span><span>Alex Rivera · <span class="mono" style="color:var(--fg)">200481</span></span>
+        <span style="color:var(--muted)">Checked out</span><span class="mono" style="color:var(--fg)">2026-09-05 14:32</span>
+        <span style="color:var(--muted)">Due</span><span class="mono" style="color:var(--fg)">2026-09-12</span>
+      </div>
+    </div></div>
+    <p class="note"><b>Anything printed on a barcode sticker renders in mono.</b> Makes serials and student
+    numbers unmistakably machine data, and 0/O and 1/l stop being ambiguous when someone reads one aloud.
+    Costs a second font file.</p>
+  </div>
+</div>
+
+<div class="warn" style="margin-top:40px;border-left-color:#111">
+<b>Deliberately absent from every option:</b> purple/indigo gradients, glassmorphism, glow effects, neon
+accents on dark, oversized border-radius, animated blobs, and colour used decoratively. Hue in this app
+means <i>state</i> and nothing else. That constraint is what makes it read as a tool rather than a template.
+</div>
+
+</div>
+</body>
+</html>
