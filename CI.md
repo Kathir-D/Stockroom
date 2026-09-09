@@ -7,10 +7,10 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
 | Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 297 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
-| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 139 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, sessions and idle expiry, scan/typed login, the limited-session flow, user CRUD and the delete rules, roster CSV import, error→HTTP mapping, JSON decoding, the auth/users routes |
+| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 156 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, sessions and idle expiry, scan/typed login, the limited-session flow, user CRUD and the delete rules, roster CSV import, error→HTTP mapping, JSON decoding, the auth/users routes |
 | Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
 
-527 cases total. Run everything locally:
+545 cases total. Run everything locally:
 
 ```bash
 ./scripts/test-all.sh

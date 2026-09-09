@@ -9,7 +9,7 @@ Three suites, one per layer. Run them all with:
 | Layer | Tool | Location | Count |
 |---|---|---|---|
 | Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 297 assertions |
-| Go (config, pool, auth, sessions, users, roster, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 139 cases |
+| Go (config, pool, auth, sessions, users, roster, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 156 cases |
 | Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 92 cases |
 
 Everything here tests code that exists today. Nothing in `TODO.md` Phases 3 to 8 is tested ahead of being written.
