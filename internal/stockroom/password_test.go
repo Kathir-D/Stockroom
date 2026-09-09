@@ -40,7 +40,7 @@ func TestHashPasswordRejectsBadInput(t *testing.T) {
 	for name, pw := range map[string]string{
 		"empty":     "",
 		"too short": strings.Repeat("x", MinPasswordLength-1),
-		"too long":  strings.Repeat("x", 73),
+		"too long":  strings.Repeat("x", MaxPasswordLength+1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := HashPassword(pw); !errors.Is(err, ErrInvalid) {
@@ -50,6 +50,9 @@ func TestHashPasswordRejectsBadInput(t *testing.T) {
 	}
 	if _, err := HashPassword(strings.Repeat("x", MinPasswordLength)); err != nil {
 		t.Errorf("a password of exactly the minimum length is rejected: %v", err)
+	}
+	if _, err := HashPassword(strings.Repeat("x", MaxPasswordLength)); err != nil {
+		t.Errorf("a password of exactly the maximum length is rejected: %v", err)
 	}
 }
 
@@ -77,26 +80,33 @@ func TestCheckPasswordMalformedHash(t *testing.T) {
 
 func TestNormalizeStudentNumber(t *testing.T) {
 	cases := []struct {
+		name string
 		in   string
 		want string
 		ok   bool
 	}{
-		{"123456", "123456", true},
-		{"  123456\n", "123456", true},
-		{"000123", "000123", true}, // leading zeros survive
-		{"", "", false},
-		{"   ", "", false},
-		{"12a456", "", false},
-		{"123-456", "", false},
-		{strings.Repeat("1", 33), "", false},
+		{"six digits, the card format", "123456", "123456", true},
+		{"surrounding whitespace is trimmed", "  123456\n", "123456", true},
+		{"leading zeros survive", "000123", "000123", true},
+		{"exactly the maximum length", strings.Repeat("1", MaxStudentNumberLength), strings.Repeat("1", MaxStudentNumberLength), true},
+		{"empty", "", "", false},
+		{"whitespace only", "   ", "", false},
+		{"a letter in the middle", "12a456", "", false},
+		{"a separator", "123-456", "", false},
+		{"past the maximum length", strings.Repeat("1", MaxStudentNumberLength+1), "", false},
 	}
 	for _, c := range cases {
-		got, err := NormalizeStudentNumber(c.in)
-		if c.ok && (err != nil || got != c.want) {
-			t.Errorf("NormalizeStudentNumber(%q) = %q, %v; want %q", c.in, got, err, c.want)
-		}
-		if !c.ok && !errors.Is(err, ErrInvalid) {
-			t.Errorf("NormalizeStudentNumber(%q) = %q, %v; want ErrInvalid", c.in, got, err)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			got, err := NormalizeStudentNumber(c.in)
+			if c.ok {
+				if err != nil || got != c.want {
+					t.Errorf("NormalizeStudentNumber(%q) = %q, %v; want %q, nil", c.in, got, err, c.want)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Errorf("NormalizeStudentNumber(%q) = %q, %v; want ErrInvalid", c.in, got, err)
+			}
+		})
 	}
 }

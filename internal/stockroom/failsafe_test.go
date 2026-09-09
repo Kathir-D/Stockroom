@@ -5,14 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"testing"
 )
 
-// testStudentNumber returns a fresh 9-digit number in a range the seed never
-// uses, and deletes the profile that ends up holding it when the test is done.
+// testStudentNumber returns a fresh six-digit number -- the real card format
+// (CLAUDE.md §1) -- in the 9xxxxx range, which the seed (1xxxxx, 2xxxxx) never
+// uses. The profile that ends up holding it is deleted when the test is done.
 func testStudentNumber(t *testing.T, db *DB) string {
 	t.Helper()
-	sn := fmt.Sprintf("9%08d", rand.IntN(100_000_000))
+	sn := fmt.Sprintf("9%05d", rand.IntN(100_000))
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(context.Background(), `delete from profiles where student_number = $1`, sn)
 	})
@@ -81,14 +83,45 @@ func TestEnsureFailsafeAdminRejectsBadConfig(t *testing.T) {
 	ctx := context.Background()
 
 	for name, c := range map[string]struct{ sn, pw string }{
-		"blank number":   {"", "a fine password"},
 		"letters":        {"admin", "a fine password"},
-		"short password": {"912345678", "short"},
+		"separator":      {"912-345", "a fine password"},
+		"short password": {"912345", "short"},
+		"long password":  {"912345", strings.Repeat("x", MaxPasswordLength+1)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := db.EnsureFailsafeAdmin(ctx, c.sn, c.pw); !errors.Is(err, ErrInvalid) {
 				t.Errorf("EnsureFailsafeAdmin(%q, %q) = %v, want ErrInvalid", c.sn, c.pw, err)
 			}
 		})
+	}
+}
+
+// A blank number or password is not a bad config, it is no config: the
+// operator has not set up a failsafe admin. The server logs that and starts
+// anyway, so the distinction has to come back as its own error.
+func TestEnsureFailsafeAdminWithoutConfig(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+
+	for name, c := range map[string]struct{ sn, pw string }{
+		"no number":    {"", "a fine password"},
+		"blank number": {"   ", "a fine password"},
+		"no password":  {"912345", ""},
+		"neither":      {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := db.EnsureFailsafeAdmin(ctx, c.sn, c.pw); !errors.Is(err, ErrFailsafeNotConfigured) {
+				t.Errorf("EnsureFailsafeAdmin(%q, %q) = %v, want ErrFailsafeNotConfigured", c.sn, c.pw, err)
+			}
+		})
+	}
+
+	// Nothing was written on the way to that answer.
+	var n int
+	if err := db.Pool.QueryRow(ctx, `select count(*) from profiles where student_number = '912345'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("an unconfigured failsafe created %d profile(s), want 0", n)
 	}
 }

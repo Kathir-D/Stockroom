@@ -6,11 +6,11 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
-| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 296 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
-| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 90 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, error→HTTP mapping, JSON decoding, `/health` |
+| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 297 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
+| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 105 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, error→HTTP mapping, JSON decoding, `/health` |
 | Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
 
-478 cases total. Run everything locally:
+494 cases total. Run everything locally:
 
 ```bash
 ./scripts/test-all.sh
@@ -128,6 +128,7 @@ Rules of the road:
 - Always wrap in `begin; … rollback;` so the suite leaves the local database untouched.
 - Use `no_plan()` rather than `plan(N)` so the count stays out of your way.
 - Use fixed UUID prefixes per file (`11111111-...` in `020`, `22222222-...` in `030`, and so on) so fixtures can't collide.
+- Give fixture `serial_number`s a per-file prefix too (`SR060...` in `060`). `idx_assets_serial` is unique, so a fixture that borrows a serial from `seed.sql` or another file breaks the moment that serial is used for real.
 - Assert behaviour (insert and check what happens) over DDL text wherever you can.
 - Common SQLSTATEs are `23505` unique, `23503` foreign key, `23502` not null, `23514` check, `23P01` exclusion, and `22P02` bad enum value.
 

@@ -39,12 +39,14 @@ func main() {
 
 	// The failsafe admin (CLAUDE.md §7) is re-applied on every start so a
 	// forgotten password or a bad roster import can never lock out the admin
-	// panel. Unset values mean the operator has not configured one yet; that
-	// is allowed but worth a loud log line.
-	if cfg.AdminStudentNumber == "" || cfg.AdminPassword == "" {
+	// panel. Nothing here is fatal. The failsafe exists to prevent a lockout,
+	// so a missing or malformed .env value must not take the whole API down
+	// with it -- log it and serve without one.
+	switch err := db.EnsureFailsafeAdmin(ctx, cfg.AdminStudentNumber, cfg.AdminPassword); {
+	case errors.Is(err, stockroom.ErrFailsafeNotConfigured):
 		log.Println("warning: ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD not set; no failsafe admin")
-	} else if err := db.EnsureFailsafeAdmin(ctx, cfg.AdminStudentNumber, cfg.AdminPassword); err != nil {
-		log.Fatalf("failsafe admin: %v", err)
+	case err != nil:
+		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
 	}
 
 	srv := &http.Server{

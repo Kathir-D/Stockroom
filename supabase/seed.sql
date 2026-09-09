@@ -4,9 +4,26 @@
 --
 -- Category tree: Type -> Category -> Model, from Catagories.md. Every physical
 -- unit is an asset whose category_id points at a Model node. Names are unique
--- across the whole table, so parents are looked up by name below. Where
--- Catagories.md lists models directly under a type, a middle level is added
--- here so every branch is the same depth.
+-- across the whole table, so parents are looked up by name below.
+--
+-- Every Type and Model name here is Catagories.md's, unchanged. The Category
+-- level is only partly its: Catagories.md names the three under Lenses (Zooms,
+-- Primes, Accessories) and the one under Cameras/Bodies (Camera Model), but
+-- lists models straight under the other six types. Those Categories are
+-- invented here so every branch is the same depth and the browse filter has a
+-- middle level to show:
+--
+--   Lights              -> Studio Lights, Light Modifiers
+--   Audio Stuff         -> Wireless Mics, Wired Mics
+--   Physical Bags, etc. -> Bags
+--   Tripods/Monopods    -> Tripods, Gimbals
+--   Batteries           -> Camera Batteries
+--   Misc                -> Other
+--
+-- Splitting a type in two (Lights, Audio Stuff, Tripods/Monopods) is a reading
+-- of the inventory, not a rule; rename or merge them freely, they hold no data
+-- of their own. Primes is seeded with no Models under it because Catagories.md
+-- says there are none in inventory yet, so not every branch reaches depth 3.
 --
 -- Accounts: one admin and one student. Both sign in by scanning their student
 -- number. The admin also has the typed-login password "stockroom"; the
@@ -29,7 +46,7 @@ insert into categories (name, parent_id) values
   ('Camera Model',      (select id from categories where name = 'Cameras/Bodies')),
   ('Zooms',             (select id from categories where name = 'Lenses')),
   ('Primes',            (select id from categories where name = 'Lenses')),
-  ('Lens Accessories',  (select id from categories where name = 'Lenses')),
+  ('Accessories',       (select id from categories where name = 'Lenses')),
   ('Studio Lights',     (select id from categories where name = 'Lights')),
   ('Light Modifiers',   (select id from categories where name = 'Lights')),
   ('Wireless Mics',     (select id from categories where name = 'Audio Stuff')),
@@ -69,8 +86,8 @@ insert into categories (name, parent_id) values
   ('Canon 18-55mm',                           (select id from categories where name = 'Zooms')),
   -- Lenses > Primes: none in inventory yet; the Category node stays so the
   -- filter shows it
-  -- Lenses > Lens Accessories
-  ('Sigma Teleconverter',                     (select id from categories where name = 'Lens Accessories')),
+  -- Lenses > Accessories
+  ('Sigma Teleconverter',                     (select id from categories where name = 'Accessories')),
   -- Lights > Studio Lights
   ('Softbox Lights w/stand - Interfit',       (select id from categories where name = 'Studio Lights')),
   ('LED light box w/stand - Neewer',          (select id from categories where name = 'Studio Lights')),

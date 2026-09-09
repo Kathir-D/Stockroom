@@ -296,7 +296,7 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 - `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
 **`categories`.** No change. Used as a strict 3-level tree via `parent_id`:
-`Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`; where that file lists models straight under a type, the seed inserts a middle Category (Lights → Studio Lights, Audio Stuff → Wired Mics, and so on) so every branch is three deep. `categories.name` is unique across the whole table, not per parent.
+`Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`, whose Type and Model names are used verbatim. That file names the Categories under `Lenses` (Zooms, Primes, Accessories) and `Cameras/Bodies` (Camera Model) but lists models straight under the other six types, so the seed invents a middle Category there (Lights → Studio Lights + Light Modifiers, Audio Stuff → Wireless Mics + Wired Mics, and so on); those six are the seed's own naming and are safe to rename. Branches may stop short of depth 3 when a Category has no models yet: `Primes` is seeded empty because `Catagories.md` records none in inventory. `categories.name` is unique across the whole table, not per parent, so generic names are worth avoiding.
 
 **Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
 
@@ -323,7 +323,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 - **Typed** (same number entered by hand): password required, checked against `password_hash` with bcrypt.
 - Roster-imported users have `password_hash = null`. Their first **scan** login prompts them to set a password before continuing; typed login is impossible until then.
 - Admins can set or reset any user's password from the admin panel.
-- **Failsafe admin.** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password. A way back into the admin panel that doesn't depend on any UI.
+- **Failsafe admin.** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password. A way back into the admin panel that doesn't depend on any UI. It is never a startup requirement: unset, malformed, or rejected values are logged as warnings and the server starts without a failsafe admin, because a typo in `.env` must not take the whole API down.
 
 **Sessions**
 - In-memory session map in the Go server (token in a cookie or `Authorization` header). Restarting the server signs everyone out; acceptable.
@@ -367,7 +367,7 @@ stockroom/
 │   │   ├── 20260826173006_init_schema.sql
 │   │   ├── 20260826180000_grant_service_role.sql   # historical, harmless
 │   │   └── 20260908100000_v1_flow.sql              # Section 6.2
-│   └── seed.sql               # category tree from Catagories.md + sample assets + failsafe admin
+│   └── seed.sql               # category tree from Catagories.md + sample assets + two sample accounts
 ├── scripts/
 │   ├── start-mac.sh           # start/stop everything on macOS (needs: also launch server/)
 │   └── start-windows.ps1      # Windows equivalent, untested on real Windows
@@ -490,6 +490,9 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Out of scope: bookings, locations, tags, saved filters, custom fields, LAN access, email. Kits = lowest priority.
 - [x] Backup: nightly CSV via Go CLI into a **Google Drive** folder.
 - [x] Styling (2026-09-05): **Tailwind CSS v4** in both frontends via `@tailwindcss/vite`; design tokens live in each app's `src/app.css` `@theme` block (desktop: the dark "Nocturne" system from the UI import). No component CSS files, no `tailwind.config.js`.
+
+- [x] Failsafe admin is best-effort (2026-09-08): `EnsureFailsafeAdmin` returns `ErrFailsafeNotConfigured` when the `.env` values are blank, and the server only ever logs a warning. Nothing about the failsafe can stop the API from starting.
+- [x] Student numbers (2026-09-08): stored as digits-only text, no fixed length. Cards encode six digits, but `NormalizeStudentNumber` accepts 1 to 32 so a reissued or imported number still works; the bound is a mis-scan guard, not a format.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

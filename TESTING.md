@@ -8,8 +8,8 @@ Three suites, one per layer. Run them all with:
 
 | Layer | Tool | Location | Count |
 |---|---|---|---|
-| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 296 assertions |
-| Go (config, pool, passwords, failsafe admin, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 90 cases |
+| Database schema | pgTAP via `supabase test db` | `supabase/tests/*.test.sql` | 297 assertions |
+| Go (config, pool, passwords, failsafe admin, HTTP) | `go test` | `internal/stockroom/*_test.go`, `server/*_test.go` | 105 cases |
 | Desktop frontend | Vitest + Testing Library | `desktop-app/frontend/src/**/*.test.ts` | 92 cases |
 
 Everything here tests code that exists today. Nothing in `TODO.md` Phases 2 to 8 is tested ahead of being written.
@@ -47,7 +47,7 @@ The schema is the largest piece of real logic in the repo. Constraints, triggers
 
 **`070_privileges`.** `service_role` keeps full access. `anon` and `authenticated` have none, which matters because the Supabase REST API is still listening on 54321. Default privileges cover future tables for `service_role`. RLS is off by design.
 
-**`080_seed`.** `supabase/seed.sql` loads coherently. The eight types from `Catagories.md`, a tree exactly three levels deep, every seeded asset attached to a Model node, the three v1 statuses, the admin (bcrypt hash, `is_admin`) and student (no password, no email) accounts, and an open custody row behind every `checked_out` asset with nothing overdue.
+**`080_seed`.** `supabase/seed.sql` loads coherently. The eight types from `Catagories.md`, a tree exactly three levels deep with `Primes` pinned as the only branch that stops short of the Model level, the Lenses categories keeping the names `Catagories.md` gives them, every seeded asset attached to a Model node, the three v1 statuses, the admin (bcrypt hash, `is_admin`) and student (no password, no email) accounts, and an open custody row behind every `checked_out` asset with nothing overdue.
 
 Each file runs inside a transaction that is rolled back, so the suite leaves no trace in the local database.
 
@@ -61,9 +61,9 @@ Each file runs inside a transaction that is rolled back, so the suite leaves no 
 
 **`types_test.go`.** `Profile` JSON never contains the password hash. Nullable columns marshal as `null`. `ActiveCustody` flattens its embedded event. An integration test compares the Go enum constants against `pg_enum` so the two cannot drift.
 
-**`password_test.go`.** `HashPassword` produces a salted bcrypt hash and enforces the length limits (8 to 72). `CheckPassword` distinguishes a wrong password (`ErrBadCredentials`) from an account that has never set one (`ErrPasswordNotSet`) and from a corrupt hash. `NormalizeStudentNumber` trims, keeps leading zeros, and rejects anything that is not digits.
+**`password_test.go`.** `HashPassword` produces a salted bcrypt hash and enforces the length limits (8 to 72). `CheckPassword` distinguishes a wrong password (`ErrBadCredentials`) from an account that has never set one (`ErrPasswordNotSet`) and from a corrupt hash. `NormalizeStudentNumber` trims, keeps leading zeros, rejects anything that is not digits, and bounds the length at `MaxStudentNumberLength`.
 
-**`failsafe_test.go`.** `EnsureFailsafeAdmin` creates the account on first run, and on later runs rotates the password, forces `is_admin` back on, and leaves the operator's name edits alone without duplicating the row. Bad config (`ErrInvalid`) is refused before touching the database.
+**`failsafe_test.go`.** `EnsureFailsafeAdmin` creates the account on first run, and on later runs rotates the password, forces `is_admin` back on, and leaves the operator's name edits alone without duplicating the row. Bad config (`ErrInvalid`) is refused before touching the database, and blank config is reported separately as `ErrFailsafeNotConfigured` — the case the server logs and starts through, rather than a failure.
 
 **`server/json_test.go`.** The sentinel to status mapping for all eight errors, wrapped and joined errors, an unknown error becoming a 500 whose body leaks nothing, request decoding (unknown fields, malformed JSON, wrong types, empty body) and the 1 MB size cap.
 

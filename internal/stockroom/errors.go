@@ -14,3 +14,9 @@ var (
 	ErrPasswordNotSet = errors.New("password not set")
 	ErrBadCredentials = errors.New("bad credentials")
 )
+
+// ErrFailsafeNotConfigured is returned by EnsureFailsafeAdmin when
+// ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD are unset. It reports a choice the
+// operator made, not a failure, so the server logs it and starts anyway. It
+// never reaches HTTP, which is why it sits outside the block above.
+var ErrFailsafeNotConfigured = errors.New("failsafe admin not configured")

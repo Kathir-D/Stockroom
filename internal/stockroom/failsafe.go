@@ -3,6 +3,7 @@ package stockroom
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // EnsureFailsafeAdmin upserts the account named by ADMIN_STUDENT_NUMBER with
@@ -12,9 +13,16 @@ import (
 // exists, its name and photo are left alone; only the admin flag and the
 // password are forced.
 //
-// Both values must be set. The server treats blank values as "not
-// configured" and skips the call, so a blank here is a caller bug.
+// Either value being blank means the operator has not configured a failsafe
+// admin. That is allowed: the call writes nothing and returns
+// ErrFailsafeNotConfigured. Deciding what "not configured" means belongs here
+// rather than in the caller, so the rule lives in one place and is covered by
+// failsafe_test.go.
 func (db *DB) EnsureFailsafeAdmin(ctx context.Context, studentNumber, password string) error {
+	if strings.TrimSpace(studentNumber) == "" || password == "" {
+		return ErrFailsafeNotConfigured
+	}
+
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
 		return fmt.Errorf("ADMIN_STUDENT_NUMBER: %w", err)
