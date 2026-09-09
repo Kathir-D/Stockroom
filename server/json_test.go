@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,12 +11,6 @@ import (
 
 	"stockroom/internal/stockroom"
 )
-
-// Handler errors are logged; keep the test output clean.
-func TestMain(m *testing.M) {
-	log.SetOutput(io.Discard)
-	m.Run()
-}
 
 func TestWriteJSON(t *testing.T) {
 	rec := httptest.NewRecorder()

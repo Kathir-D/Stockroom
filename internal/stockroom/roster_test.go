@@ -205,3 +205,119 @@ func TestImportRosterAbsolutePhotoPath(t *testing.T) {
 		t.Errorf("absolute photo path was not copied: %v", err)
 	}
 }
+
+// One malformed line is reported against its line number and the rest of the
+// file still lands. An admin importing a 400-line roster exported from a
+// spreadsheet should not lose 399 good rows to one stray quote.
+func TestImportRosterReportsPerLineParseErrors(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	before := testStudentNumber(t, db)
+	after := testStudentNumber(t, db)
+
+	// The middle line has a bare quote inside an unquoted field, which
+	// encoding/csv rejects for that record only.
+	csv := "first_name,last_name,student_number\n" +
+		"Before,Row," + before + "\n" +
+		`Bad,Ro"w,912345678` + "\n" +
+		"After,Row," + after + "\n"
+
+	res, err := db.ImportRoster(ctx, admin, strings.NewReader(csv), "", t.TempDir())
+	if err != nil {
+		t.Fatalf("ImportRoster: %v", err)
+	}
+	if res.Created != 2 || res.Failed != 1 {
+		t.Errorf("result = %+v; want 2 created and 1 failed", res)
+	}
+
+	var bad *RosterRow
+	for i := range res.Rows {
+		if res.Rows[i].Action == RosterError {
+			bad = &res.Rows[i]
+		}
+	}
+	if bad == nil {
+		t.Fatalf("no error row reported: %+v", res.Rows)
+	}
+	// Line 3 of the file, counting the header, is what the admin sees in a
+	// spreadsheet.
+	if bad.Row != 3 {
+		t.Errorf("error reported on line %d, want 3", bad.Row)
+	}
+
+	// Both good rows really landed.
+	for _, sn := range []string{before, after} {
+		if _, err := db.profileByStudentNumber(ctx, sn); err != nil {
+			t.Errorf("row %s did not import: %v", sn, err)
+		}
+	}
+}
+
+// An unset UPLOADS_DIR is a server misconfiguration, not bad input from the
+// admin. It must not come back as ErrInvalid, or the UI would blame the file
+// the user just picked for a problem in .env.
+func TestImportRosterWithoutUploadsDirIsNotAClientError(t *testing.T) {
+	db := requireTestDB(t)
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+
+	_, err := db.ImportRoster(context.Background(), admin,
+		strings.NewReader("first_name,last_name,student_number\n"), "", "")
+	if err == nil {
+		t.Fatal("ImportRoster with no uploads dir: want an error, got nil")
+	}
+	if errors.Is(err, ErrInvalid) {
+		t.Errorf("error = %v, want it not to wrap ErrInvalid (that would answer 400)", err)
+	}
+}
+
+// The destination filename is built from the student number, which
+// NormalizeStudentNumber has already restricted to digits. A photo_path that
+// climbs out of the photo directory can therefore only ever read a file the
+// server user could already read; it can never write outside
+// uploads/profiles. Pin that, because the roster is the one admin input that
+// touches the filesystem.
+func TestImportRosterPhotoCannotEscapeUploadsDir(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	sn := testStudentNumber(t, db)
+
+	root := t.TempDir()
+	photoDir := filepath.Join(root, "photos")
+	if err := os.MkdirAll(photoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real file one level above the photo directory.
+	outside := filepath.Join(root, "outside.png")
+	if err := os.WriteFile(outside, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uploads := t.TempDir()
+
+	res, err := db.ImportRoster(ctx, admin,
+		strings.NewReader("first_name,last_name,student_number,photo_path\nA,B,"+sn+",../outside.png\n"),
+		photoDir, uploads)
+	if err != nil {
+		t.Fatalf("ImportRoster: %v", err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("result = %+v, want the row to import", res)
+	}
+
+	// The copy landed under uploads/profiles named for the student number,
+	// not anywhere the CSV asked for.
+	p, err := db.profileByStudentNumber(ctx, sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+sn+".png" {
+		t.Errorf("photo_path = %v, want profiles/%s.png", p.PhotoPath, sn)
+	}
+	if strings.Contains(*p.PhotoPath, "..") {
+		t.Errorf("stored photo_path %q contains a traversal segment", *p.PhotoPath)
+	}
+	if _, err := os.Stat(filepath.Join(uploads, "profiles", sn+".png")); err != nil {
+		t.Errorf("the copy is not inside uploads/profiles: %v", err)
+	}
+}
