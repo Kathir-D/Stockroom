@@ -46,7 +46,7 @@ func TestHealthOK(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	rec := do(newRouter(db), http.MethodGet, "/health")
+	rec := do(newRouter(deps{db: db}), http.MethodGet, "/health")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %q)", rec.Code, rec.Body.String())
 	}
@@ -76,7 +76,7 @@ func TestHealthFailsWhenDatabaseIsDown(t *testing.T) {
 	db := openTestDB(t)
 	db.Close()
 
-	rec := do(newRouter(db), http.MethodGet, "/health")
+	rec := do(newRouter(deps{db: db}), http.MethodGet, "/health")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 when the database is unreachable", rec.Code)
 	}
@@ -92,7 +92,7 @@ func TestHealthFailsWhenDatabaseIsDown(t *testing.T) {
 // Routing is asserted without a database: neither case reaches the handler, so
 // a nil pool is safe here and keeps the test hermetic.
 func TestRouterRejectsWrongMethod(t *testing.T) {
-	h := newRouter(nil)
+	h := newRouter(deps{})
 	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		if rec := do(h, m, "/health"); rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("%s /health: status = %d, want 405", m, rec.Code)
@@ -101,7 +101,7 @@ func TestRouterRejectsWrongMethod(t *testing.T) {
 }
 
 func TestRouterUnknownPath(t *testing.T) {
-	h := newRouter(nil)
+	h := newRouter(deps{})
 	for _, p := range []string{"/", "/nope", "/health/extra", "/HEALTH"} {
 		if rec := do(h, http.MethodGet, p); rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s: status = %d, want 404", p, rec.Code)
@@ -115,7 +115,7 @@ func TestHealthAnswersHEAD(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 
-	if rec := do(newRouter(db), http.MethodHead, "/health"); rec.Code != http.StatusOK {
+	if rec := do(newRouter(deps{db: db}), http.MethodHead, "/health"); rec.Code != http.StatusOK {
 		t.Errorf("HEAD /health: status = %d, want 200", rec.Code)
 	}
 }

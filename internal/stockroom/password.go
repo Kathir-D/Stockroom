@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -14,8 +15,10 @@ import (
 const (
 	// MinPasswordLength and MaxPasswordLength are the 8-to-72 range CLAUDE.md
 	// §7 sets for every place a password is chosen: first-login setup, admin
-	// resets, and the failsafe admin. The upper bound is bcrypt's, not a
-	// policy: it only reads the first 72 bytes.
+	// resets, and the failsafe admin. The minimum counts characters, so an
+	// accented or non-Latin password is measured the way the person typing it
+	// would count it. The upper bound is bcrypt's, not a policy: it only reads
+	// the first 72 bytes.
 	MinPasswordLength = 8
 	MaxPasswordLength = 72
 
@@ -24,19 +27,45 @@ const (
 	// leading zeros survive and a reissued longer number would still import.
 	// Anything past this length is a mis-scan or a pasted line of junk.
 	MaxStudentNumberLength = 32
+
+	// DefaultPasswordHashCost is the bcrypt work factor every released binary
+	// hashes at. It is pinned by hashcost_test.go so it cannot be weakened by
+	// accident.
+	DefaultPasswordHashCost = bcrypt.DefaultCost
 )
+
+// hashCost is the work factor HashPassword applies. Verification never reads
+// it: bcrypt stores the cost inside the hash, so rows written at any cost keep
+// working.
+var hashCost = DefaultPasswordHashCost
+
+// SetPasswordHashCost sets the bcrypt work factor and returns the previous
+// value. It exists for the test suites, which lower it to bcrypt.MinCost from
+// TestMain: at the production cost a single hash takes tens of milliseconds,
+// which is the right price for a login and the wrong one for the several
+// hundred fixtures the suites create, especially under -race.
+//
+// Production never calls this. A cost outside bcrypt's supported range is
+// ignored, so a bad value cannot silently produce a weak hash.
+func SetPasswordHashCost(cost int) int {
+	prev := hashCost
+	if cost >= bcrypt.MinCost && cost <= bcrypt.MaxCost {
+		hashCost = cost
+	}
+	return prev
+}
 
 // HashPassword returns a bcrypt hash for storing in profiles.password_hash.
 // It enforces MinPasswordLength so every caller gets the same rule.
 func HashPassword(password string) (string, error) {
-	if len(password) < MinPasswordLength {
+	if utf8.RuneCountInString(password) < MinPasswordLength {
 		return "", fmt.Errorf("%w: password must be at least %d characters", ErrInvalid, MinPasswordLength)
 	}
 	// Refuse anything past bcrypt's limit rather than silently truncating it.
 	if len(password) > MaxPasswordLength {
 		return "", fmt.Errorf("%w: password must be at most %d bytes", ErrInvalid, MaxPasswordLength)
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
 	}
@@ -45,9 +74,7 @@ func HashPassword(password string) (string, error) {
 
 // CheckPassword compares a candidate against a stored hash. A nil hash means
 // the account has never set a password (ErrPasswordNotSet); a mismatch is
-// ErrBadCredentials. Until LoginByPassword lands in Phase 2 its only caller is
-// failsafe_test.go, which needs it to prove EnsureFailsafeAdmin stored and
-// rotated the right hash.
+// ErrBadCredentials.
 func CheckPassword(hash *string, password string) error {
 	if hash == nil || *hash == "" {
 		return ErrPasswordNotSet

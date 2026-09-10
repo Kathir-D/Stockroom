@@ -29,3 +29,6 @@ supabase/.DS_Store
 # uploaded photos (served by the Go server)
 uploads/
 .claude/launch.json
+
+# Vitest coverage output
+coverage/

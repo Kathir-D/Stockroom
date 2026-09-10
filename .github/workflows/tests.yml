@@ -56,8 +56,11 @@ jobs:
 
       # STOCKROOM_REQUIRE_DB=1 turns "skip because Postgres is down" into a
       # failure, so a broken database can never look like a green run.
+      # -race matters because SessionStore is mutable state shared by every
+      # request; a bcrypt work-factor knob (see TESTING.md's speed budget)
+      # keeps this affordable.
       - name: Go tests
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -race
         env:
           STOCKROOM_REQUIRE_DB: "1"
 
@@ -73,13 +76,16 @@ jobs:
       - name: Frontend tests (Vitest)
         run: npm --prefix desktop-app/frontend test
 
-      # web-app has no tests yet (it is still a shell), but it must at least
-      # type-check and build so a broken PR can't merge.
+      # web-app is still a placeholder shell, so its suite is a smoke test for
+      # now, but it must also type-check and build so a broken PR can't merge.
       - name: Install web-app dependencies
         run: npm --prefix web-app ci
 
       - name: web-app type check
         run: npm --prefix web-app run check
+
+      - name: web-app tests (Vitest)
+        run: npm --prefix web-app test
 
       - name: web-app build
         run: npm --prefix web-app run build

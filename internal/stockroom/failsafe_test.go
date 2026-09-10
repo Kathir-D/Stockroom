@@ -3,23 +3,9 @@ package stockroom
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/rand/v2"
 	"strings"
 	"testing"
 )
-
-// testStudentNumber returns a fresh six-digit number -- the real card format
-// (CLAUDE.md §1) -- in the 9xxxxx range, which the seed (1xxxxx, 2xxxxx) never
-// uses. The profile that ends up holding it is deleted when the test is done.
-func testStudentNumber(t *testing.T, db *DB) string {
-	t.Helper()
-	sn := fmt.Sprintf("9%05d", rand.IntN(100_000))
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `delete from profiles where student_number = $1`, sn)
-	})
-	return sn
-}
 
 func TestEnsureFailsafeAdminCreatesAndUpdates(t *testing.T) {
 	db := requireTestDB(t)
