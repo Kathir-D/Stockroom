@@ -177,6 +177,68 @@ h2 .n{font-family:var(--mono);opacity:.45;margin-right:10px}
     margin-right:-6px;display:grid;place-items:center;font-size:10px;color:var(--faint)}
 .ground-press .av{border-radius:0}
 
+/* ---------- B settled: model rows with a unit accordion ---------- */
+.mlist{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
+.ground-press .mlist{border-radius:0}
+.mhead,.mrow,.unit{display:grid;
+  grid-template-columns:16px 26px minmax(0,1fr) 132px 96px 62px;align-items:center;gap:10px;padding:0 12px}
+.mhead{height:29px;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);
+       font-weight:650;border-bottom:1px solid var(--line)}
+.mgroup{border-bottom:1px solid var(--line)}
+.mgroup:last-child{border-bottom:0}
+.mrow{height:46px;cursor:pointer;list-style:none;user-select:none}
+.mrow::-webkit-details-marker{display:none}
+.mrow::marker{content:""}
+.mrow:hover{background:var(--raised)}
+.mgroup[open]>.mrow{background:var(--raised)}
+.caret{font-size:9px;color:var(--faint);transition:transform 120ms cubic-bezier(.2,0,0,1)}
+.mgroup[open]>.mrow .caret{transform:rotate(90deg)}
+.mname{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mname em{display:block;font-style:normal;font-weight:400;font-size:11px;color:var(--faint);margin-top:1px}
+.units{border-top:1px solid var(--line);background:var(--bg);padding:2px 0}
+.unit{height:33px;font-size:12.5px}
+.unit+.unit{border-top:1px solid var(--line)}
+.unit.dim{opacity:.55}
+.btn.sm{padding:2px 9px;font-size:11.5px}
+.rt{text-align:right}
+
+/* ---------- E settled: the cart page ---------- */
+.pagehead{display:flex;align-items:baseline;gap:12px;margin:0 0 13px}
+.pagehead h4{font-size:19px;font-weight:700;letter-spacing:-.02em;margin:0}
+.back{font-size:12.5px;color:var(--muted);text-decoration:none}
+.cartpage{display:grid;grid-template-columns:minmax(0,1fr) 244px;gap:15px;align-items:start}
+@media (max-width:820px){.cartpage{grid-template-columns:1fr}}
+.lines{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
+.ground-press .lines,.ground-press .sum{border-radius:0}
+.line{display:grid;grid-template-columns:34px minmax(0,1fr) 108px 18px;gap:12px;align-items:center;
+      padding:9px 12px}
+.line+.line{border-top:1px solid var(--line)}
+.big{width:34px;height:34px;border-radius:5px;background:var(--raised);border:1px solid var(--line);
+     display:grid;place-items:center;color:var(--faint);font-size:14px}
+.ground-press .big{border-radius:0}
+.x{color:var(--faint);cursor:pointer;font-size:13px;text-align:right}
+.sum{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:12px}
+.sumrow{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;
+        color:var(--muted);padding:4px 0}
+.sumrow b{color:var(--fg);font-weight:600}
+.field{border:1px solid var(--line-strong);border-radius:var(--radius);padding:6px 9px;font-size:12.5px;
+       display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--fg)}
+.ground-press .field{border-radius:0}
+.hint{font-size:11px;color:var(--faint);margin:5px 2px 0}
+.adminonly{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+           border:1px solid var(--line-strong);border-radius:3px;padding:0 4px;font-weight:650}
+
+/* ---------- front-page extras ---------- */
+.nav.sub{padding-left:22px;font-size:12.5px}
+.who{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.dock.blocked{background:var(--late-bg);border-top-color:var(--late)}
+
+/* ---------- mood-board chrome ---------- */
+.settled{display:flex;align-items:baseline;gap:10px;margin:0 0 16px;font-size:13px;max-width:100ch}
+.settled .code{background:#046A38;color:#fff}
+h3.considered{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--page-muted);
+   font-weight:650;margin:38px 0 13px;padding-bottom:7px;border-bottom:1px solid var(--page-line)}
+
 .legend{position:sticky;top:0;z-index:5;background:var(--page-bg);
         border-bottom:2px solid var(--page-fg);padding:14px 0 12px;margin-bottom:4px}
 .pill{display:inline-block;font-family:var(--mono);font-size:11.5px;border:1px solid var(--page-fg);
@@ -191,8 +253,182 @@ h2 .n{font-family:var(--mono);opacity:.45;margin-right:10px}
 <div class="legend">
   <h1>Stockroom design directions</h1>
   <p class="lede">Every panel below is a real Stockroom screen (real category tree, real serials, real
-  statuses) rendered in a different style. <b>Pick one code per section</b> and I'll write the full spec
-  against your combination. For example <span class="pill">A2 · B1 · C1 · D1 · E1 · F2</span></p>
+  statuses) rendered in a different style. Sections still open ask you to <b>pick one code</b>. Sections
+  already decided lead with the settled panel and keep the alternatives underneath, so the reasoning
+  survives.</p>
+  <p class="lede" style="margin-top:6px">Settled so far:
+  <span class="pill">A2 ground</span><span class="pill">B3+B1 accordion</span><span class="pill">C1 dot + label</span><span class="pill">D3 flash + log</span><span class="pill">E1 dock → cart page</span><span class="pill">F2 Inter + mono</span></p>
+</div>
+
+<!-- ============================== FRONT PAGE ============================== -->
+<h2><span class="n">0</span>The front page</h2>
+<p class="q">Every settled choice in one screen: the A2 ground, models grouped with a unit accordion, dot
+status, mono serials, and the cart sitting on the bottom edge. Click a model row. The accordion is real.</p>
+<div class="grid g1">
+  <div class="opt">
+    <div class="tag"><span class="code">A2 · B3+B1 · C1 · E1 · F2</span><span class="name">Browse, signed in as a student</span></div>
+    <div class="frame G ground-ops">
+      <div style="display:flex;flex-direction:column">
+        <div class="app" style="grid-template-columns:214px 1fr;min-height:440px">
+          <div class="side">
+            <div class="brand"><span class="mark">S</span>Stockroom</div>
+            <div class="navlabel">Browse</div>
+            <a class="nav on">Cameras/Bodies <span class="ct">13</span></a>
+            <a class="nav sub on">Camera Model <span class="ct">13</span></a>
+            <a class="nav">Lenses <span class="ct">11</span></a>
+            <a class="nav">Lights <span class="ct">8</span></a>
+            <a class="nav">Audio Stuff <span class="ct">6</span></a>
+            <a class="nav">Tripods/Support <span class="ct">5</span></a>
+            <a class="nav">Batteries/Power <span class="ct">24</span></a>
+          </div>
+          <div class="main">
+            <div class="topbar">
+              <div class="crumb">Cameras/Bodies › <b>Camera Model</b></div>
+              <div class="search">Search assets<span class="kbd">/</span></div>
+              <div class="who"><span class="thumb">▣</span>Alex Rivera · <span class="mono">200481</span></div>
+            </div>
+            <div class="body">
+              <div class="mlist">
+                <div class="mhead"><span></span><span></span><span>Model</span><span>Availability</span><span>Out</span><span></span></div>
+
+                <details class="mgroup" open>
+                  <summary class="mrow">
+                    <span class="caret">▶</span>
+                    <span class="thumb">▣</span>
+                    <span class="mname">Canon T7i<em>Cameras/Bodies › Camera Model</em></span>
+                    <span class="st s-ok"><span class="dot"></span>4 of 6 available</span>
+                    <span class="mono">2 out</span>
+                    <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+                  </summary>
+                  <div class="units">
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-001</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-002</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit dim"><span></span><span></span><span class="mono">T7i-003</span>
+                      <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">You · Sep 12</span>
+                      <span class="rt"></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-004</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit dim"><span></span><span></span><span class="mono">T7i-005</span>
+                      <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span>
+                      <span class="rt"></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-006</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                  </div>
+                </details>
+
+                <details class="mgroup">
+                  <summary class="mrow">
+                    <span class="caret">▶</span>
+                    <span class="thumb">▣</span>
+                    <span class="mname">Canon 5D Mark IV<em>Cameras/Bodies › Camera Model</em></span>
+                    <span class="st s-off"><span class="dot"></span>0 of 2 available</span>
+                    <span class="mono">2 out</span>
+                    <span class="rt"><button class="btn sm" disabled style="opacity:.4">Add</button></span>
+                  </summary>
+                  <div class="units">
+                    <div class="unit dim"><span></span><span></span><span class="mono">5D4-001</span>
+                      <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span>
+                      <span class="rt"></span></div>
+                    <div class="unit dim"><span></span><span></span><span class="mono">5D4-002</span>
+                      <span class="st s-off"><span class="dot"></span>Unavailable</span><span class="mono">Shutter fault</span>
+                      <span class="rt"></span></div>
+                  </div>
+                </details>
+
+                <details class="mgroup">
+                  <summary class="mrow">
+                    <span class="caret">▶</span>
+                    <span class="thumb">▣</span>
+                    <span class="mname">BMPCC 6K Pro<em>Cameras/Bodies › Camera Model</em></span>
+                    <span class="st s-ok"><span class="dot"></span>2 of 3 available</span>
+                    <span class="mono">1 out</span>
+                    <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+                  </summary>
+                  <div class="units">
+                    <div class="unit"><span></span><span></span><span class="mono">BM6K-001</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit dim"><span></span><span></span><span class="mono">BM6K-002</span>
+                      <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span>
+                      <span class="rt"></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">BM6K-003</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                  </div>
+                </details>
+
+                <details class="mgroup">
+                  <summary class="mrow">
+                    <span class="caret">▶</span>
+                    <span class="thumb">▣</span>
+                    <span class="mname">Canon T7i Battery<em>Batteries/Power › Camera Batteries</em></span>
+                    <span class="st s-ok"><span class="dot"></span>9 of 12 available</span>
+                    <span class="mono">3 out</span>
+                    <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+                  </summary>
+                  <div class="units">
+                    <div class="unit"><span></span><span></span><span class="mono">T7iBat-001</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">T7iBat-002</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit dim"><span></span><span></span><span class="mono">T7iBat-003</span>
+                      <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 13</span>
+                      <span class="rt"></span></div>
+                    <div class="unit" style="color:var(--faint)"><span></span><span></span>
+                      <span style="grid-column:3/7;font-size:11.5px">9 more units</span></div>
+                  </div>
+                </details>
+
+                <details class="mgroup">
+                  <summary class="mrow">
+                    <span class="caret">▶</span>
+                    <span class="thumb">▣</span>
+                    <span class="mname">SD Card 128GB<em>Media/Storage › Memory Cards</em></span>
+                    <span class="st s-ok"><span class="dot"></span>14 of 20 available</span>
+                    <span class="mono">6 out</span>
+                    <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+                  </summary>
+                  <div class="units">
+                    <div class="unit"><span></span><span></span><span class="mono">SD-014</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit"><span></span><span></span><span class="mono">SD-015</span>
+                      <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+                      <span class="rt"><button class="btn sm">Add</button></span></div>
+                    <div class="unit" style="color:var(--faint)"><span></span><span></span>
+                      <span style="grid-column:3/7;font-size:11.5px">18 more units</span></div>
+                  </div>
+                </details>
+
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dock">
+          <div class="avatars"><span class="av">▣</span><span class="av">▣</span><span class="av">▣</span></div>
+          <span class="n" style="margin-left:14px">3 items</span>
+          <span class="n">Due Sep 16</span>
+          <button class="btn pri" style="margin-left:auto">Review cart · 3</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">One row per model, so the closet's 200-odd units collapse to about thirty rows.
+    <b>Clicking the row opens the units</b>, each with its own serial and status, which is how you answer
+    "is <span class="mono">T7i-004</span> the one with the broken flash shoe" without leaving the list.
+    <b>Add</b> on the model row takes any free unit; <b>Add</b> on a unit row takes that exact one.
+    <span class="mono">T7i-003</span> reads <b>You · Sep 12</b> because Alex is holding it. A unit someone
+    else holds shows the due date and no name, per the custodian-privacy rule in
+    <span class="mono">design-system.md</span> §8.3. The dock at the bottom never covers the list and its
+    button goes to the cart page rather than expanding in place.</p>
+  </div>
 </div>
 
 <!-- ============================== A: GROUND ============================== -->
@@ -350,6 +586,106 @@ This is the single biggest choice. Everything else inherits from it.</p>
 <h2><span class="n">B</span>How the asset list is shaped</h2>
 <p class="q">You have photos per asset, but also 200+ near-identical units (ten T7i bodies). Scanning a list
 of names and recognising a picture are different jobs.</p>
+
+<p class="settled"><span class="code">B3 + B1</span><span><b>Settled.</b> B3 is the base and every model row
+opens like an accordion onto its B1 unit table. One shape does both jobs: a student who wants "a T7i
+battery" reads the count and presses <b>Add</b>, and anyone who needs a specific body opens the row and
+picks the serial.</span></p>
+
+<div class="grid g1">
+  <div class="opt">
+    <div class="tag"><span class="code">B3+B1</span><span class="name">Grouped by model, expanding to units</span></div>
+    <div class="frame G ground-manual"><div class="body" style="background:var(--surface)">
+      <div class="mlist">
+        <div class="mhead"><span></span><span></span><span>Model</span><span>Availability</span><span>Out</span><span></span></div>
+        <details class="mgroup">
+          <summary class="mrow">
+            <span class="caret">▶</span><span class="thumb">▣</span>
+            <span class="mname">Canon 70-200mm f/2.8<em>Lenses › Zooms</em></span>
+            <span class="st s-ok"><span class="dot"></span>2 of 3 available</span>
+            <span class="mono">1 out</span>
+            <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+          </summary>
+          <div class="units">
+            <div class="unit"><span></span><span></span><span class="mono">C70200-001</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+            <div class="unit dim"><span></span><span></span><span class="mono">C70200-002</span>
+              <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span><span></span></div>
+            <div class="unit"><span></span><span></span><span class="mono">C70200-003</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+          </div>
+        </details>
+        <details class="mgroup" open>
+          <summary class="mrow">
+            <span class="caret">▶</span><span class="thumb">▣</span>
+            <span class="mname">Canon T7i<em>Cameras/Bodies › Camera Model</em></span>
+            <span class="st s-ok"><span class="dot"></span>4 of 6 available</span>
+            <span class="mono">2 out</span>
+            <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+          </summary>
+          <div class="units">
+            <div class="unit"><span></span><span></span><span class="mono">T7i-001</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+            <div class="unit"><span></span><span></span><span class="mono">T7i-002</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+            <div class="unit dim"><span></span><span></span><span class="mono">T7i-003</span>
+              <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">You · Sep 12</span><span></span></div>
+            <div class="unit"><span></span><span></span><span class="mono">T7i-004</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+            <div class="unit dim"><span></span><span></span><span class="mono">T7i-005</span>
+              <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span><span></span></div>
+            <div class="unit"><span></span><span></span><span class="mono">T7i-006</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+          </div>
+        </details>
+        <details class="mgroup">
+          <summary class="mrow">
+            <span class="caret">▶</span><span class="thumb">▣</span>
+            <span class="mname">Canon T7i Battery<em>Batteries/Power › Camera Batteries</em></span>
+            <span class="st s-ok"><span class="dot"></span>9 of 12 available</span>
+            <span class="mono">3 out</span>
+            <span class="rt"><button class="btn sm" onclick="event.preventDefault();event.stopPropagation()">Add</button></span>
+          </summary>
+          <div class="units">
+            <div class="unit"><span></span><span></span><span class="mono">T7iBat-001</span>
+              <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
+              <span class="rt"><button class="btn sm">Add</button></span></div>
+            <div class="unit" style="color:var(--faint)"><span></span><span></span>
+              <span style="grid-column:3/7;font-size:11.5px">11 more units</span></div>
+          </div>
+        </details>
+        <details class="mgroup">
+          <summary class="mrow">
+            <span class="caret">▶</span><span class="thumb">▣</span>
+            <span class="mname">Canon 5D Mark IV<em>Cameras/Bodies › Camera Model</em></span>
+            <span class="st s-off"><span class="dot"></span>0 of 2 available</span>
+            <span class="mono">2 out</span>
+            <span class="rt"><button class="btn sm" disabled style="opacity:.4">Add</button></span>
+          </summary>
+          <div class="units">
+            <div class="unit dim"><span></span><span></span><span class="mono">5D4-001</span>
+              <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span><span></span></div>
+            <div class="unit dim"><span></span><span></span><span class="mono">5D4-002</span>
+              <span class="st s-off"><span class="dot"></span>Unavailable</span><span class="mono">Shutter fault</span><span></span></div>
+          </div>
+        </details>
+      </div>
+    </div></div>
+    <p class="note">Collapsed, this is B3: about thirty rows instead of two hundred, each one a model with a
+    count. Expanded, it is B1 inline, serial by serial, with the same status vocabulary. <b>Nothing is
+    hidden behind a mode toggle</b>, which is what the old "grouped by default, show units" idea would have
+    cost. Rows stay collapsed by default; search results open the matching group so a scanned or typed
+    serial lands on its own row.</p>
+  </div>
+</div>
+
+<h3 class="considered">What it came from</h3>
 <div class="grid g3">
 
   <div class="opt">
@@ -418,9 +754,12 @@ of names and recognising a picture are different jobs.</p>
     reduces list length; expand a row to see individual serials.</p>
   </div>
 </div>
-<div class="warn"><b>Worth knowing:</b> B3 changes behaviour, not just looks. It implies the server picks
-which physical unit gets checked out. That's a real product decision and it doesn't exist in
-<span class="mono">TODO.md</span> Phase 3 or 4 yet. B1 and B3 can coexist (grouped by default, "show units" toggle).</div>
+<div class="warn"><b>What the merge costs in backend work:</b> the model row needs a per-model available
+count, which <span class="mono">ListAssets</span> does not return today, and pressing <b>Add</b> on a model
+row has to resolve to some free unit. The cheaper path is for the frontend to pick a free unit from the
+group it already loaded and send that ID, so <span class="mono">CheckOutAssets</span> stays as it is. It
+races if two people browse at once, which on one shared closet PC cannot happen. Either way it is new work
+for <span class="mono">TODO.md</span> Phase 3.</div>
 
 <!-- ============================== C: STATUS ============================== -->
 <h2><span class="n">C</span>How status reads</h2>
@@ -527,6 +866,132 @@ They must know it worked without reading anything.</p>
 <h2><span class="n">E</span>Where the cart lives</h2>
 <p class="q">The cart is frontend-only state until checkout. It has to be visible enough that nobody walks
 off with an uncommitted cart.</p>
+
+<p class="settled"><span class="code">E1 → page</span><span><b>Settled.</b> The cart lives on the bottom
+edge exactly like E1, but its button navigates to a full cart page instead of expanding a drawer. That is
+the shape every student already knows from shopping online, and it gives the due-date picker and the admin
+custodian picker room to breathe without eating the browse width.</span></p>
+
+<div class="grid g1">
+  <div class="opt">
+    <div class="tag"><span class="code">E-page</span><span class="name">The cart page</span></div>
+    <div class="frame G ground-ops">
+      <div class="app" style="grid-template-columns:214px 1fr;min-height:352px">
+        <div class="side">
+          <div class="brand"><span class="mark">S</span>Stockroom</div>
+          <div class="navlabel">Browse</div>
+          <a class="nav">Cameras/Bodies <span class="ct">13</span></a>
+          <a class="nav">Lenses <span class="ct">11</span></a>
+          <a class="nav">Lights <span class="ct">8</span></a>
+          <div class="navlabel">Cart</div>
+          <a class="nav on">Cart <span class="ct">3</span></a>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <div class="crumb"><b>Cart</b></div>
+            <div class="who" style="margin-left:auto"><span class="thumb">▣</span>Alex Rivera · <span class="mono">200481</span></div>
+          </div>
+          <div class="body">
+            <div class="pagehead">
+              <a class="back">← Back to browse</a>
+              <h4>Cart</h4>
+              <span class="mono" style="font-size:12px">3 items</span>
+            </div>
+            <div class="cartpage">
+              <div class="lines">
+                <div class="line">
+                  <span class="big">▣</span>
+                  <span><b style="font-size:13px">Canon T7i</b><br><span class="mono" style="font-size:11.5px">T7i-004</span></span>
+                  <span class="st s-ok"><span class="dot"></span>Available</span>
+                  <span class="x">✕</span>
+                </div>
+                <div class="line">
+                  <span class="big">▣</span>
+                  <span><b style="font-size:13px">Canon 70-200mm f/2.8</b><br><span class="mono" style="font-size:11.5px">C70200-001</span></span>
+                  <span class="st s-ok"><span class="dot"></span>Available</span>
+                  <span class="x">✕</span>
+                </div>
+                <div class="line">
+                  <span class="big">▣</span>
+                  <span><b style="font-size:13px">Canon T7i Battery</b><br><span class="mono" style="font-size:11.5px">T7iBat-004</span></span>
+                  <span class="st s-ok"><span class="dot"></span>Available</span>
+                  <span class="x">✕</span>
+                </div>
+              </div>
+              <div class="sum">
+                <div class="sumrow"><span>Items</span><b>3</b></div>
+                <div class="sumrow"><span>Checked out</span><b class="mono" style="font-size:12px">2026-09-09</b></div>
+                <div class="navlabel" style="padding:10px 0 5px">Due date</div>
+                <div class="field">2026-09-16 <span style="color:var(--faint)">▤</span></div>
+                <p class="hint">7 days max. Sep 16 is the cap.</p>
+                <div class="navlabel" style="padding:12px 0 5px">Custodian <span class="adminonly">admin</span></div>
+                <div class="field">Alex Rivera <span style="color:var(--faint)">▾</span></div>
+                <button class="btn pri" style="width:100%;margin-top:14px;padding:8px">Check out 3</button>
+                <button class="btn" style="width:100%;margin-top:7px;border-color:transparent;background:transparent;color:var(--muted)">Clear cart</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Line items on the left, the commit panel on the right, the way any checkout page works.
+    <b>The dock is gone on this page</b>, because two <b>Check out</b> buttons on one screen is one too
+    many. Each line keeps its live status, so an item that someone else grabbed while the cart sat idle
+    turns red here rather than failing at the transaction. <b>Custodian is admin-only</b>; students never see
+    that field. Removing the last item bounces back to browse.</p>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="opt">
+    <div class="tag"><span class="code">E-dock</span><span class="name">The dock, at rest</span></div>
+    <div class="frame G ground-ops">
+      <div class="main">
+        <div class="body" style="background:var(--surface);min-height:132px">
+          <table class="tbl">
+            <tr><th>Serial</th><th>Model</th><th>Status</th></tr>
+            <tr><td class="mono">T7i-004</td><td>Canon T7i</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+            <tr><td class="mono">C70200-001</td><td>Canon 70-200mm</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+          </table>
+        </div>
+        <div class="dock">
+          <div class="avatars"><span class="av">▣</span><span class="av">▣</span><span class="av">▣</span></div>
+          <span class="n" style="margin-left:14px">3 items</span>
+          <span class="n">Due Sep 16</span>
+          <button class="btn pri" style="margin-left:auto">Review cart · 3</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">48px, only when the cart is non-empty, and the whole bar is the link. Adding an item
+    flashes the bar and bumps the count. <b>It never opens itself</b>, because someone mid-scan with an
+    armful of gear should not have the screen change under them.</p>
+  </div>
+  <div class="opt">
+    <div class="tag"><span class="code">E-dock</span><span class="name">The dock, blocked by an overdue item</span></div>
+    <div class="frame G ground-ops">
+      <div class="main">
+        <div class="body" style="background:var(--surface);min-height:132px">
+          <table class="tbl">
+            <tr><th>Serial</th><th>Model</th><th>Status</th></tr>
+            <tr><td class="mono">T7i-004</td><td>Canon T7i</td><td><span class="st s-ok"><span class="dot"></span>In cart</span></td></tr>
+            <tr><td class="mono">BM6K-002</td><td>BMPCC 6K Pro</td><td><span class="st s-late"><span class="dot"></span>Overdue 3d</span></td></tr>
+          </table>
+        </div>
+        <div class="dock blocked">
+          <span class="st s-late"><span class="dot"></span>Return <span class="mono" style="color:inherit">BM6K-002</span> to check out</span>
+          <span class="n" style="margin-left:14px">3 items held</span>
+          <button class="btn" style="margin-left:auto">Override</button>
+          <button class="btn pri" disabled style="opacity:.4">Review cart · 3</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">The overdue block reads on the dock rather than waiting to fail at checkout. The cart
+    keeps its items, so returning the late body and pressing again costs nothing. <b>Override is admin-only</b>
+    and opens a confirm naming the overdue items first.</p>
+  </div>
+</div>
+
+<h3 class="considered">What it came from</h3>
 <div class="grid g2">
   <div class="opt">
     <div class="tag"><span class="code">E1</span><span class="name">Bottom dock</span></div>
@@ -549,8 +1014,8 @@ off with an uncommitted cart.</p>
         </div>
       </div>
     </div>
-    <p class="note">Always visible, never covers the list, and the due-date picker lives right next to the
-    commit button. <b>Impossible to forget.</b> Costs ~48px of vertical space permanently.</p>
+    <p class="note">Always visible, never covers the list. Impossible to forget. <b>Kept</b>, minus the
+    inline due-date picker and the inline commit, which moved to the page above.</p>
   </div>
   <div class="opt">
     <div class="tag"><span class="code">E2</span><span class="name">Right drawer</span></div>
@@ -578,8 +1043,9 @@ off with an uncommitted cart.</p>
         </div>
       </div>
     </div>
-    <p class="note">Room to show each item, remove individually, pick the custodian for the admin flow, and set the
-    date. <b>Eats horizontal width</b>, which hurts in the Wails window at 1024px unless it collapses.</p>
+    <p class="note">Room to show each item, remove individually, pick the custodian, set the date.
+    <b>Dropped.</b> It eats horizontal width in a 1024px Wails window, and everything it offered fits on the
+    cart page with more room and no overlay.</p>
   </div>
 </div>
 
