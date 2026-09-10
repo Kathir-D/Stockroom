@@ -7,10 +7,11 @@ Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
 | Suite | Where | Tool | Cases | What it protects |
 |---|---|---|---|---|
 | Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 297 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
-| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test` | 156 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, sessions and idle expiry, scan/typed login, the limited-session flow, user CRUD and the delete rules, roster CSV import, error→HTTP mapping, JSON decoding, the auth/users routes |
-| Frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
+| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test ./... -race` | 188 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, sessions and idle expiry under concurrency, scan/typed login, the limited-session flow, user CRUD and the delete rules, roster CSV import, Postgres error→HTTP mapping, JSON decoding, the auth/users routes |
+| Desktop frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
+| Web app | `web-app/src/**/*.test.ts` | Vitest + Testing Library | 2 | the harness is wired: a fresh clone gets a real pass |
 
-545 cases total. Run everything locally:
+579 cases total. Run everything locally:
 
 ```bash
 ./scripts/test-all.sh
@@ -20,18 +21,24 @@ Individually:
 
 ```bash
 supabase start
-go test ./... -count=1
+go vet ./...
+go test ./... -count=1 -race
 supabase test db
 npm --prefix desktop-app/frontend test
+npm --prefix web-app test
 ```
 
 ### File-by-file
 
 **Database.** `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
 
-**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `sessions_test.go`, `auth_test.go`, `users_test.go`, `roster_test.go`, `testdb_test.go`, `server/json_test.go`, `server/router_test.go`, `server/auth_test.go`.
+**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `sessions_test.go`, `sessions_concurrent_test.go`, `auth_test.go`, `users_test.go`, `roster_test.go`, `pgerr_test.go`, `hashcost_test.go`, `main_test.go`, `testdb_test.go`, `server/json_test.go`, `server/router_test.go`, `server/auth_test.go`, `server/main_test.go`.
 
-**Frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
+**Desktop frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
+
+**Web app.** `src/App.test.ts`.
+
+Full per-test rationale, including the speed budget that keeps `-race` affordable and the plan for testing `TODO.md` Phases 3 to 8 as they land, is in [TESTING.md](TESTING.md#testing-features-that-dont-exist-yet).
 
 ---
 
@@ -46,10 +53,10 @@ Two pieces are needed. A workflow that runs them on every PR, and a branch prote
 1. sets up Go, Node 22 and the Supabase CLI
 2. runs `supabase start` (applies all migrations + the seed)
 3. `go vet ./...`
-4. `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`
+4. `go test ./... -count=1 -race` with `STOCKROOM_REQUIRE_DB=1`
 5. `supabase test db` (pgTAP)
 6. `npm ci`, `npm run check` (svelte-check), `npm test` (Vitest) for `desktop-app/frontend`
-7. `npm ci`, `npm run check`, `npm run build` for `web-app` (no tests yet, but it must still compile)
+7. `npm ci`, `npm run check`, `npm test` (Vitest), `npm run build` for `web-app`
 
 `STOCKROOM_REQUIRE_DB=1` matters. Without it the Go integration tests skip when Postgres is unreachable, so a broken database would look green. In CI they must fail instead.
 
@@ -163,4 +170,4 @@ Run with `npm --prefix desktop-app/frontend test` (or `test:watch` while writing
 ./scripts/test-all.sh
 ```
 
-Green locally means green in CI, with one exception. CI also runs `go vet` and `svelte-check`, so run those too if you touched Go or Svelte.
+`scripts/test-all.sh` runs the same checks in the same order CI does (`go vet`, `-race`, pgTAP, both frontends' `check` and tests, the web-app build), so green locally means green in CI.

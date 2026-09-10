@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs every test suite in the repo: Go (unit + integration), pgTAP against the
-# local Postgres, and Vitest for the desktop frontend.
+# Runs every check CI runs: go vet, Go tests under -race, pgTAP against the
+# local Postgres, and type-check + Vitest for both frontends.
 #
 #   ./scripts/test-all.sh
 #
@@ -41,7 +41,8 @@ else
   echo "         Run 'supabase start' to include the database-backed tests."
 fi
 
-run "go" go test ./...
+run "go vet" go vet ./...
+run "go (-race)" go test ./... -race
 
 if db_up; then
   run "pgtap" supabase test db
@@ -49,7 +50,11 @@ else
   failed+=("pgtap (skipped: database down)")
 fi
 
-run "vitest (desktop-app)" npm --prefix desktop-app/frontend test
+run "desktop-app: svelte-check" npm --prefix desktop-app/frontend run check
+run "desktop-app: vitest" npm --prefix desktop-app/frontend test
+run "web-app: svelte-check" npm --prefix web-app run check
+run "web-app: vitest" npm --prefix web-app test
+run "web-app: build" npm --prefix web-app run build
 
 echo
 if [ ${#failed[@]} -eq 0 ]; then

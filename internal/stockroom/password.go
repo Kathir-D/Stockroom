@@ -27,7 +27,33 @@ const (
 	// leading zeros survive and a reissued longer number would still import.
 	// Anything past this length is a mis-scan or a pasted line of junk.
 	MaxStudentNumberLength = 32
+
+	// DefaultPasswordHashCost is the bcrypt work factor every released binary
+	// hashes at. It is pinned by hashcost_test.go so it cannot be weakened by
+	// accident.
+	DefaultPasswordHashCost = bcrypt.DefaultCost
 )
+
+// hashCost is the work factor HashPassword applies. Verification never reads
+// it: bcrypt stores the cost inside the hash, so rows written at any cost keep
+// working.
+var hashCost = DefaultPasswordHashCost
+
+// SetPasswordHashCost sets the bcrypt work factor and returns the previous
+// value. It exists for the test suites, which lower it to bcrypt.MinCost from
+// TestMain: at the production cost a single hash takes tens of milliseconds,
+// which is the right price for a login and the wrong one for the several
+// hundred fixtures the suites create, especially under -race.
+//
+// Production never calls this. A cost outside bcrypt's supported range is
+// ignored, so a bad value cannot silently produce a weak hash.
+func SetPasswordHashCost(cost int) int {
+	prev := hashCost
+	if cost >= bcrypt.MinCost && cost <= bcrypt.MaxCost {
+		hashCost = cost
+	}
+	return prev
+}
 
 // HashPassword returns a bcrypt hash for storing in profiles.password_hash.
 // It enforces MinPasswordLength so every caller gets the same rule.
@@ -39,7 +65,7 @@ func HashPassword(password string) (string, error) {
 	if len(password) > MaxPasswordLength {
 		return "", fmt.Errorf("%w: password must be at most %d bytes", ErrInvalid, MaxPasswordLength)
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
 	}
