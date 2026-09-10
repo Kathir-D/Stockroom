@@ -471,9 +471,9 @@ buried in a screen.
 ├───────────┴──────────────────────────────────────────────┤
 │ Cart dock                                                │  48px, only when cart is non-empty
 └──────────────────────────────────────────────────────────┘
+```
 
 The cart page (§8.4) is a route inside this same shell. It replaces the content area and hides the dock.
-```
 
 - **Sidebar.** 236px fixed. Category tree first, then an `Admin` group visible only when
   `is_admin`. Collapses to a 56px icon rail below 900px, and to a `sheet` below 720px.
@@ -524,7 +524,7 @@ entirely.
 The primary screen. Sidebar category tree, top-bar search, content table.
 
 **List shape is `B3 + B1`: one row per model, and the row is an accordion onto its units.** Settled
-2026-09-10, closing what §15 carried as Q-B. `B3` is the base because the closet holds 200-odd units across
+2026-09-10, closing the former list-shape question. `B3` is the base because the closet holds 200-odd units across
 roughly thirty models, and a flat unit list is thirty screens of near-identical rows. `B1` survives inside
 the expansion, so nothing the flat list could tell you is lost.
 
@@ -543,8 +543,9 @@ due date when checked out, and its own **Add**. Rules that make the two levels b
   and a scanned serial opens its group and highlights the unit for `--dur-slow`.
 - **The expansion is not paginated but it is capped**, at fifty units with a `n more units` footer row.
   `SD Card 128GB` with twenty units is fine inline. A future model with three hundred would not be.
-- **`unavailable` units** render at 55% opacity with `Add` disabled and the reason in a tooltip. They still
-  count in the total (`4 of 6`), because someone looking at the shelf will count six bodies.
+- **`unavailable` units** render their thumbnail and row fill at 55% opacity, while their serial and status
+  label remain fully opaque. `Add` is disabled and the reason appears in a tooltip. They still count in the
+  total (`4 of 6`), because someone looking at the shelf will count six bodies.
 - **Custodian identity stays admin-only** in the unit rows, per §8.3. A unit the viewer holds themselves may
   read `You · Sep 12`, since the custodian is an approved audience for their own record. Every other
   checked-out unit shows the due date and no name.
@@ -858,7 +859,7 @@ Also still open from `CLAUDE.md` §13 and relevant here: the scan-vs-typed keyst
 
 ## 16. Decisions log
 
-**2026-09-10, list shape: `B3 + B1`, one accordion instead of two views.** Closes what §15 carried as Q-B.
+**2026-09-10, list shape: `B3 + B1`, one accordion instead of two views.** Closes the former list-shape question.
 The earlier note left `B1` and `B3` as coexisting modes behind a toggle. A toggle is a setting somebody
 has to find, and the two audiences are not two people: the same student wants a count on Tuesday and a
 specific serial on Thursday. Folding `B1` into the expansion of a `B3` row serves both without a mode. Cost: a per-model

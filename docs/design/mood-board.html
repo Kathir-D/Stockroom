@@ -198,7 +198,8 @@ h2 .n{font-family:var(--mono);opacity:.45;margin-right:10px}
 .units{border-top:1px solid var(--line);background:var(--bg);padding:2px 0}
 .unit{height:33px;font-size:12.5px}
 .unit+.unit{border-top:1px solid var(--line)}
-.unit.dim{opacity:.55}
+.unit.dim{background:color-mix(in srgb,var(--raised) 55%,transparent)}
+.unit.dim .thumb{opacity:.55}
 .btn.sm{padding:2px 9px;font-size:11.5px}
 .rt{text-align:right}
 
@@ -307,13 +308,13 @@ status, mono serials, and the cart sitting on the bottom edge. Click a model row
                     <div class="unit"><span></span><span></span><span class="mono">T7i-002</span>
                       <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
                       <span class="rt"><button class="btn sm">Add</button></span></div>
-                    <div class="unit dim"><span></span><span></span><span class="mono">T7i-003</span>
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-003</span>
                       <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">You · Sep 12</span>
                       <span class="rt"></span></div>
                     <div class="unit"><span></span><span></span><span class="mono">T7i-004</span>
                       <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
                       <span class="rt"><button class="btn sm">Add</button></span></div>
-                    <div class="unit dim"><span></span><span></span><span class="mono">T7i-005</span>
+                    <div class="unit"><span></span><span></span><span class="mono">T7i-005</span>
                       <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span>
                       <span class="rt"></span></div>
                     <div class="unit"><span></span><span></span><span class="mono">T7i-006</span>
@@ -328,11 +329,11 @@ status, mono serials, and the cart sitting on the bottom edge. Click a model row
                     <span class="thumb">▣</span>
                     <span class="mname">Canon 5D Mark IV<em>Cameras/Bodies › Camera Model</em></span>
                     <span class="st s-off"><span class="dot"></span>0 of 2 available</span>
-                    <span class="mono">2 out</span>
+                    <span class="mono">1 out</span>
                     <span class="rt"><button class="btn sm" disabled style="opacity:.4">Add</button></span>
                   </summary>
                   <div class="units">
-                    <div class="unit dim"><span></span><span></span><span class="mono">5D4-001</span>
+                    <div class="unit"><span></span><span></span><span class="mono">5D4-001</span>
                       <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span>
                       <span class="rt"></span></div>
                     <div class="unit dim"><span></span><span></span><span class="mono">5D4-002</span>
@@ -354,7 +355,7 @@ status, mono serials, and the cart sitting on the bottom edge. Click a model row
                     <div class="unit"><span></span><span></span><span class="mono">BM6K-001</span>
                       <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
                       <span class="rt"><button class="btn sm">Add</button></span></div>
-                    <div class="unit dim"><span></span><span></span><span class="mono">BM6K-002</span>
+                    <div class="unit"><span></span><span></span><span class="mono">BM6K-002</span>
                       <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span>
                       <span class="rt"></span></div>
                     <div class="unit"><span></span><span></span><span class="mono">BM6K-003</span>
@@ -379,7 +380,7 @@ status, mono serials, and the cart sitting on the bottom edge. Click a model row
                     <div class="unit"><span></span><span></span><span class="mono">T7iBat-002</span>
                       <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
                       <span class="rt"><button class="btn sm">Add</button></span></div>
-                    <div class="unit dim"><span></span><span></span><span class="mono">T7iBat-003</span>
+                    <div class="unit"><span></span><span></span><span class="mono">T7iBat-003</span>
                       <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 13</span>
                       <span class="rt"></span></div>
                     <div class="unit" style="color:var(--faint)"><span></span><span></span>
@@ -610,7 +611,7 @@ picks the serial.</span></p>
             <div class="unit"><span></span><span></span><span class="mono">C70200-001</span>
               <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
               <span class="rt"><button class="btn sm">Add</button></span></div>
-            <div class="unit dim"><span></span><span></span><span class="mono">C70200-002</span>
+            <div class="unit"><span></span><span></span><span class="mono">C70200-002</span>
               <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span><span></span></div>
             <div class="unit"><span></span><span></span><span class="mono">C70200-003</span>
               <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
@@ -632,12 +633,12 @@ picks the serial.</span></p>
             <div class="unit"><span></span><span></span><span class="mono">T7i-002</span>
               <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
               <span class="rt"><button class="btn sm">Add</button></span></div>
-            <div class="unit dim"><span></span><span></span><span class="mono">T7i-003</span>
+            <div class="unit"><span></span><span></span><span class="mono">T7i-003</span>
               <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">You · Sep 12</span><span></span></div>
             <div class="unit"><span></span><span></span><span class="mono">T7i-004</span>
               <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
               <span class="rt"><button class="btn sm">Add</button></span></div>
-            <div class="unit dim"><span></span><span></span><span class="mono">T7i-005</span>
+            <div class="unit"><span></span><span></span><span class="mono">T7i-005</span>
               <span class="st s-late"><span class="dot"></span>Overdue 3d</span><span class="mono">Sep 06</span><span></span></div>
             <div class="unit"><span></span><span></span><span class="mono">T7i-006</span>
               <span class="st s-ok"><span class="dot"></span>Available</span><span class="mono">—</span>
@@ -665,11 +666,11 @@ picks the serial.</span></p>
             <span class="caret">▶</span><span class="thumb">▣</span>
             <span class="mname">Canon 5D Mark IV<em>Cameras/Bodies › Camera Model</em></span>
             <span class="st s-off"><span class="dot"></span>0 of 2 available</span>
-            <span class="mono">2 out</span>
+            <span class="mono">1 out</span>
             <span class="rt"><button class="btn sm" disabled style="opacity:.4">Add</button></span>
           </summary>
           <div class="units">
-            <div class="unit dim"><span></span><span></span><span class="mono">5D4-001</span>
+            <div class="unit"><span></span><span></span><span class="mono">5D4-001</span>
               <span class="st s-out"><span class="dot"></span>Checked out</span><span class="mono">Sep 12</span><span></span></div>
             <div class="unit dim"><span></span><span></span><span class="mono">5D4-002</span>
               <span class="st s-off"><span class="dot"></span>Unavailable</span><span class="mono">Shutter fault</span><span></span></div>
