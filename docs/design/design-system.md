@@ -9,8 +9,12 @@ Written 2026-09-09. Direction chosen from `docs/design/mood-board.html` (open it
 `python3 -m http.server 8899` inside `docs/design/`, then visit `/mood-board.html`).
 
 **Settled:** ground `A2` "Studio Ops" (warm charcoal dark) · component library **shadcn-svelte v1** over
-Bits UI · shared **npm workspace package** · cart as a **dock that expands into a drawer** · status as
-**dot + label** · **Inter + mono for identifiers**.
+Bits UI · shared **npm workspace package** · asset list **grouped by model, each row an accordion onto its
+units** (`B3 + B1`) · cart as a **bottom dock that opens a full cart page** · status as **dot + label** ·
+**Inter + mono for identifiers**.
+
+Revised 2026-09-10: the list shape and the cart shape both changed. §8.2 and §8.4 carry the new versions and
+§16 records why.
 
 **Not settled:** seven user-flow questions in §15. Everything in §1 to §14 holds regardless of how they
 land; where a section depends on one, it says so.
@@ -134,7 +138,7 @@ cd packages/ui
 npx shadcn-svelte@latest init
 npx shadcn-svelte@latest add button dialog table input label select checkbox \
     dropdown-menu tooltip sheet sonner badge separator scroll-area \
-    alert-dialog popover calendar tabs skeleton avatar command
+    alert-dialog popover calendar tabs skeleton avatar command collapsible
 ```
 
 The critical part is `components.json`. Set the aliases to **package-absolute paths**, so generated
@@ -261,7 +265,7 @@ There is deliberately **no brand accent colour**. Primary actions are near-white
   /* ---------- shape ---------- */
   --radius-sm: 4px;   /* chips, thumbnails, checkboxes */
   --radius:    6px;   /* buttons, inputs, rows, the default */
-  --radius-lg: 10px;  /* cards, dialogs, the cart drawer */
+  --radius-lg: 10px;  /* cards, dialogs, the cart summary panel */
   /* Nothing in this app is more rounded than 10px. Large radii read as consumer/toy. */
 
   /* ---------- elevation: hairline first, shadow second ---------- */
@@ -277,7 +281,7 @@ There is deliberately **no brand accent colour**. Primary actions are near-white
   /* ---------- motion ---------- */
   --ease:       cubic-bezier(.2, 0, 0, 1);
   --dur-fast:   120ms;   /* hover, focus, checkbox */
-  --dur-normal: 200ms;   /* drawer, dialog, popover */
+  --dur-normal: 200ms;   /* dialog, popover, sheet */
   --dur-slow:   320ms;   /* scan confirmation */
 
   /* ---------- density (see §4) ---------- */
@@ -387,7 +391,8 @@ component that hardcodes `h-9` instead is a bug. It will not scale into kiosk mo
 | `button` | everything | Replace variants with: `primary` (near-white fill), `secondary` (outline on `--line-control`), `ghost` (hover fill only), `destructive`. **Delete the `link` variant**. A button that looks like a link has no place here. Heights bind to `--control-h`. |
 | `table` | asset list, users, overdue, history | Row height → `--row-h`. Sticky header. `tabular-nums` on every numeric column. |
 | `dialog` | asset detail, confirmations | Max width 560px. `--elev-3`. Escape and click-outside both close. |
-| `sheet` | the cart drawer (§8.4) | Right side, width `min(420px, 90vw)`. |
+| `sheet` | the sidebar below 720px (§7.2) | Left side, width `min(300px, 85vw)`. The cart no longer uses it. |
+| `collapsible` | the unit accordion on a model row (§8.2) | Trigger is the whole row. No height animation; see §11. |
 | `input`, `label`, `checkbox`, `select` | forms, filters | Border `--line-control`, not `--line`: they need 3:1 (§10). |
 | `command` | global search / jump-to-asset | Bound to `/` and `Cmd/Ctrl+K`. |
 | `sonner` | toasts | Bottom-centre. Never for errors that need a decision. Those are dialogs. |
@@ -405,10 +410,16 @@ These live in `packages/ui/src/lib/components/app/`.
   can never drift between two screens.
 - **`<Serial value="T7iBat-001" />`.** Mono, `select-all` on click, copy-on-click with a toast. Every
   serial and student number in the app goes through this.
-- **`<AssetRow />`.** Thumbnail, name, category path, `<Serial>`, `<StatusDot>`, due date, cart affordance.
+- **`<ModelRow />`.** A model with its thumbnail, name, category path, `n of m available`, out-count and
+  **Add**. Wraps a `collapsible` whose content is the unit list. The whole row is the trigger; **Add** stops
+  propagation so pressing it does not also toggle the row. §8.2.
+- **`<UnitRow />`.** One physical asset inside an expanded `<ModelRow>`: `<Serial>`, `<StatusDot>`, due date
+  or custodian, and its own **Add**. Also used standalone by the admin asset table.
 - **`<CategoryTree />`.** The three-level `Type → Category → Model` filter. Must handle branches that stop
   short of depth 3 (`Primes` is seeded with no models, per `CLAUDE.md` §6.2).
-- **`<CartDock />`** and **`<CartDrawer />`.** §8.4.
+- **`<CartDock />`.** The 48px bottom bar. Count, thumbnails, due date, and one action that navigates to
+  the cart page. §8.4.
+- **`<CartPage />`.** Line items plus the commit panel. §8.4.
 - **`<ScanListener />`.** Headless. Wraps `lib/scanner.ts`, emits `scan` and `typed` events. Exactly one
   instance mounts at the app root; screens subscribe. §9.
 - **`<ScanResult />`.** The screen shown after a scan. §8.6.
@@ -462,6 +473,8 @@ buried in a screen.
 └──────────────────────────────────────────────────────────┘
 ```
 
+The cart page (§8.4) is a route inside this same shell. It replaces the content area and hides the dock.
+
 - **Sidebar.** 236px fixed. Category tree first, then an `Admin` group visible only when
   `is_admin`. Collapses to a 56px icon rail below 900px, and to a `sheet` below 720px.
 - **Top bar.** Breadcrumb of the active category path on the left; search and the signed-in user on the
@@ -469,7 +482,8 @@ buried in a screen.
   `Me().has_overdue` is true.
 - **Content.** Capped at 1440px so a wide monitor doesn't produce 2000px-wide table rows that are
   impossible to track across.
-- **Cart dock.** Absent at zero items, so it costs nothing until it matters.
+- **Cart dock.** Spans the full width below the sidebar. Absent at zero items, so it costs nothing until it
+  matters, and absent again on the cart page itself.
 
 ### 7.2 Breakpoints
 
@@ -478,8 +492,8 @@ Tailwind defaults, with only three that matter here:
 | Width | Behaviour |
 |---|---|
 | ≥1280px | Full shell. The closet PC and any dev machine. |
-| 900 to 1279px | Sidebar → icon rail. Table sheds the *Category* column. |
-| <900px | Sidebar → sheet. Table → stacked cards. |
+| 900 to 1279px | Sidebar → icon rail. Model rows shed the category path; unit rows shed the due column. |
+| <900px | Sidebar → sheet. Rows → stacked cards. The cart page drops to one column. |
 
 Below 900px is a courtesy, not a supported target. `CLAUDE.md` §2 rules out mobile and LAN access. Don't
 spend time there. Do make sure it isn't *broken*, because someone will resize the Wails window.
@@ -509,24 +523,47 @@ entirely.
 
 The primary screen. Sidebar category tree, top-bar search, content table.
 
-**List shape is `B1 + B3`** (grouped by model, expandable to units), pending §15 Q-B. Default rows are one
-per **model**: thumbnail, model name, category path in `--fg-muted`, `9 of 12 available`, `Add`. Expanding a
-row reveals its individual units with their serials, so an admin can act on a specific one.
+**List shape is `B3 + B1`: one row per model, and the row is an accordion onto its units.** Settled
+2026-09-10, closing the former list-shape question. `B3` is the base because the closet holds 200-odd units across
+roughly thirty models, and a flat unit list is thirty screens of near-identical rows. `B1` survives inside
+the expansion, so nothing the flat list could tell you is lost.
 
-> **This needs backend work that doesn't exist yet.** `ListAssets` returns units; grouping needs a
-> per-model available-count, and `CheckOutAssets` needs to accept "any unit of model X" or the frontend must
-> pick a free unit itself and send its ID. The second option needs no server change and is the cheaper path
-> It races when two people browse at once, which on a single shared PC cannot happen. Recommend the
-> frontend picks. Add it to `TODO.md` Phase 3.
+**The model row** carries thumbnail, model name, category path in `--fg-muted`, `4 of 6 available` as a
+`<StatusDot>`, an out-count, and **Add**. Its availability dot reads `--status-available` when the count is
+above zero and `--status-unavailable` at `0 of n`, where **Add** is disabled.
+
+**Expanding it** reveals one `<UnitRow>` per physical asset: `<Serial>` in mono, its own `<StatusDot>`, its
+due date when checked out, and its own **Add**. Rules that make the two levels behave predictably:
+
+- **Add on the model row takes any free unit. Add on a unit row takes that exact one.** Both put a specific
+  `asset_id` in the cart; the model-level press just picks the first available unit in the group.
+- **The whole row is the accordion trigger, so `Add` must stop propagation.** A press that both adds an item
+  and expands a row is a press nobody meant.
+- **Rows are collapsed by default.** Two exceptions open one: a search result opens the group that matched,
+  and a scanned serial opens its group and highlights the unit for `--dur-slow`.
+- **The expansion is not paginated but it is capped**, at fifty units with a `n more units` footer row.
+  `SD Card 128GB` with twenty units is fine inline. A future model with three hundred would not be.
+- **`unavailable` units** render their thumbnail and row fill at 55% opacity, while their serial and status
+  label remain fully opaque. `Add` is disabled and the reason appears in a tooltip. They still count in the
+  total (`4 of 6`), because someone looking at the shelf will count six bodies.
+- **Custodian identity stays admin-only** in the unit rows, per §8.3. A unit the viewer holds themselves may
+  read `You · Sep 12`, since the custodian is an approved audience for their own record. Every other
+  checked-out unit shows the due date and no name.
+
+> **This needs backend work that doesn't exist yet.** `ListAssets` returns units; the model row needs a
+> per-model available count, and `Add` on a model row needs a free unit to point at. Have the **frontend
+> pick** from the group it already loaded and send that ID, so `CheckOutAssets` stays unchanged. It races
+> when two people browse at once, which on a single shared PC cannot happen. Add it to `TODO.md` Phase 3.
 
 Other rules:
 
 - Filtering is instant and client-side once the category's assets are loaded. Search hits the server
   (the `idx_assets_search` GIN index exists).
-- Clicking a row opens the detail dialog. Clicking `Add` skips the dialog.
-- `unavailable` units render at 55% opacity with `Add` disabled and the reason in a tooltip.
+- Clicking a model row expands it. Clicking a unit row opens the detail dialog.
 - The empty state distinguishes "this category has no models yet" (true for `Primes`) from "your filters
   matched nothing". They need different actions.
+- **The admin asset table (§8.7) stays flat `B1`.** An operator editing assets works unit by unit and the
+  grouping only gets in the way. Same `<UnitRow>` component, no `<ModelRow>` around it.
 
 ### 8.3 Asset detail
 
@@ -549,43 +586,55 @@ custodian fields for a non-admin actor rather than returning them for the fronte
 is still sent over the wire and the web app is a `fetch` call away. `TODO.md` Phase 3 owns that response
 shape. If Q7 later approves peer disclosure, widening it is a change in that one place.
 
-### 8.4 Cart: dock + expanding drawer
+### 8.4 Cart: bottom dock, full cart page
 
-Chosen shape: a persistent dock that expands into a drawer, the way an e-commerce cart does.
+Settled 2026-09-10, replacing the expanding drawer. The cart sits on the bottom edge and its button
+**navigates to a cart page**, the way an online store does. The drawer is gone: it ate 420px of a 1024px
+Wails window, and everything it held fits on the page with room left over.
 
-**Collapsed dock** (48px, bottom, only when non-empty): up to five overlapping item thumbnails, `3 items`,
-the chosen due date, and **Check out 3** as the primary action. Clicking anywhere on the dock *except* the
-primary button expands the drawer.
+**The dock** (48px, full width below the sidebar, only when the cart is non-empty): up to five overlapping
+thumbnails, `3 items`, the chosen due date if one has been picked, and **Review cart · 3**. The whole bar is
+the link, not just the button.
 
-**Expanded drawer** (`sheet`, right, `min(420px, 90vw)`): header `Cart · 3` with a close control; a scrolling
-list of items, each with thumbnail, name, `<Serial>` and a remove button; then the due-date picker
-(`<DueDatePicker>`, capped at 7 days); then, **for admins only**, a custodian picker defaulting to the signed-in
-user; then **Check out**. A `Clear cart` ghost action sits at the bottom, behind an `alert-dialog`.
+**The cart page** (a route in the same shell, `data-density="comfortable"`) is two columns:
+
+- **Left, the line items.** Thumbnail, name, `<Serial>`, live `<StatusDot>`, and a remove control per row.
+  The status is live so an item that someone else took while the cart sat idle turns red here instead of
+  failing inside the transaction.
+- **Right, the commit panel** (244px, `--radius-lg`): the item count, the `<DueDatePicker>` capped at 7 days
+  with the cap named in the hint, a custodian picker **for admins only** defaulting to the signed-in user,
+  then **Check out n** full-width. `Clear cart` sits below it as a ghost action behind an `alert-dialog`.
 
 Rules:
 
-- Adding an item while the drawer is closed **pulses the dock** (`--dur-fast` background flash) and
-  increments the count. It does not auto-open the drawer, which would interrupt someone mid-scan.
-- Adding while the drawer is open scrolls the new item into view and highlights it for `--dur-slow`.
-- The drawer is **not modal**: you can browse with it open. Wails windows are small; make sure the content
-  area still works at 420px narrower.
+- **The dock is hidden on the cart page.** Two `Check out` buttons in one view is one too many, and the
+  §13 rule allows one primary button per view.
+- **`Back to browse` returns to the category the user left**, not to the root of the tree. Someone adding
+  six items from one shelf should not re-navigate the tree after every trip to the cart.
+- Adding an item while browsing **pulses the dock** (`--dur-fast` background flash) and increments the
+  count. It never navigates on its own, which would interrupt someone mid-scan.
+- **Scanning still works on the cart page.** `<ScanListener>` is mounted at the app root (§9), so a scan
+  there opens `<ScanResult>` over the cart exactly as it would over browse.
+- **Removing the last item returns to browse**, because an empty cart page is a dead end.
 - **When the user has an overdue item**, the dock renders in the overdue colour with
-  `Return BM6K-002 to check out` and the primary button is disabled. Admins see an **Override** control
-  that opens an `alert-dialog` naming the overdue items before it will proceed. ⚠ §15 Q6.
+  `Return BM6K-002 to check out` and the button is disabled, so the block reads before the page rather than
+  at the commit. Admins get an **Override** control that opens an `alert-dialog` naming the overdue items
+  first. The same block repeats on the cart page if someone arrives by URL. ⚠ §15 Q6.
 - Cart state clears on sign-out and on idle-timeout 401. ⚠ §15 Q5.
 
 ### 8.5 Checkout
 
-Not a screen, a transition. Pressing **Check out** disables the button, shows an inline spinner, and calls
-`POST /checkout` once. `CheckOutAssets` is a single transaction and the whole cart fails together, so the
-UI must never show partial success.
+Not a screen, a transition on the cart page (§8.4). Pressing **Check out** disables the button, shows an
+inline spinner, and calls `POST /checkout` once. `CheckOutAssets` is a single transaction and the whole
+cart fails together, so the UI must never show partial success.
 
 - **Success** → `<ScanResult>` in confirm mode: `3 items checked out`, the list, the due date,
   and two buttons, **Done** and **Sign out**. The sign-out prompt is required by `CLAUDE.md` §7 because
   the machine is shared.
 - **`ErrConflict`** (an item stopped being available) → dialog naming exactly which items failed, with
-  **Remove them and retry**. Never a bare "conflict".
-- **`ErrOverdueBlocked`** → shouldn't be reachable if 8.4 disabled the button, but handle it: the same
+  **Remove them and retry**. Never a bare "conflict". The failed lines also flip to their real status on the
+  page behind the dialog, so the two agree.
+- **`ErrOverdueBlocked`** → shouldn't be reachable if the dock already blocked it, but handle it: the same
   overdue notice, with the admin override if applicable.
 
 ### 8.6 Scan result ⚠
@@ -600,7 +649,7 @@ cancel, Escape, or a fresh scan.
 
 | Scan result | Surface |
 |---|---|
-| `available` | Large photo, name, `<Serial>`, `Available` chip. Buttons: **Add to cart** (primary, autofocused) · **Cancel**. |
+| `available` | Large photo, name, `<Serial>`, `Available` chip. Buttons: **Add to cart** (primary, autofocused) · **Cancel**. Adding pulses the dock; it does not navigate to the cart page. |
 | `checked_out` | Name, `<Serial>`, days out, and the custodian **for admins only** (§8.3). Buttons: **Check in** (primary) · **Cancel**. An optional damage-note field is collapsed under **Add a note**, expanded inline. |
 | `unavailable` | Name, `<Serial>`, `Unavailable` chip, reason. Single **Close**. No path to the cart. |
 | unknown serial (`ErrNotFound`) | The scanned string in mono, "Not a Stockroom item." Single **Close**. |
@@ -618,9 +667,9 @@ will scan continuously and should never have to press Cancel between items.
 Reached from the sidebar `Admin` group, visible only when `is_admin`. Not a separate app, not a separate
 theme. It is the same shell, `data-density="compact"`.
 
-- **Assets.** Table with create/edit/delete, photo upload, `available ⇄ unavailable` toggle. Delete is an
-  `alert-dialog` and is blocked server-side when custody is open; surface that as a specific message, not a
-  generic failure.
+- **Assets.** Flat unit table (§8.2, no model grouping) with create/edit/delete, photo upload, and the
+  `available ⇄ unavailable` toggle. Delete is an `alert-dialog` and is blocked server-side when custody is
+  open; surface that as a specific message, not a generic failure.
 - **Categories.** The three-level tree with inline rename, add-child, and delete. Depth is capped at 3
   server-side; the UI hides **Add child** on depth-3 nodes rather than letting the server reject it. Delete
   is blocked when the node has children or assets. Say which.
@@ -681,6 +730,9 @@ invisible; an input border may not.
   Never `outline: none` without a replacement.
 - Full keyboard operation: `Tab` order follows visual order; `/` focuses search; `Escape` closes the
   topmost layer only; `Enter` activates the focused row.
+- A model row is a real trigger, not a `<div>` with an `onclick`. It needs `aria-expanded`, `aria-controls`
+  pointing at its unit list, and `Enter` / `Space` to toggle. Bits UI's `collapsible` gives all three; a
+  hand-rolled row gives none of them.
 - Status is never colour-alone (§6).
 - Every icon-only button has an `aria-label`.
 - Dialogs trap focus and restore it to the trigger on close. Bits UI does this; don't fight it.
@@ -695,12 +747,17 @@ invisible; an input border may not.
 | What | Duration | Property |
 |---|---|---|
 | Hover, focus, checkbox | `--dur-fast` | `background-color`, `border-color` |
-| Dialog, drawer, popover | `--dur-normal` | `opacity` + `translate` |
+| Dialog, sheet, popover | `--dur-normal` | `opacity` + `translate` |
+| Model row caret on expand | `--dur-fast` | `transform: rotate(90deg)` |
 | Scan confirmation | `--dur-slow` | `opacity` |
 | Cart dock pulse on add | `--dur-fast` | `background-color` |
 
 Animate `opacity` and `transform` only. Never animate `height`, `width` or `box-shadow`. They force
-layout and the Wails webview on a school PC is not a fast machine. All easing is `--ease`. No spring
+layout and the Wails webview on a school PC is not a fast machine.
+
+**The unit accordion therefore does not slide open.** Units appear at once; only the caret rotates. A
+twenty-row expansion animating its height is exactly the layout thrash this rule exists to prevent, and the
+row is a filter step, not a reveal worth decorating. All easing is `--ease`. No spring
 physics, no bounce, no stagger, no page transitions.
 
 ---
@@ -757,11 +814,13 @@ Maps onto `TODO.md` Phase 6 (Week 8), which is where UI work is scheduled. Each 
 2. **shadcn-svelte init and base components.** Run the CLI in `packages/ui`, fix `components.json` aliases, add
    the §5.1 list, rework `Button` variants and `Table` density.
 3. **Stockroom components** (§5.2), built against fixtures, so no server is needed. `<StatusDot>`, `<Serial>`,
-   `<AssetRow>`, `<PhotoFrame>`, `<EmptyState>` first; they unblock everything.
+   `<UnitRow>`, `<PhotoFrame>`, `<EmptyState>` first; they unblock everything. `<ModelRow>` after
+   `<UnitRow>`, since it wraps it.
 4. **App shell** (§7) in the desktop app, with a stub sidebar and top bar.
 5. **Sign-in** (8.1) + `<ScanListener>` (§9) against `POST /auth/scan`. The first path that runs end to end, from scanner to database.
-6. **Browse + detail** (8.2, 8.3).
-7. **Cart dock + drawer + checkout** (8.4, 8.5).
+6. **Browse + detail** (8.2, 8.3). Build the flat unit list first, then wrap it in the model accordion, so
+   the admin table (8.7) and the browse list share one component from the start.
+7. **Cart dock + cart page + checkout** (8.4, 8.5).
 8. **Scan result** (8.6). The riskiest screen; do it once the loop below it is solid.
 9. **Admin panel** (8.7), `data-density="compact"`.
 10. **Mirror into `web-app`.** If steps 1 to 9 were done right this is import statements and routing, because
@@ -792,8 +851,24 @@ These block specific sections, not the whole document. Recorded from the grillin
 - **Q7. Who may see who holds an item?** Admins and the custodian only, or any signed-in student? Needs
   whoever owns student privacy at the school to decide. Until then §8.3 ships the admin-only default and
   the API withholds the field. *Blocks:* 8.3, 8.6.
-- **Q-B. `B1` vs `B1 + B3`.** Unit-level or model-level browsing. If `B1 + B3`, `TODO.md` Phase 3 needs a
-  per-model availability count. *Blocks:* 8.2.
 
 Also still open from `CLAUDE.md` §13 and relevant here: the scan-vs-typed keystroke threshold (§9) and
 `SESSION_IDLE_MINUTES`, which determines how aggressively the cart is discarded (8.4).
+
+---
+
+## 16. Decisions log
+
+**2026-09-10, list shape: `B3 + B1`, one accordion instead of two views.** Closes the former list-shape question.
+The earlier note left `B1` and `B3` as coexisting modes behind a toggle. A toggle is a setting somebody
+has to find, and the two audiences are not two people: the same student wants a count on Tuesday and a
+specific serial on Thursday. Folding `B1` into the expansion of a `B3` row serves both without a mode. Cost: a per-model
+availability count that `ListAssets` does not return yet (`TODO.md` Phase 3), and one more component pair,
+`<ModelRow>` over `<UnitRow>`. §8.2 has the rules.
+
+**2026-09-10, cart: bottom dock, full page.** Replaces the dock-expands-into-a-drawer shape. The dock stays
+because it is the part that stops someone walking off with an uncommitted cart. The drawer goes because
+420px of a 1024px Wails window is too much to spend on a panel you visit once per checkout, and because a
+cart page is the interaction every student already knows. The commit panel gets more room for the due-date
+picker and the admin custodian picker, and the dock stops carrying a commit button it was too small for.
+§8.4 has the rules.
