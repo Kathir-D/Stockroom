@@ -29,6 +29,18 @@ const (
 	StatusLost        AssetStatus = "lost"        // unused in v1
 )
 
+// Valid reports whether s is one of the asset_status enum labels. Callers
+// use it to reject a status from a client before Postgres does, so a typo in
+// a filter is a 400 with a useful message rather than a query error.
+func (s AssetStatus) Valid() bool {
+	switch s {
+	case StatusAvailable, StatusCheckedOut, StatusUnavailable,
+		StatusReserved, StatusMaintenance, StatusRetired, StatusLost:
+		return true
+	}
+	return false
+}
+
 type BookingStatus string
 
 const (

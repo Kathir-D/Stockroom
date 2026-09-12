@@ -122,7 +122,9 @@ The "Add" tag button in `App.svelte` never worked. Svelte 5's legacy compiler tu
 
 The grant migration's `alter default privileges` for sequences and functions has nothing reading it yet; the tables case is covered.
 
-Everything in `TODO.md` Phases 3 to 8 (browse, checkout, check-in, scanning, the admin asset and category API, the backup CLI) does not exist yet.
+Phase 3 (browse) is written but deliberately untested for now: `GetCategoryTree`, `ListAssets`, `GetAsset`, the three browse routes and `/files/`. It was verified by hand against the seeded database (every filter level, search, the detail payload, the error statuses, and that `/files/` serves a photo but not a directory listing). The seam list below still describes the coverage it needs when tests are added back.
+
+The rest of `TODO.md` Phases 4 to 8 (checkout, check-in, scanning, the admin asset and category API, the backup CLI) does not exist yet.
 
 Barcode scanner input handling. `lib/scanner.ts` is not written, and the keystroke-timing threshold needs real hardware to pin down (CLAUDE.md §10).
 
@@ -142,7 +144,7 @@ Test at `internal/stockroom` function boundaries (`ListAssets`, `ScanItem`, `Che
 
 ### Per-phase seam list
 
-**Phase 3 (browse).** `ListAssets`: category-tree filtering at each of the three levels, free-text search matching name/description/serial, `unavailable` assets still listed (they're not hidden, just not checkable-out), empty-filter returns everything.
+**Phase 3 (browse), written but not yet tested.** `ListAssets`: category-tree filtering at each of the three levels, free-text search matching name/description/serial, `unavailable` assets still listed (they're not hidden, just not checkable-out), empty-filter returns everything.
 
 **Phase 4 (cart checkout, scan, check-in — the core loop).** `CheckOutAssets`: a non-admin can only check out to themselves, `dueAt` is bounded (`now < dueAt <= now + 7 days`, enforced server-side regardless of what the client sends), `ErrOverdueBlocked` is returned unless the actor is an admin overriding, the whole cart fails together if any one asset isn't `available` (no partial checkout), exactly one `custody_events` row is written per asset, and `assets.status` flips for every item in the same transaction as the custody rows. `ScanItem`: a `checked_out` serial checks in immediately regardless of who checked it out; an `available` serial returns the same payload the click-to-open-detail path returns, so the frontend can't tell scan and click apart; an unknown serial is `ErrNotFound`. `CheckInAsset`: any signed-in user can check in any item, an optional damage note lands on `condition_in`, checking in something already checked in is a no-op error, not a duplicate row.
 

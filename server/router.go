@@ -48,6 +48,16 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /auth/logout", d.withSession(d.handleLogout, allowLimited))
 	mux.Handle("GET /me", d.withSession(d.handleMe, allowLimited))
 
+	// Browse. Any full session may read the catalogue; nothing here is
+	// admin-only (CLAUDE.md §7).
+	mux.Handle("GET /categories/tree", d.withSession(d.handleCategoryTree, fullOnly))
+	mux.Handle("GET /assets", d.withSession(d.handleListAssets, fullOnly))
+	mux.Handle("GET /assets/{id}", d.withSession(d.handleGetAsset, fullOnly))
+
+	// Photos, served straight off UPLOADS_DIR. Unauthenticated on purpose;
+	// see fileServer.
+	mux.Handle("GET /files/", fileServer(d.uploadsDir))
+
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))

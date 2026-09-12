@@ -36,11 +36,11 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] HTTP: `POST /auth/scan`, `POST /auth/password`, `POST /auth/set-password`, `POST /auth/logout`, `GET /me`, `/users…`, `POST /users/import`. `server/auth.go`, `server/users.go`. Import takes multipart (`file` + optional `photo_dir`) or a `text/csv` body
 
 ## Phase 3: Browse (Week 6)
-- [ ] `GetCategoryTree()`. Full tree in one call (Type → Category → Model) for the left-side filters
-- [ ] `ListAssets(filter)`. Filter by any category node (includes descendants), status, free-text (existing GIN index); returns category path + photo URL per asset
-- [ ] `GetAsset(id)`. Detail popup payload incl. current custodian (if checked out) and category path
-- [ ] Static file serving: `GET /files/…` from `UPLOADS_DIR`
-- [ ] HTTP: `GET /categories/tree`, `GET /assets?…`, `GET /assets/{id}`
+- [x] `GetCategoryTree()`. Full tree in one call (Type → Category → Model) for the left-side filters. `categories.go`; the table is a few dozen rows, so it is read flat and nested in Go rather than with recursive SQL. A row whose parent is missing, or which is its own parent, becomes a root instead of disappearing
+- [x] `ListAssets(filter)`. Filter by any category node (includes descendants, via a recursive CTE), status, free-text; returns category path + photo URL per asset. `assets.go`. Search matches two ways: `plainto_tsquery` over the existing GIN index for words and stemming, plus `ilike` over name/tag/description/serial for the partial identifiers a tsquery can't match (`T7iB` → `T7iBat-001`). `%` and `_` in the search text are escaped to literals. An unknown category id is `ErrNotFound` and an unknown status `ErrInvalid`, so a broken filter is never a silently empty list. `unavailable` assets are listed, not hidden
+- [x] `GetAsset(id)`. Detail popup payload incl. current custodian (if checked out) and category path. The open custody row is read whatever the status column says, so a drifted status still reports the real holder; custodian name falls back from first/last to `full_name` to the student number
+- [x] Static file serving: `GET /files/…` from `UPLOADS_DIR`. `server/files.go`. No session: the desktop app renders photos in `<img>` tags, which cannot carry the bearer token. Directory listings are refused
+- [x] HTTP: `GET /categories/tree`, `GET /assets?category=&status=&q=`, `GET /assets/{id}`. `server/assets.go`; all three need a full session, none is admin-only
 
 ## Phase 4: Core loop: scan, cart checkout, check-in (Week 6)
 - [ ] `ScanItem(actor, serial)`. The one function behind every item scan:
