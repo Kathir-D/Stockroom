@@ -356,7 +356,8 @@ stockroom/
 ├── server/                    # Go net/http JSON API on localhost; thin handlers over internal/stockroom
 │   ├── main.go, router.go, json.go
 │   ├── session.go             # token -> Actor middleware (Bearer header or cookie)
-│   └── auth.go, users.go      # handlers
+│   ├── files.go               # GET /files/... served from UPLOADS_DIR, no session
+│   └── auth.go, users.go, assets.go   # handlers
 ├── cmd/backup/                # CLI: export all tables to CSV (Task Scheduler / launchd)
 │   └── main.go
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
