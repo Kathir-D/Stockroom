@@ -122,7 +122,7 @@ func (db *DB) GetAsset(ctx context.Context, id string) (AssetDetail, error) {
 	// The open custody row is read regardless of status rather than only
 	// when the asset says checked_out, so a status that has drifted out of
 	// step with custody still shows the truth.
-	detail.Custody, err = db.currentCustody(ctx, a.ID)
+	detail.Custody, err = currentCustody(ctx, db.Pool, a.ID)
 	if err != nil {
 		return AssetDetail{}, err
 	}
@@ -231,13 +231,15 @@ func photoURL(stored *string) *string {
 
 // currentCustody returns the unreturned custody event for an asset, or nil if
 // it isn't out. Ordered newest-first so a stale duplicate open row (which
-// the schema permits but Phase 4 never writes) reports the current holder.
-func (db *DB) currentCustody(ctx context.Context, assetID string) (*AssetCustody, error) {
+// the schema permits but nothing writes) reports the current holder. It takes
+// a querier rather than hanging off DB because CheckInAsset reads the same
+// row inside its transaction.
+func currentCustody(ctx context.Context, q querier, assetID string) (*AssetCustody, error) {
 	var (
 		c                 AssetCustody
 		full, first, last *string
 	)
-	err := db.Pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		select ce.id, ce.custodian_id, p.full_name, p.first_name, p.last_name, p.student_number,
 		       ce.checked_out_at, ce.due_at, (ce.due_at is not null and ce.due_at < now())
 		from custody_events ce

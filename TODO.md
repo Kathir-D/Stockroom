@@ -47,22 +47,25 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [ ] `ListAssets`'s `order by a.name, a.asset_tag` needs to become: category in `Catagories.md`'s document order (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc) as the primary key, `available` before `checked_out`/`unavailable` as the secondary key, then name. `GetCategoryTree`'s own ordering should be checked against the same list while touching this.
 
 ## Phase 4: Core loop: scan, cart checkout, check-in (Week 6)
-- [ ] `ScanItem(actor, serial)`. The one function behind every item scan:
-  - asset `checked_out` → `CheckInAsset` immediately, return `{action: "checked_in", …}`
-  - asset `available` → return `{action: "detail", asset}` (same payload as `GetAsset`)
-  - asset `unavailable` → return `{action: "detail", asset}` with a flag so the UI can't add it to the cart
-  - unknown serial → `ErrNotFound`
-- [ ] `CheckOutAssets(actor, custodianID, assetIDs[], dueAt, overrideOverdue)`. Single transaction:
-  - non-admin: `custodianID` must equal actor; admin may pick anyone
-  - `dueAt` > now and ≤ now + 7 days (server-enforced)
-  - refuse with `ErrOverdueBlocked` if custodian has any row in `overdue_custody`, unless admin passes `overrideOverdue`
-  - every asset must be `available` (else `ErrConflict`, whole cart fails)
-  - insert one `custody_events` row per asset (`checked_out_by = actor`), set `assets.status = 'checked_out'`
-- [ ] `CheckInAsset(actor, assetID, damageNote?)`. Close the open `custody_events` row (`checked_in_by = actor`, `condition_in = note`), set status back to `available`; also callable directly by admin
-- [ ] `ListActiveCustody()`, `ListOverdueCustody()`. Over the existing views, joined with custodian names
-- [ ] `GetAssetHistory(assetID)`. Full past-custodian trail for one asset. **Admin-only** (2026-09-12: distinct from current-custodian visibility, which is open to everyone via `GetAsset`/`ListAssets`/`ScanItem` — this is the *historical* trail, `ErrForbidden` for a non-admin actor regardless of whose item it is)
-- [ ] `GetUserHistory(userID)`. Full custody trail for one user. Non-admin may only read their own (`ErrForbidden` otherwise); admin may read anyone's
-- [ ] HTTP: `POST /scan`, `POST /checkout`, `POST /assets/{id}/checkin`, `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history`, `GET /users/{id}/history`
+- [x] `ScanItem(actor, serial)`. The one function behind every item scan. `internal/stockroom/custody.go`:
+  - asset out (decided by the open custody row, not the status column, so drift can't answer "not checked out" to someone holding the item) → `CheckInAsset` immediately, return `{action: "checked_in", …}` with `returned_from` naming who had it
+  - asset `available` → return `{action: "detail", asset}` (byte-for-byte the `GetAsset` payload, so the frontend can't tell a scan from a click) with `checkable: true`
+  - asset `unavailable` → the same detail payload with `checkable: false`, which is the flag that closes the path to the cart. A just-checked-in item is `checkable: false` too: its dialog is a confirmation, not an add screen
+  - unknown serial → `ErrNotFound`; a blank one → `ErrInvalid`. The serial is trimmed first, because a scanner sends a trailing Enter
+- [x] `CheckOutAssets(actor, CheckoutInput)`. Single transaction:
+  - non-admin: `custodian_id` must equal the actor (blank means the actor); an admin may pick anyone. A non-admin sending `override_overdue` is `ErrForbidden`, not a silently dropped field
+  - `due_at` > now and ≤ now + `MaxCheckoutDays` (7), server-enforced. The error names the latest acceptable instant, because a date picker offering "seven days out" at end of day lands past the cap
+  - refuses with `ErrOverdueBlocked` if the custodian has any row in `overdue_custody`, unless an admin passes `override_overdue`; the message names what to bring back
+  - every asset must be `available`, checked under `for update` in id order (so two carts sharing an item can't deadlock) and including a guard on stray open custody rows. The whole cart fails together, naming which items weren't available
+  - a duplicate id in the cart is one item, not two: a cart is a set
+  - one `custody_events` row per asset (`checked_out_by = actor`) plus the `assets.status` flip, in the same transaction
+- [x] `CheckInAsset(actor, assetID, damageNote?)`. Closes the open `custody_events` row (`checked_in_by = actor`, `condition_in` = the trimmed note) and sets the status back to `available`. Any signed-in user may return any item. The **open custody row decides**, not the status column, so an asset whose status drifted still returns correctly; an item that is not out is `ErrConflict`, never a second row
+- [x] `ListActiveCustody()`, `ListOverdueCustody()`. Read through the `active_custody` / `overdue_custody` views so "overdue" has one definition, shared with the sign-in warning and the checkout block. **Admin-only**: the 2026-09-12 decision opens the *current holder of a named item* to everyone (via `ListAssets`/`GetAsset`/`ScanItem`), not the roster of who has what, which is an admin-panel screen. Rows carry custodian name, student number, serial, due date and `days_overdue`, which is what CLAUDE.md §8.7's overdue table needs
+- [x] `GetAssetHistory(assetID)`. Full past-custodian trail for one asset. **Admin-only** (`ErrForbidden` for a non-admin regardless of whose item it is), distinct from the current-custodian visibility that is open to everyone
+- [x] `GetUserHistory(userID)`. Full custody trail for one user. Non-admin may only read their own (`ErrForbidden` otherwise); admin may read anyone's
+- [x] HTTP: `POST /scan`, `POST /checkout`, `POST /assets/{id}/checkin` (an empty body is a check-in with no note), `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history`, `GET /users/{id}/history`. `server/custody.go`; all seven need a full session
+- [x] A limited session (scan login, no password set) is refused by `ScanItem`, `CheckOutAssets`, `CheckInAsset` and `GetUserHistory` in the package via `RequireFullSession`, not only by the router, so the rule doesn't depend on the HTTP layer
+- [x] Tested: `internal/stockroom/custody_test.go` (the rules, against the live database) and `server/custody_test.go` (statuses, routing, payload shape). Verified by hand with `curl` end to end as well: scan → detail, scan → check-in, cart checkout, the 7-day cap, the overdue block and its admin override, both history reads and their refusals
 
 ## Phase 5: Admin panel API (Week 7)
 - [ ] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (block if open custody), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`), asset photo upload → `UPLOADS_DIR/assets/`

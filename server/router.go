@@ -54,6 +54,20 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /assets", d.withSession(d.handleListAssets, fullOnly))
 	mux.Handle("GET /assets/{id}", d.withSession(d.handleGetAsset, fullOnly))
 
+	// The core loop: scan, cart checkout, check-in. Any full session may
+	// reach all three -- anyone signed in can return any item (CLAUDE.md §7)
+	// -- and the rules about who may check out what live in the package.
+	mux.Handle("POST /scan", d.withSession(d.handleScan, fullOnly))
+	mux.Handle("POST /checkout", d.withSession(d.handleCheckout, fullOnly))
+	mux.Handle("POST /assets/{id}/checkin", d.withSession(d.handleCheckIn, fullOnly))
+
+	// Custody reads. The two lists and the asset trail are admin-only,
+	// enforced inside internal/stockroom; a user's own history is not.
+	mux.Handle("GET /custody/active", d.withSession(d.handleActiveCustody, fullOnly))
+	mux.Handle("GET /custody/overdue", d.withSession(d.handleOverdueCustody, fullOnly))
+	mux.Handle("GET /assets/{id}/history", d.withSession(d.handleAssetHistory, fullOnly))
+	mux.Handle("GET /users/{id}/history", d.withSession(d.handleUserHistory, fullOnly))
+
 	// Photos, served straight off UPLOADS_DIR. Unauthenticated on purpose;
 	// see fileServer.
 	mux.Handle("GET /files/", fileServer(d.uploadsDir))

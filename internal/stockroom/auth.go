@@ -32,6 +32,18 @@ func RequireAdmin(a Actor) error {
 	return nil
 }
 
+// RequireFullSession refuses a limited session: a scan login by an account
+// that has never set a password has proven possession of a card and nothing
+// else, so it may only finish setting that password (CLAUDE.md §7). The
+// router enforces the same rule route by route; this is the copy that makes
+// it hold for every caller of the package, not only the HTTP layer.
+func RequireFullSession(a Actor) error {
+	if a.Limited {
+		return fmt.Errorf("%w: password not set", ErrForbidden)
+	}
+	return nil
+}
+
 // Auth owns sign-in, sign-out and session resolution. It holds the session
 // store so both frontends share one map (CLAUDE.md §4).
 type Auth struct {

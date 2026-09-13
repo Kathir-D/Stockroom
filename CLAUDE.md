@@ -316,6 +316,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 | See who currently holds a checked-out item | ✓ (any item, not just own) | ✓ |
 | View own custody history | ✓ | ✓ |
 | View any item's or user's full custody history | | ✓ |
+| Admin panel: the active-custody and overdue lists (who has what, across everyone) | | ✓ |
 | Admin panel: asset CRUD, mark unavailable, category tree CRUD | | ✓ |
 | Admin panel: user CRUD, roster CSV import, set/reset any password | | ✓ |
 | Admin panel: overdue list, override overdue-block on checkout, Backup Now | | ✓ |
@@ -519,6 +520,13 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **Custodian visibility, reversing the 2026-09-09 review tightening**: who currently holds a checked-out item is visible to any signed-in user, not admin-only. Applies only to the current holder — `GetAssetHistory`'s full past-custodian trail stays admin-only, and a non-admin's own history is available only via `GetUserHistory`. See §7.
 - [x] Browse list sort order (previously unspecified): categories in `Catagories.md`'s document order, not alphabetical; within any list, available units sort before checked-out ones.
 - [x] Backup: nightly CSV → local folder → **`rclone copy` pushes it to Google Drive** directly, replacing the "Drive desktop client syncs a local folder, no cloud API code" plan. One-time interactive `rclone config` OAuth setup instead of hand-written Google API/OAuth code. See §11.
+
+**Closed (2026-09-12, building Phase 4)**
+- [x] **The two custody *lists* are admin-only.** The 2026-09-12 decision opens the current holder of a *named* item to everyone (`ListAssets`, `GetAsset`, `ScanItem` name it for every actor). `ListActiveCustody` / `ListOverdueCustody` are the other thing: the roster of who has what, which §8.7 of the design doc specs as admin-panel screens. A student who wants to know who has the lens they want still finds it in the browse list.
+- [x] **The 7-day cap is an exact instant**, `now + 7×24h` at the moment of the request, not "the end of the seventh day". A date picker that offers a *date* has to send an instant at or before that, and the `ErrInvalid` message names the instant so the UI can say why. Frontend work in Phase 6 has to respect it.
+- [x] **A cart is a set.** The same asset id twice is one item, not a failed checkout.
+- [x] **The open custody row, not `assets.status`, decides whether an item is out.** Check-in follows the row (matching what `GetAsset` already did for the current custodian), and checkout refuses an asset that claims to be available while a row is still open. Status drift becomes visible instead of duplicating custody rows.
+- [x] **A limited session is refused inside `internal/stockroom`**, not only by the router: `RequireFullSession` sits beside `RequireAdmin` and guards every core-loop write.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
