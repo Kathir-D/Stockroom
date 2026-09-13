@@ -243,10 +243,16 @@ func (p *stagedPhoto) rollbackWith(err error) error {
 }
 
 // storePhoto writes src to <uploads>/<dir>/<base><ext> and returns the path
-// relative to uploads. It is the whole sequence run at once, for a caller with
-// no database write to keep in step with the file; SetAssetPhoto, which has
-// one, drives the steps itself and takes the same lock around them.
-func storePhoto(uploads, dir, base, ext string, src io.Reader) (string, error) {
+// relative to uploads. It is the whole sequence run at once, with the lock
+// held across all of it; SetAssetPhoto drives the same steps itself because
+// it has more to do between them.
+//
+// publishRow, if it is not nil, runs once the new file is in place and before
+// the copy it replaced is dropped: that is where a caller writes the database
+// row naming the photo, so the file and the column settle inside one lock. An
+// error from it rolls the upload back and comes out of storePhoto unchanged,
+// so errors.Is upstream still matches.
+func storePhoto(uploads, dir, base, ext string, src io.Reader, publishRow func(rel string) error) (string, error) {
 	defer lockPhoto(dir, base)()
 
 	p, err := stagePhoto(uploads, dir, base, ext, src)
@@ -255,6 +261,11 @@ func storePhoto(uploads, dir, base, ext string, src io.Reader) (string, error) {
 	}
 	if err := p.publish(); err != nil {
 		return "", err
+	}
+	if publishRow != nil {
+		if err := publishRow(p.rel); err != nil {
+			return "", p.rollbackWith(err)
+		}
 	}
 	p.commit()
 	return p.rel, nil

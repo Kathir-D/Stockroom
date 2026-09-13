@@ -155,17 +155,39 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 		return "", fmt.Errorf("%w: a first or last name is required", ErrInvalid)
 	}
 
-	var photoPath *string
-	if photo != "" {
-		rel, err := photos.copyFor(photo, sn)
-		if err != nil {
-			return "", err
-		}
-		photoPath = &rel
+	if photo == "" {
+		return db.upsertProfileRow(ctx, sn, first, last, nil)
 	}
 
+	src, ext, err := photos.openFor(photo)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	// The row is written inside the photo's lock, after the new file is in
+	// place and before the copy it replaced is dropped — the order
+	// SetAssetPhoto uses, for the same reason (photos.go). Two imports naming
+	// this student under different extensions would otherwise each find the
+	// other's file stale and delete it on commit, and whichever upsert landed
+	// after that would leave the row naming a path that is already gone.
+	var action RosterAction
+	_, err = storePhoto(photos.uploads, "profiles", sn, ext, src, func(rel string) error {
+		var err error
+		action, err = db.upsertProfileRow(ctx, sn, first, last, &rel)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return action, nil
+}
+
+// upsertProfileRow writes one roster line to profiles. A nil photoPath leaves
+// whatever photo the account already had.
+func (db *DB) upsertProfileRow(ctx context.Context, sn, first, last string, photoPath *string) (RosterAction, error) {
 	var inserted bool
-	err = db.Pool.QueryRow(ctx, `
+	err := db.Pool.QueryRow(ctx, `
 		insert into profiles (student_number, first_name, last_name, full_name, photo_path)
 		values ($1, $2, $3, $4, $5)
 		on conflict (student_number) do update
@@ -184,14 +206,13 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 	return RosterUpdated, nil
 }
 
-// copyFor copies src (absolute, or relative to the store's dir) to
-// <uploads>/profiles/<studentNumber>.<ext> and returns the path relative to
-// uploads, which is what goes in the database and what /files/ serves. The
-// extension is required: it is what tells a browser how to render the file,
-// and it is part of the stored path. Which extensions are allowed is not
-// checked here; see uploadPhotoExtensions for why the upload path is
-// stricter than this one.
-func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
+// openFor opens src (absolute, or relative to the store's dir) and returns it
+// alongside its lowercased extension; the caller closes the file. The photo
+// lands at <uploads>/profiles/<studentNumber>.<ext>, so the extension is
+// required: it is what tells a browser how to render the file, and it is part
+// of the stored path. Which extensions are allowed is not checked here; see
+// uploadPhotoExtensions for why the upload path is stricter than this one.
+func (ps photoStore) openFor(src string) (*os.File, string, error) {
 	if !filepath.IsAbs(src) {
 		dir := ps.dir
 		if dir == "" {
@@ -201,13 +222,11 @@ func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
 	}
 	ext := strings.ToLower(filepath.Ext(src))
 	if ext == "" {
-		return "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
+		return nil, "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
 	}
 	in, err := os.Open(src)
 	if err != nil {
-		return "", fmt.Errorf("%w: photo %s: %v", ErrInvalid, src, err)
+		return nil, "", fmt.Errorf("%w: photo %s: %v", ErrInvalid, src, err)
 	}
-	defer in.Close()
-
-	return storePhoto(ps.uploads, "profiles", studentNumber, ext, in)
+	return in, ext, nil
 }

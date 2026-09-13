@@ -22,12 +22,12 @@ func (errReader) Read([]byte) (int, error) { return 0, errors.New("connection re
 
 func TestStorePhotoKeepsTheOldPhotoWhenTheCopyFails(t *testing.T) {
 	uploads := t.TempDir()
-	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first")); err != nil {
+	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first"), nil); err != nil {
 		t.Fatalf("storePhoto: %v", err)
 	}
 
 	half := io.MultiReader(strings.NewReader("half a "), errReader{})
-	if _, err := storePhoto(uploads, "assets", "unit-1", ".png", half); err == nil {
+	if _, err := storePhoto(uploads, "assets", "unit-1", ".png", half, nil); err == nil {
 		t.Fatal("storePhoto with a failing reader succeeded, want an error")
 	}
 
@@ -37,7 +37,7 @@ func TestStorePhotoKeepsTheOldPhotoWhenTheCopyFails(t *testing.T) {
 
 func TestStagedPhotoRollbackRestoresWhatItReplaced(t *testing.T) {
 	uploads := t.TempDir()
-	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first")); err != nil {
+	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first"), nil); err != nil {
 		t.Fatalf("storePhoto: %v", err)
 	}
 
@@ -76,7 +76,7 @@ func TestStagedPhotoRollbackRemovesAPhotoThatReplacedNothing(t *testing.T) {
 
 func TestStagedPhotoDropsTheOtherExtensionOnlyOnCommit(t *testing.T) {
 	uploads := t.TempDir()
-	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first")); err != nil {
+	if _, err := storePhoto(uploads, "assets", "unit-1", ".jpg", strings.NewReader("first"), nil); err != nil {
 		t.Fatalf("storePhoto: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestStorePhotoSerializesUploadsOfTheSamePhoto(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ext := exts[i%len(exts)]
-			if _, err := storePhoto(uploads, "assets", "unit-1", ext, strings.NewReader(ext)); err != nil {
+			if _, err := storePhoto(uploads, "assets", "unit-1", ext, strings.NewReader(ext), nil); err != nil {
 				t.Errorf("storePhoto: %v", err)
 			}
 		}(i)
