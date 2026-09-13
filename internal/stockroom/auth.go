@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
 // Actor is the signed-in account behind a request, resolved from the session
-// token by Auth.Resolve and passed into every function that needs to know
+// token by DB.Resolve and passed into every function that needs to know
 // who is calling. Handlers never read the profile table for this themselves.
 type Actor struct {
 	ID            string
@@ -44,23 +43,6 @@ func RequireFullSession(a Actor) error {
 	return nil
 }
 
-// Auth owns sign-in, sign-out and session resolution. It holds the session
-// store so both frontends share one map (CLAUDE.md §4).
-type Auth struct {
-	db       *DB
-	Sessions *SessionStore
-}
-
-// NewAuth wires a session store with the given idle timeout to db. The
-// store is handed to db as well, because the account operations that live
-// there (an admin delete or password reset) drop the affected user's
-// sessions themselves rather than leaving it to the caller.
-func NewAuth(db *DB, idle time.Duration) *Auth {
-	a := &Auth{db: db, Sessions: NewSessionStore(idle)}
-	db.sessions = a.Sessions
-	return a
-}
-
 // LoginResult is what both login paths return. NeedsPassword is true for a
 // scan login by an account with no password: the token is a limited session
 // whose only permitted call is SetInitialPassword.
@@ -76,12 +58,12 @@ type LoginResult struct {
 // scan (§10); the server trusts that decision. An unknown number is
 // ErrNotFound so the UI can say "not registered" rather than "wrong
 // password".
-func (a *Auth) LoginByScan(ctx context.Context, studentNumber string) (LoginResult, error) {
+func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResult, error) {
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	p, err := a.db.profileByStudentNumber(ctx, sn)
+	p, err := db.profileByStudentNumber(ctx, sn)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -89,7 +71,7 @@ func (a *Auth) LoginByScan(ctx context.Context, studentNumber string) (LoginResu
 	// SetInitialPassword read it, so a blank column can still be set from
 	// the first scan login instead of locking the account out.
 	limited := p.PasswordHash == nil || *p.PasswordHash == ""
-	return a.openSession(ctx, p, limited)
+	return db.openSession(ctx, p, limited)
 }
 
 // LoginByPassword signs in from a typed student number and password. A wrong
@@ -97,12 +79,12 @@ func (a *Auth) LoginByScan(ctx context.Context, studentNumber string) (LoginResu
 // response does not reveal which numbers exist. An account that has never
 // set a password gets ErrPasswordNotSet, because the fix (scan the card) is
 // different from "try again".
-func (a *Auth) LoginByPassword(ctx context.Context, studentNumber, password string) (LoginResult, error) {
+func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password string) (LoginResult, error) {
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	p, err := a.db.profileByStudentNumber(ctx, sn)
+	p, err := db.profileByStudentNumber(ctx, sn)
 	if errors.Is(err, ErrNotFound) {
 		return LoginResult{}, ErrBadCredentials
 	}
@@ -112,17 +94,17 @@ func (a *Auth) LoginByPassword(ctx context.Context, studentNumber, password stri
 	if err := CheckPassword(p.PasswordHash, password); err != nil {
 		return LoginResult{}, err
 	}
-	return a.openSession(ctx, p, false)
+	return db.openSession(ctx, p, false)
 }
 
-func (a *Auth) openSession(ctx context.Context, p Profile, limited bool) (LoginResult, error) {
-	sess, err := a.Sessions.Create(p.ID, limited)
+func (db *DB) openSession(ctx context.Context, p Profile, limited bool) (LoginResult, error) {
+	sess, err := db.Sessions.Create(p.ID, limited)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	overdue, err := a.db.hasOverdue(ctx, p.ID)
+	overdue, err := db.hasOverdue(ctx, p.ID)
 	if err != nil {
-		a.Sessions.Delete(sess.Token)
+		db.Sessions.Delete(sess.Token)
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: sess.Token, NeedsPassword: limited, HasOverdue: overdue, Profile: p}, nil
@@ -133,12 +115,12 @@ func (a *Auth) openSession(ctx context.Context, p Profile, limited bool) (LoginR
 // no password, null or blank, matching what LoginByScan calls a limited
 // session (ErrConflict otherwise); admins reset existing passwords with
 // SetUserPassword.
-func (a *Auth) SetInitialPassword(ctx context.Context, actor Actor, password string) error {
+func (db *DB) SetInitialPassword(ctx context.Context, actor Actor, password string) error {
 	hash, err := HashPassword(password)
 	if err != nil {
 		return err
 	}
-	tag, err := a.db.Pool.Exec(ctx,
+	tag, err := db.Pool.Exec(ctx,
 		`update profiles set password_hash = $2
 		 where id = $1 and (password_hash is null or password_hash = '')`,
 		actor.ID, hash)
@@ -148,30 +130,30 @@ func (a *Auth) SetInitialPassword(ctx context.Context, actor Actor, password str
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("%w: password already set", ErrConflict)
 	}
-	a.Sessions.Upgrade(actor.Token)
+	db.Sessions.Upgrade(actor.Token)
 	return nil
 }
 
 // Logout ends the actor's session.
-func (a *Auth) Logout(actor Actor) {
-	a.Sessions.Delete(actor.Token)
+func (db *DB) Logout(actor Actor) {
+	db.Sessions.Delete(actor.Token)
 }
 
 // Resolve turns a session token into an Actor. The profile is reloaded from
 // the database on every call, so an admin flag change or a deleted account
 // takes effect on the next request, not at the next login. A missing,
 // expired, or orphaned token is ErrUnauthorized.
-func (a *Auth) Resolve(ctx context.Context, token string) (Actor, error) {
+func (db *DB) Resolve(ctx context.Context, token string) (Actor, error) {
 	if token == "" {
 		return Actor{}, ErrUnauthorized
 	}
-	sess, ok := a.Sessions.Get(token)
+	sess, ok := db.Sessions.Get(token)
 	if !ok {
 		return Actor{}, ErrUnauthorized
 	}
-	p, err := a.db.profileByID(ctx, sess.ProfileID)
+	p, err := db.profileByID(ctx, sess.ProfileID)
 	if errors.Is(err, ErrNotFound) {
-		a.Sessions.Delete(token)
+		db.Sessions.Delete(token)
 		return Actor{}, ErrUnauthorized
 	}
 	if err != nil {
@@ -193,12 +175,12 @@ type MeResult struct {
 
 // Me returns the actor's own profile. Any session, including a limited one,
 // may call it, because the set-password screen shows who is signing in.
-func (a *Auth) Me(ctx context.Context, actor Actor) (MeResult, error) {
-	p, err := a.db.profileByID(ctx, actor.ID)
+func (db *DB) Me(ctx context.Context, actor Actor) (MeResult, error) {
+	p, err := db.profileByID(ctx, actor.ID)
 	if err != nil {
 		return MeResult{}, err
 	}
-	overdue, err := a.db.hasOverdue(ctx, actor.ID)
+	overdue, err := db.hasOverdue(ctx, actor.ID)
 	if err != nil {
 		return MeResult{}, err
 	}
@@ -231,6 +213,7 @@ func scanProfile(row pgx.Row) (Profile, error) {
 	if err != nil {
 		return Profile{}, fmt.Errorf("scan profile: %w", err)
 	}
+	p.PhotoURL = photoURL(p.PhotoPath)
 	return p, nil
 }
 

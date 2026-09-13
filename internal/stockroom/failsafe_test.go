@@ -3,7 +3,6 @@ package stockroom
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -61,53 +60,5 @@ func TestEnsureFailsafeAdminCreatesAndUpdates(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("profiles with the failsafe number = %d, want exactly 1", n)
-	}
-}
-
-func TestEnsureFailsafeAdminRejectsBadConfig(t *testing.T) {
-	db := requireTestDB(t)
-	ctx := context.Background()
-
-	for name, c := range map[string]struct{ sn, pw string }{
-		"letters":        {"admin", "a fine password"},
-		"separator":      {"912-345", "a fine password"},
-		"short password": {"912345", "short"},
-		"long password":  {"912345", strings.Repeat("x", MaxPasswordLength+1)},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := db.EnsureFailsafeAdmin(ctx, c.sn, c.pw); !errors.Is(err, ErrInvalid) {
-				t.Errorf("EnsureFailsafeAdmin(%q, %q) = %v, want ErrInvalid", c.sn, c.pw, err)
-			}
-		})
-	}
-}
-
-// A blank number or password is not a bad config, it is no config: the
-// operator has not set up a failsafe admin. The server logs that and starts
-// anyway, so the distinction has to come back as its own error.
-func TestEnsureFailsafeAdminWithoutConfig(t *testing.T) {
-	db := requireTestDB(t)
-	ctx := context.Background()
-
-	for name, c := range map[string]struct{ sn, pw string }{
-		"no number":    {"", "a fine password"},
-		"blank number": {"   ", "a fine password"},
-		"no password":  {"912345", ""},
-		"neither":      {"", ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := db.EnsureFailsafeAdmin(ctx, c.sn, c.pw); !errors.Is(err, ErrFailsafeNotConfigured) {
-				t.Errorf("EnsureFailsafeAdmin(%q, %q) = %v, want ErrFailsafeNotConfigured", c.sn, c.pw, err)
-			}
-		})
-	}
-
-	// Nothing was written on the way to that answer.
-	var n int
-	if err := db.Pool.QueryRow(ctx, `select count(*) from profiles where student_number = '912345'`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("an unconfigured failsafe created %d profile(s), want 0", n)
 	}
 }

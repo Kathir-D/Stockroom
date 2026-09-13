@@ -31,7 +31,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := stockroom.Open(ctx, cfg.DatabaseURL)
+	db, err := stockroom.Open(ctx, cfg.DatabaseURL, stockroom.Options{
+		SessionIdle: time.Duration(cfg.SessionIdleMinutes) * time.Minute,
+		UploadsDir:  cfg.UploadsDir,
+		BackupDir:   cfg.BackupDir,
+	})
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
@@ -49,8 +53,6 @@ func main() {
 		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
 	}
 
-	auth := stockroom.NewAuth(db, time.Duration(cfg.SessionIdleMinutes)*time.Minute)
-
 	// ReadTimeout bounds the body as well as the headers. Without it a photo
 	// upload that trickles in a byte at a time holds a connection and its
 	// goroutine open forever, and ReadHeaderTimeout alone does not touch that
@@ -58,7 +60,7 @@ func main() {
 	// picture needs over loopback and far shorter than forever.
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
-		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir, backupDir: cfg.BackupDir}),
+		Handler:           newRouter(deps{db: db}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       60 * time.Second,
 	}

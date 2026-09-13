@@ -18,7 +18,7 @@ func (d deps) handleLoginByScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	res, err := d.auth.LoginByScan(r.Context(), in.StudentNumber)
+	res, err := d.db.LoginByScan(r.Context(), in.StudentNumber)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -37,7 +37,7 @@ func (d deps) handleLoginByPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	res, err := d.auth.LoginByPassword(r.Context(), in.StudentNumber, in.Password)
+	res, err := d.db.LoginByPassword(r.Context(), in.StudentNumber, in.Password)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -56,7 +56,7 @@ func (d deps) handleSetInitialPassword(w http.ResponseWriter, r *http.Request, a
 		writeError(w, err)
 		return
 	}
-	if err := d.auth.SetInitialPassword(r.Context(), actor, in.Password); err != nil {
+	if err := d.db.SetInitialPassword(r.Context(), actor, in.Password); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -65,14 +65,14 @@ func (d deps) handleSetInitialPassword(w http.ResponseWriter, r *http.Request, a
 
 // POST /auth/logout
 func (d deps) handleLogout(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	d.auth.Logout(actor)
+	d.db.Logout(actor)
 	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // GET /me
 func (d deps) handleMe(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	res, err := d.auth.Me(r.Context(), actor)
+	res, err := d.db.Me(r.Context(), actor)
 	if err != nil {
 		writeError(w, err)
 		return

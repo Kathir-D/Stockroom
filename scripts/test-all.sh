@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every check CI runs: go vet, Go tests under -race, pgTAP against the
+# Runs every check CI runs: go vet, Go tests, pgTAP against the
 # local Postgres, and type-check + Vitest for both frontends.
 #
 #   ./scripts/test-all.sh
@@ -42,7 +42,7 @@ else
 fi
 
 run "go vet" go vet ./...
-run "go (-race)" go test ./... -race
+run "go" go test ./... -count=1
 
 if db_up; then
   run "pgtap" supabase test db

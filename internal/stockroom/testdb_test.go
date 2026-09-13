@@ -27,7 +27,7 @@ func requireTestDB(t *testing.T) *DB {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db, err := Open(ctx, testDatabaseURL())
+	db, err := Open(ctx, testDatabaseURL(), Options{})
 	if err != nil {
 		if os.Getenv("STOCKROOM_REQUIRE_DB") == "1" {
 			t.Fatalf("database required but unavailable: %v", err)
@@ -79,7 +79,7 @@ func insertTestProfile(t *testing.T, db *DB, isAdmin bool, password string) Prof
 	return p
 }
 
-// actorFor builds the Actor that Auth.Resolve would produce for p with a
+// actorFor builds the Actor that DB.Resolve would produce for p with a
 // full (not limited) session, for calling package functions directly.
 func actorFor(p Profile) Actor {
 	sn := ""

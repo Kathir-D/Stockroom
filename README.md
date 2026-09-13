@@ -67,7 +67,7 @@ Run every suite (Go, pgTAP against the local Postgres, and the frontend's Vitest
 ./scripts/test-all.sh
 ```
 
-The database suites need `supabase start` to have been run first. [CI.md](CI.md) is the quick reference for what the suites cover, how to add new tests, and how to require them before a PR can merge. [TESTING.md](TESTING.md) has the full per-file detail.
+The database suites need `supabase start` to have been run first. The suite is deliberately small (one happy path and one permission gate per module); [TESTING.md](TESTING.md) lists what runs and what was cut, and [CI.md](CI.md) covers the GitHub Actions job and branch protection.
 
 ## Adding/editing/removing assets and tags
 

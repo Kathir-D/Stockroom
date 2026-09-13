@@ -23,6 +23,17 @@ import (
 // a client can send anything (CLAUDE.md §7).
 const MaxCheckoutDays = 7
 
+// openCustodySQL is the one definition of "this asset is out": an unreturned
+// custody row exists for it. Every check that decides between borrowed and
+// on the shelf -- the scan branch, the cart lock, the delete and status
+// refusals -- uses this predicate rather than the status column, so drift
+// between the two is visible instead of duplicated (CLAUDE.md §13). The
+// argument is the asset id expression, so it can name a joined column or a
+// placeholder.
+func openCustodySQL(assetID string) string {
+	return `exists (select 1 from custody_events oc where oc.asset_id = ` + assetID + ` and oc.checked_in_at is null)`
+}
+
 // querier is the subset of pgx both *pgxpool.Pool and pgx.Tx satisfy, so the
 // helpers below read the same rows inside a transaction and outside one.
 type querier interface {
@@ -161,8 +172,7 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 		open bool
 	)
 	err := db.Pool.QueryRow(ctx, `
-		select a.id, exists (select 1 from custody_events ce
-		                     where ce.asset_id = a.id and ce.checked_in_at is null)
+		select a.id, `+openCustodySQL("a.id")+`
 		from assets a where a.serial_number = $1`, serial).Scan(&id, &open)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScanResult{}, fmt.Errorf("%w: no item with serial %q", ErrNotFound, serial)
@@ -463,9 +473,7 @@ func lockCartAssets(ctx context.Context, q querier, ids []string) ([]CheckoutIte
 	}
 
 	rows, err := q.Query(ctx, `
-		select a.id, a.asset_tag, a.name, a.serial_number, a.status,
-		       exists (select 1 from custody_events ce
-		               where ce.asset_id = a.id and ce.checked_in_at is null)
+		select a.id, a.asset_tag, a.name, a.serial_number, a.status, `+openCustodySQL("a.id")+`
 		from assets a
 		where a.id in (`+strings.Join(placeholders, ", ")+`)
 		order by a.id

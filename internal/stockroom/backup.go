@@ -37,17 +37,17 @@ type TableExport struct {
 	Rows  int64  `json:"rows"`
 }
 
-// BackupNow runs the export into baseDir, which the server passes from
-// BACKUP_DIR. Admin-only, like every other admin-panel action.
-func (db *DB) BackupNow(ctx context.Context, actor Actor, baseDir string) (BackupResult, error) {
+// BackupNow runs the export into BackupDir. Admin-only, like every other
+// admin-panel action.
+func (db *DB) BackupNow(ctx context.Context, actor Actor) (BackupResult, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return BackupResult{}, err
 	}
-	return db.ExportAllTablesToCSV(ctx, baseDir)
+	return db.ExportAllTablesToCSV(ctx)
 }
 
 // ExportAllTablesToCSV writes one CSV per table into
-// <baseDir>/<yyyy-mm-dd>/<table>.csv and returns what it wrote. Running twice
+// <BackupDir>/<yyyy-mm-dd>/<table>.csv and returns what it wrote. Running twice
 // in a day replaces the day's folder rather than piling up copies.
 //
 // The table list comes from the database, not from a list in Go, so a table
@@ -62,7 +62,8 @@ func (db *DB) BackupNow(ctx context.Context, actor Actor, baseDir string) (Backu
 // the reload fails on the foreign key. A run that wrote straight into the
 // dated folder and then died would leave half the tables in a folder that
 // looks exactly like a whole backup, which is worse than leaving yesterday's.
-func (db *DB) ExportAllTablesToCSV(ctx context.Context, baseDir string) (BackupResult, error) {
+func (db *DB) ExportAllTablesToCSV(ctx context.Context) (BackupResult, error) {
+	baseDir := db.BackupDir
 	if baseDir == "" {
 		return BackupResult{}, fmt.Errorf("%w: BACKUP_DIR is not set, so there is nowhere to write the backup", ErrNotConfigured)
 	}

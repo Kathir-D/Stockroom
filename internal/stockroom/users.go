@@ -174,7 +174,7 @@ func (db *DB) DeleteUser(ctx context.Context, actor Actor, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	db.dropSessions(id)
+	db.Sessions.DeleteForProfile(id)
 	return nil
 }
 
@@ -196,6 +196,6 @@ func (db *DB) SetUserPassword(ctx context.Context, actor Actor, id, password str
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	db.dropSessions(id)
+	db.Sessions.DeleteForProfile(id)
 	return nil
 }

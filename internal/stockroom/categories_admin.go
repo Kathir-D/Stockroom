@@ -95,21 +95,21 @@ func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	shape, err := categoryShape(ctx, tx)
+	tree, err := loadCategoryTree(ctx, tx)
 	if err != nil {
 		return Category{}, err
 	}
 	if in.ParentID != nil {
-		if _, ok := shape.byID[*in.ParentID]; !ok {
+		if _, ok := tree.byID[*in.ParentID]; !ok {
 			return Category{}, fmt.Errorf("%w: category %s", ErrNotFound, *in.ParentID)
 		}
-		if shape.depth[*in.ParentID] >= MaxCategoryDepth {
+		if tree.depth[*in.ParentID] >= MaxCategoryDepth {
 			return Category{}, fmt.Errorf("%w: %q is already at the deepest level (%d), so it cannot have children",
-				ErrInvalid, shape.byID[*in.ParentID].Name, MaxCategoryDepth)
+				ErrInvalid, tree.byID[*in.ParentID].Name, MaxCategoryDepth)
 		}
 	}
 
-	order := shape.nextSortOrder(in.ParentID)
+	order := tree.nextSortOrder(in.ParentID)
 	if in.SortOrder != nil {
 		order = *in.SortOrder
 	}
@@ -144,15 +144,15 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	shape, err := categoryShape(ctx, tx)
+	tree, err := loadCategoryTree(ctx, tx)
 	if err != nil {
 		return Category{}, err
 	}
-	node, ok := shape.byID[id]
+	node, ok := tree.byID[id]
 	if !ok {
 		return Category{}, fmt.Errorf("%w: no category %s", ErrNotFound, id)
 	}
-	if err := shape.checkMove(node, in.ParentID); err != nil {
+	if err := tree.checkMove(node, in.ParentID); err != nil {
 		return Category{}, err
 	}
 
@@ -163,7 +163,7 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 	case !sameParent(node.ParentID, in.ParentID):
 		// A node arriving in a level it has never been in has no position
 		// there, and its old number means nothing among its new siblings.
-		order = shape.nextSortOrder(in.ParentID)
+		order = tree.nextSortOrder(in.ParentID)
 	}
 
 	c, err := scanCategory(tx.QueryRow(ctx, `
@@ -234,157 +234,36 @@ func (db *DB) DeleteCategory(ctx context.Context, actor Actor, id string) error 
 	return nil
 }
 
-// categoryTreeShape is the tree measured, which is what the writes above need
-// and the reads don't: how deep each node sits, how tall the branch under it
-// is, and who its siblings are. One read of the whole table (a few dozen
-// rows) answers all three.
-type categoryTreeShape struct {
-	byID     map[string]Category
-	depth    map[string]int      // 1 for a Type at the root
-	height   map[string]int      // 0 for a node with no children
-	children map[string][]string // parent id -> child ids; "" holds the roots
-}
-
-func categoryShape(ctx context.Context, q querier) (categoryTreeShape, error) {
-	cats, err := loadCategories(ctx, q)
-	if err != nil {
-		return categoryTreeShape{}, err
-	}
-	return measureCategories(cats), nil
-}
-
-// measureCategories fills in the depths and heights. A row whose parent is
-// missing, or which is its own parent, counts as a root, the same reading
-// buildCategoryTree gives it, so a malformed row is measured rather than
-// skipped.
-func measureCategories(cats []Category) categoryTreeShape {
-	s := categoryTreeShape{
-		byID:     make(map[string]Category, len(cats)),
-		depth:    make(map[string]int, len(cats)),
-		height:   make(map[string]int, len(cats)),
-		children: make(map[string][]string, len(cats)),
-	}
-	for _, c := range cats {
-		s.byID[c.ID] = c
-	}
-	for _, c := range cats {
-		s.children[s.parentKey(c)] = append(s.children[s.parentKey(c)], c.ID)
-	}
-
-	// Depth walks up. The seen set stops a parent_id cycle, which nothing
-	// writes but which would otherwise hang the loop.
-	for _, c := range cats {
-		depth, seen := 0, map[string]bool{}
-		for node := c; !seen[node.ID]; {
-			seen[node.ID] = true
-			depth++
-			parent, ok := s.byID[s.parentKey(node)]
-			if !ok {
-				break
-			}
-			node = parent
-		}
-		s.depth[c.ID] = depth
-	}
-
-	// Height walks down, memoised, with the same cycle guard.
-	var measure func(id string, seen map[string]bool) int
-	measure = func(id string, seen map[string]bool) int {
-		if h, done := s.height[id]; done {
-			return h
-		}
-		if seen[id] {
-			return 0
-		}
-		seen[id] = true
-		h := 0
-		for _, child := range s.children[id] {
-			if ch := measure(child, seen) + 1; ch > h {
-				h = ch
-			}
-		}
-		s.height[id] = h
-		return h
-	}
-	for _, c := range cats {
-		measure(c.ID, map[string]bool{})
-	}
-	return s
-}
-
-// parentKey is the children map's key for c: its parent id, or "" when it is
-// a root by any of the three readings (no parent, a parent that isn't in the
-// table, or itself).
-func (s categoryTreeShape) parentKey(c Category) string {
-	if c.ParentID == nil || *c.ParentID == c.ID {
-		return ""
-	}
-	if _, ok := s.byID[*c.ParentID]; !ok {
-		return ""
-	}
-	return *c.ParentID
-}
-
-// nextSortOrder is one past the highest position among the children of
-// parent, so a new node lands after its siblings. Gaps and duplicates are
-// harmless (the name breaks a tie), so nothing renumbers the level.
-func (s categoryTreeShape) nextSortOrder(parent *string) int {
-	key := ""
-	if parent != nil {
-		key = *parent
-	}
-	next := 1
-	for _, id := range s.children[key] {
-		if order := s.byID[id].SortOrder; order >= next {
-			next = order + 1
-		}
-	}
-	return next
-}
-
 // checkMove decides whether node may hang off parent: not itself, not one of
 // its own descendants, and not so deep that the branch under it runs past
 // MaxCategoryDepth.
-func (s categoryTreeShape) checkMove(node Category, parent *string) error {
+func (t categoryTree) checkMove(node Category, parent *string) error {
 	if parent == nil {
-		if 1+s.height[node.ID] > MaxCategoryDepth {
-			return s.tooDeep(node, 1)
+		if 1+t.height[node.ID] > MaxCategoryDepth {
+			return t.tooDeep(node, 1)
 		}
 		return nil
 	}
 	if *parent == node.ID {
 		return fmt.Errorf("%w: a category cannot be its own parent", ErrInvalid)
 	}
-	target, ok := s.byID[*parent]
+	target, ok := t.byID[*parent]
 	if !ok {
 		return fmt.Errorf("%w: category %s", ErrNotFound, *parent)
 	}
-	if s.isDescendant(*parent, node.ID) {
+	if t.isDescendant(*parent, node.ID) {
 		return fmt.Errorf("%w: cannot move %q under %q, which is inside it", ErrInvalid, node.Name, target.Name)
 	}
-	if depth := s.depth[*parent] + 1; depth+s.height[node.ID] > MaxCategoryDepth {
-		return s.tooDeep(node, depth)
+	if depth := t.depth[*parent] + 1; depth+t.height[node.ID] > MaxCategoryDepth {
+		return t.tooDeep(node, depth)
 	}
 	return nil
 }
 
-// isDescendant reports whether id sits somewhere under ancestor.
-func (s categoryTreeShape) isDescendant(id, ancestor string) bool {
-	seen := map[string]bool{}
-	for cur := id; cur != "" && !seen[cur]; {
-		seen[cur] = true
-		parent := s.parentKey(s.byID[cur])
-		if parent == ancestor {
-			return true
-		}
-		cur = parent
-	}
-	return false
-}
-
-func (s categoryTreeShape) tooDeep(node Category, depth int) error {
+// tooDeep words the depth refusal so an admin sees why the move failed.
+func (t categoryTree) tooDeep(node Category, depth int) error {
 	return fmt.Errorf("%w: the tree is %d levels deep, and that move would put %q at level %d with %d more below it",
-		ErrInvalid, MaxCategoryDepth, node.Name, depth, s.height[node.ID])
+		ErrInvalid, MaxCategoryDepth, node.Name, depth, t.height[node.ID])
 }
 
 // sameParent compares two optional parent ids, treating null as the root.

@@ -8,13 +8,10 @@ import (
 	"stockroom/internal/stockroom"
 )
 
-// deps is everything the handlers need. main builds one from the config;
-// tests build one with whatever the case under test requires.
+// deps is everything the handlers need: the one DB handle, which carries the
+// pool, the session store and the two directories (stockroom.Options).
 type deps struct {
-	db         *stockroom.DB
-	auth       *stockroom.Auth
-	uploadsDir string
-	backupDir  string
+	db *stockroom.DB
 }
 
 // newRouter registers every HTTP route and wraps the mux in shared
@@ -71,7 +68,7 @@ func newRouter(d deps) http.Handler {
 
 	// Photos, served straight off UPLOADS_DIR. Unauthenticated on purpose;
 	// see fileServer.
-	mux.Handle("GET /files/", fileServer(d.uploadsDir))
+	mux.Handle("GET /files/", fileServer(d.db.UploadsDir))
 
 	// The admin panel's writes: the asset table, the category tree, and the
 	// backup button. Admin-only, enforced inside internal/stockroom.

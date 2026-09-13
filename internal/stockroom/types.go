@@ -73,6 +73,9 @@ type Profile struct {
 	PhotoPath     *string   `json:"photo_path"`     // v1
 	IsAdmin       bool      `json:"is_admin"`       // v1
 	CreatedAt     time.Time `json:"created_at"`
+	// PhotoURL is PhotoPath as the frontend fetches it, under FilesPrefix.
+	// Derived by scanProfile, never stored.
+	PhotoURL *string `json:"photo_url"`
 }
 
 type Location struct {

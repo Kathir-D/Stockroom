@@ -24,6 +24,11 @@ import (
 // edit to a name or a serial from ever quietly returning an item someone is
 // holding.
 //
+// There is no photo field either: SetAssetPhoto is the one writer of
+// photo_path, because it is the only path that also puts the file on disk.
+// Letting the form write the column would let a row name a file that was
+// never uploaded, or drop the pointer to one that was.
+//
 // The two date fields are strings rather than time.Time so a date picker can
 // send "2026-09-13"; Postgres casts both that and the RFC 3339 timestamp the
 // API hands back, and rejects anything else as ErrInvalid.
@@ -37,7 +42,6 @@ type AssetInput struct {
 	PurchaseDate       *string  `json:"purchase_date"`
 	PurchasePrice      *float64 `json:"purchase_price"`
 	WarrantyExpiration *string  `json:"warranty_expiration"`
-	PhotoPath          *string  `json:"photo_path"`
 }
 
 // normalize trims every field, requires the two that identify a unit, and
@@ -59,7 +63,6 @@ func (in *AssetInput) normalize() error {
 	in.Condition = trimOptional(in.Condition)
 	in.PurchaseDate = trimOptional(in.PurchaseDate)
 	in.WarrantyExpiration = trimOptional(in.WarrantyExpiration)
-	in.PhotoPath = trimOptional(in.PhotoPath)
 	if in.PurchasePrice != nil && *in.PurchasePrice < 0 {
 		return fmt.Errorf("%w: purchase price cannot be negative", ErrInvalid)
 	}
@@ -82,12 +85,11 @@ func (db *DB) CreateAsset(ctx context.Context, actor Actor, in AssetInput) (Asse
 	var id string
 	err := db.Pool.QueryRow(ctx, `
 		insert into assets (asset_tag, name, description, category_id, serial_number, condition,
-		                    purchase_date, purchase_price, warranty_expiration, photo_path,
-		                    status, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9::date, $10, 'available', $11)
+		                    purchase_date, purchase_price, warranty_expiration, status, created_by)
+		values ($1, $2, $3, $4, $5, $6, $7::date, $8, $9::date, 'available', $10)
 		returning id`,
 		in.AssetTag, in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
-		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration, in.PhotoPath, actor.ID).Scan(&id)
+		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration, actor.ID).Scan(&id)
 	if err != nil {
 		return AssetDetail{}, mapPgError("create asset", err)
 	}
@@ -111,10 +113,10 @@ func (db *DB) UpdateAsset(ctx context.Context, actor Actor, id string, in AssetI
 		update assets
 		set asset_tag = $2, name = $3, description = $4, category_id = $5, serial_number = $6,
 		    condition = $7, purchase_date = $8::date, purchase_price = $9,
-		    warranty_expiration = $10::date, photo_path = $11
+		    warranty_expiration = $10::date
 		where id = $1`,
 		id, in.AssetTag, in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
-		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration, in.PhotoPath)
+		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration)
 	if err != nil {
 		return AssetDetail{}, mapPgError("update asset", err)
 	}
@@ -157,7 +159,7 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 
 	var open, everHeld bool
 	err = tx.QueryRow(ctx, `
-		select exists (select 1 from custody_events where asset_id = $1 and checked_in_at is null),
+		select `+openCustodySQL("$1::uuid")+`,
 		       exists (select 1 from custody_events where asset_id = $1)`, id).Scan(&open, &everHeld)
 	if err != nil {
 		return mapPgError("delete asset", err)
@@ -213,9 +215,7 @@ func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status
 	}
 
 	var open bool
-	err = tx.QueryRow(ctx,
-		`select exists (select 1 from custody_events where asset_id = $1 and checked_in_at is null)`,
-		id).Scan(&open)
+	err = tx.QueryRow(ctx, `select `+openCustodySQL("$1::uuid"), id).Scan(&open)
 	if err != nil {
 		return AssetDetail{}, mapPgError("set asset status", err)
 	}
@@ -232,14 +232,14 @@ func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status
 	return db.GetAsset(ctx, actor, id)
 }
 
-// SetAssetPhoto stores an uploaded picture as <uploads>/assets/<asset id>.<ext>
+// SetAssetPhoto stores an uploaded picture as <UploadsDir>/assets/<asset id>.<ext>
 // and points the row at it. Naming the file after the id rather than the asset
 // tag means renaming a tag never orphans a photo, and re-uploading replaces
 // the old file instead of piling up copies (storePhoto).
 //
 // filename is the name the upload arrived under; only its extension is used,
 // and only the handful in uploadPhotoExtensions are accepted.
-func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename string, src io.Reader, uploadsDir string) (AssetDetail, error) {
+func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename string, src io.Reader) (AssetDetail, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return AssetDetail{}, err
 	}
@@ -274,7 +274,7 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 	// wait, since the extension is the part that differs.
 	defer lockPhoto("assets", id)()
 
-	staged, err := stagePhoto(uploadsDir, "assets", id, ext, src)
+	staged, err := stagePhoto(db.UploadsDir, "assets", id, ext, src)
 	if err != nil {
 		return AssetDetail{}, err
 	}
@@ -306,11 +306,11 @@ func (db *DB) requireCategory(ctx context.Context, id *string) error {
 	if id == nil {
 		return nil
 	}
-	ok, err := db.categoryExists(ctx, *id)
+	tree, err := loadCategoryTree(ctx, db.Pool)
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if !tree.exists(*id) {
 		return fmt.Errorf("%w: category %s", ErrNotFound, *id)
 	}
 	return nil

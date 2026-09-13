@@ -1,82 +1,32 @@
-# Tests & required checks
+# CI
 
-Quick reference. Full per-file detail is in [TESTING.md](TESTING.md).
+One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), one job named `tests`. It runs on every pull request against `main` and on every push to `main`. What it runs, and what it deliberately no longer runs, is in [TESTING.md](TESTING.md).
 
-## The test cases at a glance
+## What the job does
 
-| Suite | Where | Tool | Cases | What it protects |
-|---|---|---|---|---|
-| Database | `supabase/tests/*.test.sql` | pgTAP (`supabase test db`) | 297 | schema shape, constraints, FK cascades, triggers, views, search index, grants, seed |
-| Go | `internal/stockroom/*_test.go`, `server/*_test.go` | `go test ./... -race` | 188 | config/`.env` loading, pool + ping failures, bcrypt + student-number validation, the failsafe admin upsert, sessions and idle expiry under concurrency, scan/typed login, the limited-session flow, user CRUD and the delete rules, roster CSV import, Postgres error→HTTP mapping, JSON decoding, the auth/users routes |
-| Desktop frontend | `desktop-app/frontend/src/**/*.test.ts` | Vitest + Testing Library | 92 | `db.ts` query shapes, category flattening and error unwrapping, the browse screen (filters, detail dialog), and the admin screen's flows |
-| Web app | `web-app/src/**/*.test.ts` | Vitest + Testing Library | 2 | the harness is wired: a fresh clone gets a real pass |
+1. Checks out, then decides whether any code changed (see below).
+2. Sets up Go, Node 22 and the Supabase CLI.
+3. `supabase start`, which applies every migration and the seed.
+4. `go vet ./...`, then `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`, so a Go test that would skip on a missing database fails instead.
+5. `supabase test db` (pgTAP).
+6. `npm ci`, `npm run check`, `npm test` for `desktop-app/frontend`; the same plus `npm run build` for `web-app`.
+7. `supabase stop`, always, if it was started.
 
-579 cases total. Run everything locally:
+A push to a PR cancels the run already going for it.
 
-```bash
-./scripts/test-all.sh
-```
+## Docs-only changes
 
-Individually:
+Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `desktop-app/`, `web-app/`, `scripts/` or the workflow itself. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change: the job runs a single echo step and finishes green in a few seconds.
 
-```bash
-supabase start
-go vet ./...
-go test ./... -count=1 -race
-supabase test db
-npm --prefix desktop-app/frontend test
-npm --prefix web-app test
-```
+Filtering inside the job rather than with `on.push.paths` matters for branch protection. A workflow that never triggers never reports a check, and a required check that never reports blocks the merge. A job that runs and skips its steps still reports `tests: success`.
 
-### File-by-file
+## Branch protection
 
-**Database.** `010_structure` (tables/views/enums/indexes/triggers and the column types the Go structs scan), `020_constraints` (uniqueness, NOT NULL, defaults, every FK delete action), `030_bookings` (both CHECKs + the GiST exclusion constraint), `040_triggers` (`updated_at`, status-change logging), `050_views` (`active_custody` / `overdue_custody`), `060_search` (GIN tsvector index + the `coalesce()` null guard), `070_privileges` (`service_role` vs `anon`, RLS off by design), `080_seed` (`seed.sql` loads coherently).
+The workflow alone blocks nothing. The check has to be marked required.
 
-**Go.** `config_test.go`, `db_test.go`, `errors_test.go`, `types_test.go`, `password_test.go`, `failsafe_test.go`, `sessions_test.go`, `sessions_concurrent_test.go`, `auth_test.go`, `users_test.go`, `roster_test.go`, `pgerr_test.go`, `hashcost_test.go`, `main_test.go`, `testdb_test.go`, `server/json_test.go`, `server/router_test.go`, `server/auth_test.go`, `server/main_test.go`.
+In the web UI: Settings, Rules, Rulesets, New branch ruleset. Target the default branch. Turn on "Require a pull request before merging", "Require status checks to pass" (add `tests`), and "Require branches to be up to date before merging". Set enforcement to Active. The `tests` check only appears in the search box after the workflow has run once.
 
-**Desktop frontend.** `src/lib/db.test.ts`, `src/lib/AssetBrowser.test.ts`, `src/App.test.ts`.
-
-**Web app.** `src/App.test.ts`.
-
-Full per-test rationale, including the speed budget that keeps `-race` affordable and the plan for testing `TODO.md` Phases 3 to 8 as they land, is in [TESTING.md](TESTING.md#testing-features-that-dont-exist-yet).
-
----
-
-## Making the tests block a merge
-
-Two pieces are needed. A workflow that runs them on every PR, and a branch protection rule that makes that workflow's check required.
-
-### 1. The workflow (already committed)
-
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request targeting `main` and on pushes to `main`. It:
-
-1. sets up Go, Node 22 and the Supabase CLI
-2. runs `supabase start` (applies all migrations + the seed)
-3. `go vet ./...`
-4. `go test ./... -count=1 -race` with `STOCKROOM_REQUIRE_DB=1`
-5. `supabase test db` (pgTAP)
-6. `npm ci`, `npm run check` (svelte-check), `npm test` (Vitest) for `desktop-app/frontend`
-7. `npm ci`, `npm run check`, `npm test` (Vitest), `npm run build` for `web-app`
-
-`STOCKROOM_REQUIRE_DB=1` matters. Without it the Go integration tests skip when Postgres is unreachable, so a broken database would look green. In CI they must fail instead.
-
-The job is named `tests`. That is the check name you require below.
-
-### 2. Turn on branch protection
-
-The workflow alone does not block anything; GitHub only enforces it once the check is marked required.
-
-In the web UI, open the repo's Settings, then Rules, then Rulesets, then New branch ruleset.
-
-- Target: **Default branch** (`main`)
-- Enable **Require a pull request before merging** (so nothing lands by direct push)
-- Enable **Require status checks to pass** → search for and add **`tests`**
-- Enable **Require branches to be up to date before merging** (so a PR is re-tested against the latest `main`)
-- Set **Enforcement status** to **Active**
-
-> The `tests` check only appears in the search box after the workflow has run at least once. Open a throwaway PR first, or push the workflow to `main`, let it finish, then add the check.
-
-Or with the `gh` CLI. This is classic branch protection, and that API requires every field below.
+Or with `gh`, as classic branch protection, which needs every field:
 
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
@@ -89,85 +39,12 @@ gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSO
 JSON
 ```
 
-Set `"enforce_admins": false` if you want to keep the ability to override on your own repo.
+Set `"enforce_admins": false` to keep the ability to override on your own repo.
 
-### 3. Check it works
-
-```bash
-git checkout -b test-ci
-git commit --allow-empty -m "Check CI"
-git push -u origin test-ci
-gh pr create --fill
-```
-
-The PR should show the `tests` check running, and the Merge button should stay disabled until it goes green.
-
----
-
-## Adding new test cases
-
-Put each test with the layer it covers. The CI workflow picks up new files automatically.
-
-### Database (pgTAP)
-
-Add `supabase/tests/NNN_topic.test.sql`, following the existing numbering. The skeleton:
-
-```sql
-begin;
-create extension if not exists pgtap;
-select no_plan();
-
--- fixtures
-insert into assets (id, asset_tag, name) values ('...', 'FIX-001', 'Fixture');
-
--- assertions
-select is(status::text, 'available', 'a new asset defaults to available')
-  from assets where asset_tag = 'FIX-001';
-select throws_ok(
-  $$insert into assets (asset_tag, name) values ('FIX-001', 'dup')$$,
-  '23505', null, 'asset_tag is unique');
-
-select * from finish();
-rollback;
-```
-
-Rules of the road:
-- Always wrap in `begin; … rollback;` so the suite leaves the local database untouched.
-- Use `no_plan()` rather than `plan(N)` so the count stays out of your way.
-- Use fixed UUID prefixes per file (`11111111-...` in `020`, `22222222-...` in `030`, and so on) so fixtures can't collide.
-- Give fixture `serial_number`s a per-file prefix too (`SR060...` in `060`). `idx_assets_serial` is unique, so a fixture that borrows a serial from `seed.sql` or another file breaks the moment that serial is used for real.
-- Assert behaviour (insert and check what happens) over DDL text wherever you can.
-- Common SQLSTATEs are `23505` unique, `23503` foreign key, `23502` not null, `23514` check, `23P01` exclusion, and `22P02` bad enum value.
-
-Run just this layer with `supabase test db`.
-
-### Go
-
-Add `*_test.go` next to the code, same package. For anything needing Postgres, call the existing helper so the test skips locally without Docker but is mandatory in CI:
-
-```go
-func TestSomething(t *testing.T) {
-    db := requireTestDB(t) // internal/stockroom; server/ has openTestDB(t)
-    // ...
-}
-```
-
-Prefer table-driven subtests, and assert on the sentinel errors (`errors.Is(err, stockroom.ErrConflict)`) rather than on message text.
-
-### Frontend
-
-Add `*.test.ts` under `desktop-app/frontend/src/` (the Vitest `include` is `src/**/*.test.ts`).
-
-- For logic in `lib/`, mock `./supabase` and assert the query chain, as `src/lib/db.test.ts` does.
-- For components, `vi.mock('./lib/db', ...)`, `render(Component)`, then drive it with `fireEvent` and assert through `screen` and `within`. Query by role and text, not CSS classes, except where a class is the only way to disambiguate.
-- Anything async needs `await waitFor(...)`. The admin screen tears its form down while `loading` is true, so re-query elements after an action instead of holding a reference.
-
-Run with `npm --prefix desktop-app/frontend test` (or `test:watch` while writing).
-
-### Before opening the PR
+## Running the same thing locally
 
 ```bash
 ./scripts/test-all.sh
 ```
 
-`scripts/test-all.sh` runs the same checks in the same order CI does (`go vet`, `-race`, pgTAP, both frontends' `check` and tests, the web-app build), so green locally means green in CI.
+It runs the same steps in the same order, skipping the database suites with a warning if Postgres is not up.

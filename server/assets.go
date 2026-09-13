@@ -40,8 +40,8 @@ func (d deps) handleGetAsset(w http.ResponseWriter, r *http.Request, actor stock
 
 // GET /categories/tree
 // The left-hand filter tree, Type -> Category -> Model, in one call.
-func (d deps) handleCategoryTree(w http.ResponseWriter, r *http.Request, _ stockroom.Actor) {
-	tree, err := d.db.GetCategoryTree(r.Context())
+func (d deps) handleCategoryTree(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	tree, err := d.db.GetCategoryTree(r.Context(), actor)
 	if err != nil {
 		writeError(w, err)
 		return
