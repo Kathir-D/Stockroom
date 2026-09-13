@@ -182,7 +182,7 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 		return ScanResult{Action: ScanCheckedIn, Asset: in.Asset, ReturnedFrom: &returned}, nil
 	}
 
-	asset, err := db.GetAsset(ctx, id)
+	asset, err := db.GetAsset(ctx, actor, id)
 	if err != nil {
 		return ScanResult{}, err
 	}
@@ -321,7 +321,7 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 
 	// The open custody row decides, not the status column: an asset whose
 	// status drifted still has exactly one truth about whether it is out.
-	held, err := currentCustody(ctx, tx, assetID)
+	held, err := currentCustody(ctx, tx, assetID, actor)
 	if err != nil {
 		return CheckInResult{}, err
 	}
@@ -344,7 +344,7 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 		return CheckInResult{}, fmt.Errorf("check in: %w", err)
 	}
 
-	asset, err := db.GetAsset(ctx, assetID)
+	asset, err := db.GetAsset(ctx, actor, assetID)
 	if err != nil {
 		return CheckInResult{}, err
 	}

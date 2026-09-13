@@ -9,10 +9,12 @@ import (
 // GET /assets?category=<uuid>&status=<asset_status>&q=<text>
 // The browse list. Every parameter is optional; with none of them the whole
 // inventory comes back. category matches that node and everything under it,
-// so a Type filters to every Model beneath it.
-func (d deps) handleListAssets(w http.ResponseWriter, r *http.Request, _ stockroom.Actor) {
+// so a Type filters to every Model beneath it. Rows carry the current holder,
+// which is why the actor reaches the package: what a row shows of that holder
+// depends on who is asking.
+func (d deps) handleListAssets(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	q := r.URL.Query()
-	assets, err := d.db.ListAssets(r.Context(), stockroom.AssetFilter{
+	assets, err := d.db.ListAssets(r.Context(), actor, stockroom.AssetFilter{
 		CategoryID: q.Get("category"),
 		Status:     stockroom.AssetStatus(q.Get("status")),
 		Search:     q.Get("q"),
@@ -25,9 +27,10 @@ func (d deps) handleListAssets(w http.ResponseWriter, r *http.Request, _ stockro
 }
 
 // GET /assets/{id}
-// The detail popup: the asset, its category path, and who holds it.
-func (d deps) handleGetAsset(w http.ResponseWriter, r *http.Request, _ stockroom.Actor) {
-	asset, err := d.db.GetAsset(r.Context(), r.PathValue("id"))
+// The detail popup: the asset, its category path, and who holds it. Same shape
+// as one row of the list above.
+func (d deps) handleGetAsset(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	asset, err := d.db.GetAsset(r.Context(), actor, r.PathValue("id"))
 	if err != nil {
 		writeError(w, err)
 		return

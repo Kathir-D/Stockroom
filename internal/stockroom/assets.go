@@ -1,10 +1,12 @@
 package stockroom
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,93 +38,179 @@ type AssetFilter struct {
 }
 
 // AssetListItem is an asset as the browse list shows it: the row plus the
-// two things the list needs that aren't columns -- where it sits in the
-// category tree, and a URL the frontend can put in an <img> tag.
+// three things the list needs that aren't columns -- where it sits in the
+// category tree, a URL the frontend can put in an <img> tag, and who has it.
 type AssetListItem struct {
 	Asset
 	CategoryPath []CategoryRef `json:"category_path"`
 	PhotoURL     *string       `json:"photo_url"`
-}
-
-// AssetDetail is the detail-popup payload: a list item plus who holds it.
-// Phase 4's ScanItem answers with this same shape, so a scanned item and a
-// clicked one open the identical dialog.
-type AssetDetail struct {
-	AssetListItem
 	// Custody is the open custody event, or nil when nobody has the item.
+	// Every row carries it, for every actor: a unit row has to be able to say
+	// who holds the lens without a fetch per row (design doc §8.2, decided
+	// 2026-09-12).
 	Custody *AssetCustody `json:"custody"`
 }
 
-// AssetCustody is who currently holds an asset, flattened for display.
+// AssetDetail is the detail-popup payload. It is the list row itself: since
+// the list started carrying the current holder there is nothing detail knows
+// that a row doesn't, and the alias keeps the name the API and the design doc
+// use for the dialog. ScanItem answers with this same shape, so a scanned item
+// and a clicked one open the identical dialog.
+type AssetDetail = AssetListItem
+
+// AssetCustody is who currently holds an asset, flattened for display. Who
+// holds a named item is open to every signed-in user (CLAUDE.md §7, decided
+// 2026-09-12) -- but only as a name. See forViewer for the number.
 type AssetCustody struct {
-	CustodyEventID string     `json:"custody_event_id"`
-	CustodianID    string     `json:"custodian_id"`
-	CustodianName  string     `json:"custodian_name"`
-	StudentNumber  *string    `json:"student_number"`
-	CheckedOutAt   time.Time  `json:"checked_out_at"`
-	DueAt          *time.Time `json:"due_at"`
-	Overdue        bool       `json:"overdue"`
+	CustodyEventID string `json:"custody_event_id"`
+	CustodianID    string `json:"custodian_id"`
+	CustodianName  string `json:"custodian_name"`
+	// StudentNumber is admin-only: it is the scan-login key, so handing it to
+	// every browsing student turns "who has the lens" into a list of other
+	// people's credentials. Blanked by forViewer for everyone else.
+	StudentNumber *string    `json:"student_number"`
+	CheckedOutAt  time.Time  `json:"checked_out_at"`
+	DueAt         *time.Time `json:"due_at"`
+	Overdue       bool       `json:"overdue"`
 }
 
-// ListAssets returns the assets matching filter, by name. Unavailable items
-// are included: the browse screen shows them greyed out rather than hiding
-// equipment that exists, and the detail popup refuses to add them to a cart.
-func (db *DB) ListAssets(ctx context.Context, filter AssetFilter) ([]AssetListItem, error) {
+// unnamedCustodian labels a holder whose profile carries no name at all, for a
+// viewer who may not see the student number. Rare -- every path that creates a
+// user asks for a name -- but displayName's last resort is the number itself,
+// and that would hand it over under a different key.
+const unnamedCustodian = "Someone"
+
+// forViewer trims a custody record to what actor is allowed to see. Every path
+// that builds one goes through here rather than each caller remembering, and
+// it happens in the package rather than the UI because a field the UI hides is
+// still one fetch away (CLAUDE.md §7).
+func (c *AssetCustody) forViewer(actor Actor) {
+	if c == nil || actor.IsAdmin {
+		return
+	}
+	if c.StudentNumber != nil && c.CustodianName == *c.StudentNumber {
+		c.CustodianName = unnamedCustodian
+	}
+	c.StudentNumber = nil
+}
+
+// ListAssets returns the assets matching filter, in browse order (see
+// sortBrowseList). Unavailable items are included: the browse screen shows
+// them greyed out rather than hiding equipment that exists, and the detail
+// popup refuses to add them to a cart.
+func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) ([]AssetListItem, error) {
+	if err := RequireFullSession(actor); err != nil {
+		return nil, err
+	}
 	where, args, err := db.assetFilterSQL(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 
+	// No order by: the list is sorted in Go, below, because its first key is
+	// the asset's position in the category tree and that is exactly what the
+	// one category read already knows.
 	rows, err := db.Pool.Query(ctx,
-		`select `+assetColumns+` from assets a where `+where+` order by a.name, a.asset_tag`, args...)
+		`select `+assetColumns+` from assets a where `+where, args...)
 	if err != nil {
 		return nil, mapPgError("list assets", err)
 	}
 	defer rows.Close()
 
 	assets := []Asset{}
+	ids := []string{}
 	for rows.Next() {
 		a, err := scanAsset(rows)
 		if err != nil {
 			return nil, err
 		}
 		assets = append(assets, a)
+		ids = append(ids, a.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapPgError("list assets", err)
 	}
 
-	paths, err := db.assetCategoryPaths(ctx)
+	index, err := db.categoryIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// One query for the whole page rather than one per row: a list of two
+	// hundred units would otherwise be two hundred round trips.
+	held, err := holdersByAsset(ctx, db.Pool, ids, actor)
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]AssetListItem, 0, len(assets))
 	for _, a := range assets {
-		items = append(items, newAssetListItem(a, paths))
+		item := newAssetListItem(a, index)
+		item.Custody = held[a.ID]
+		items = append(items, item)
 	}
+	sortBrowseList(items, index)
 	return items, nil
+}
+
+// sortBrowseList puts the list in the order the browse screen reads in
+// (design doc §8.2, decided 2026-09-12): category first, in Catagories.md's
+// document order rather than alphabetically, then available units ahead of the
+// ones nobody can take today, then by name. asset_tag breaks the last tie so
+// two identically named units never swap places between two requests.
+func sortBrowseList(items []AssetListItem, index categoryIndex) {
+	slices.SortFunc(items, func(x, y AssetListItem) int {
+		if c := compareCategoryKeys(index.keyFor(x.CategoryID), index.keyFor(y.CategoryID)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(browseRank(x.Status), browseRank(y.Status)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(x.Name, y.Name); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.AssetTag, y.AssetTag)
+	})
+}
+
+// browseRank is the availability half of that order: what a borrower can take
+// now, then what is out and will come back, then what is out of service.
+func browseRank(s AssetStatus) int {
+	switch s {
+	case StatusAvailable:
+		return 0
+	case StatusCheckedOut:
+		return 1
+	default:
+		return 2
+	}
 }
 
 // GetAsset returns one asset with its category path and current custodian,
 // which is what the detail popup shows. An id that is not a uuid comes back
 // as ErrInvalid (from Postgres), an unknown one as ErrNotFound.
-func (db *DB) GetAsset(ctx context.Context, id string) (AssetDetail, error) {
+func (db *DB) GetAsset(ctx context.Context, actor Actor, id string) (AssetDetail, error) {
+	if err := RequireFullSession(actor); err != nil {
+		return AssetDetail{}, err
+	}
 	a, err := scanAsset(db.Pool.QueryRow(ctx,
 		`select `+assetColumns+` from assets a where a.id = $1`, id))
+	if errors.Is(err, ErrNotFound) {
+		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+	}
 	if err != nil {
 		return AssetDetail{}, mapPgError("get asset", err)
 	}
 
-	paths, err := db.assetCategoryPaths(ctx)
+	index, err := db.categoryIndex(ctx)
 	if err != nil {
 		return AssetDetail{}, err
 	}
-	detail := AssetDetail{AssetListItem: newAssetListItem(a, paths)}
+	detail := newAssetListItem(a, index)
 
 	// The open custody row is read regardless of status rather than only
 	// when the asset says checked_out, so a status that has drifted out of
 	// step with custody still shows the truth.
-	detail.Custody, err = currentCustody(ctx, db.Pool, a.ID)
+	detail.Custody, err = currentCustody(ctx, db.Pool, a.ID, actor)
 	if err != nil {
 		return AssetDetail{}, err
 	}
@@ -191,21 +279,31 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func escapeLike(s string) string { return likeEscaper.Replace(s) }
 
-// assetCategoryPaths reads the category tree and returns id -> path. The
-// table is a few dozen rows, so one read per list call is cheaper than a
-// recursive join per asset.
-func (db *DB) assetCategoryPaths(ctx context.Context) (map[string][]CategoryRef, error) {
+// categoryIndex reads the category tree once per call and returns the paths
+// and sort keys built from it. The table is a few dozen rows, so one read per
+// list is cheaper than a recursive join per asset.
+func (db *DB) categoryIndex(ctx context.Context) (categoryIndex, error) {
 	cats, err := db.loadCategories(ctx)
 	if err != nil {
-		return nil, err
+		return categoryIndex{}, err
 	}
-	return categoryPaths(cats), nil
+	return indexCategories(cats), nil
 }
 
-func newAssetListItem(a Asset, paths map[string][]CategoryRef) AssetListItem {
+// keyFor is the sort key of the category an asset is filed under. An asset
+// with no category, or one naming a category that has since been deleted, gets
+// the empty key, which sorts last.
+func (i categoryIndex) keyFor(categoryID *string) []categorySortKey {
+	if categoryID == nil {
+		return nil
+	}
+	return i.keys[*categoryID]
+}
+
+func newAssetListItem(a Asset, index categoryIndex) AssetListItem {
 	item := AssetListItem{Asset: a, CategoryPath: []CategoryRef{}, PhotoURL: photoURL(a.PhotoPath)}
 	if a.CategoryID != nil {
-		if p, ok := paths[*a.CategoryID]; ok {
+		if p, ok := index.paths[*a.CategoryID]; ok {
 			item.CategoryPath = p
 		}
 	}
@@ -225,38 +323,97 @@ func photoURL(stored *string) *string {
 	if rel == "" {
 		return nil
 	}
-	url := FilesPrefix + path.Clean(rel)
+	// Clean against a leading slash so a stored "../x" resolves inside the
+	// uploads root instead of pointing above it. http.Dir refuses such a
+	// request anyway; this keeps the URL itself honest.
+	clean := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if clean == "" || clean == "." {
+		return nil
+	}
+	url := FilesPrefix + clean
 	return &url
 }
+
+// holderColumns and holderFrom are the open-custody read that the single
+// asset and the whole list share, so a holder means the same thing in the
+// detail dialog and in the row behind it. They are narrower than custody.go's
+// custodyColumns, which reads a whole event trail for the admin screens.
+const holderColumns = `ce.asset_id, ce.id, ce.custodian_id, p.full_name, p.first_name, p.last_name,
+	p.student_number, ce.checked_out_at, ce.due_at, (ce.due_at is not null and ce.due_at < now())`
+
+const holderFrom = `
+	from custody_events ce
+	join profiles p on p.id = ce.custodian_id
+	where ce.checked_in_at is null`
 
 // currentCustody returns the unreturned custody event for an asset, or nil if
 // it isn't out. Ordered newest-first so a stale duplicate open row (which
 // the schema permits but nothing writes) reports the current holder. It takes
 // a querier rather than hanging off DB because CheckInAsset reads the same
 // row inside its transaction.
-func currentCustody(ctx context.Context, q querier, assetID string) (*AssetCustody, error) {
-	var (
-		c                 AssetCustody
-		full, first, last *string
-	)
-	err := q.QueryRow(ctx, `
-		select ce.id, ce.custodian_id, p.full_name, p.first_name, p.last_name, p.student_number,
-		       ce.checked_out_at, ce.due_at, (ce.due_at is not null and ce.due_at < now())
-		from custody_events ce
-		join profiles p on p.id = ce.custodian_id
-		where ce.asset_id = $1 and ce.checked_in_at is null
+func currentCustody(ctx context.Context, q querier, assetID string, actor Actor) (*AssetCustody, error) {
+	row := q.QueryRow(ctx, `select `+holderColumns+holderFrom+`
+		and ce.asset_id = $1
 		order by ce.checked_out_at desc
-		limit 1`, assetID).
-		Scan(&c.CustodyEventID, &c.CustodianID, &full, &first, &last, &c.StudentNumber,
-			&c.CheckedOutAt, &c.DueAt, &c.Overdue)
+		limit 1`, assetID)
+
+	_, c, err := scanHolder(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, mapPgError("get custody", err)
 	}
-	c.CustodianName = displayName(first, last, full, c.StudentNumber)
+	c.forViewer(actor)
 	return &c, nil
+}
+
+// holdersByAsset is the same read for a whole browse page: one query for every
+// asset in the list, keyed by asset id, instead of a round trip per row.
+// distinct on keeps the newest open row per asset, matching currentCustody.
+func holdersByAsset(ctx context.Context, q querier, assetIDs []string, actor Actor) (map[string]*AssetCustody, error) {
+	held := map[string]*AssetCustody{}
+	if len(assetIDs) == 0 {
+		return held, nil
+	}
+
+	rows, err := q.Query(ctx, `select distinct on (ce.asset_id) `+holderColumns+holderFrom+`
+		and ce.asset_id = any($1)
+		order by ce.asset_id, ce.checked_out_at desc`, assetIDs)
+	if err != nil {
+		return nil, mapPgError("list custody", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		assetID, c, err := scanHolder(rows)
+		if err != nil {
+			return nil, mapPgError("list custody", err)
+		}
+		c.forViewer(actor)
+		held[assetID] = &c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapPgError("list custody", err)
+	}
+	return held, nil
+}
+
+// scanHolder reads one holderColumns row. The custodian's label is resolved
+// here rather than in SQL so every screen falls back the same way.
+func scanHolder(row pgx.Row) (string, AssetCustody, error) {
+	var (
+		assetID           string
+		c                 AssetCustody
+		full, first, last *string
+	)
+	err := row.Scan(&assetID, &c.CustodyEventID, &c.CustodianID, &full, &first, &last,
+		&c.StudentNumber, &c.CheckedOutAt, &c.DueAt, &c.Overdue)
+	if err != nil {
+		return "", AssetCustody{}, err
+	}
+	c.CustodianName = displayName(first, last, full, c.StudentNumber)
+	return assetID, c, nil
 }
 
 // displayName picks the best label for a person: the split name fields, then

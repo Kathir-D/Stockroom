@@ -31,90 +31,93 @@
 -- which is the roster-import case.
 
 -- Types --------------------------------------------------------------------
-insert into categories (name) values
-  ('Cameras/Bodies'),
-  ('Lenses'),
-  ('Lights'),
-  ('Audio Stuff'),
-  ('Physical Bags, etc.'),
-  ('Tripods/Monopods'),
-  ('Batteries'),
-  ('Misc');
+-- sort_order is a row's position among its siblings (categories.sort_order):
+-- these eight are Catagories.md's document order, which is what the browse
+-- filters and the asset list sort by.
+insert into categories (name, sort_order) values
+  ('Cameras/Bodies',      1),
+  ('Lenses',              2),
+  ('Lights',              3),
+  ('Audio Stuff',         4),
+  ('Physical Bags, etc.', 5),
+  ('Tripods/Monopods',    6),
+  ('Batteries',           7),
+  ('Misc',                8);
 
 -- Categories ---------------------------------------------------------------
-insert into categories (name, parent_id) values
-  ('Camera Model',      (select id from categories where name = 'Cameras/Bodies')),
-  ('Zooms',             (select id from categories where name = 'Lenses')),
-  ('Primes',            (select id from categories where name = 'Lenses')),
-  ('Accessories',       (select id from categories where name = 'Lenses')),
-  ('Studio Lights',     (select id from categories where name = 'Lights')),
-  ('Light Modifiers',   (select id from categories where name = 'Lights')),
-  ('Wireless Mics',     (select id from categories where name = 'Audio Stuff')),
-  ('Wired Mics',        (select id from categories where name = 'Audio Stuff')),
-  ('Bags',              (select id from categories where name = 'Physical Bags, etc.')),
-  ('Tripods',           (select id from categories where name = 'Tripods/Monopods')),
-  ('Gimbals',           (select id from categories where name = 'Tripods/Monopods')),
-  ('Camera Batteries',  (select id from categories where name = 'Batteries')),
-  ('Other',             (select id from categories where name = 'Misc'));
+insert into categories (name, parent_id, sort_order) values
+  ('Camera Model',      (select id from categories where name = 'Cameras/Bodies'),  1),
+  ('Zooms',             (select id from categories where name = 'Lenses'),  1),
+  ('Primes',            (select id from categories where name = 'Lenses'),  2),
+  ('Accessories',       (select id from categories where name = 'Lenses'),  3),
+  ('Studio Lights',     (select id from categories where name = 'Lights'),  1),
+  ('Light Modifiers',   (select id from categories where name = 'Lights'),  2),
+  ('Wireless Mics',     (select id from categories where name = 'Audio Stuff'),  1),
+  ('Wired Mics',        (select id from categories where name = 'Audio Stuff'),  2),
+  ('Bags',              (select id from categories where name = 'Physical Bags, etc.'),  1),
+  ('Tripods',           (select id from categories where name = 'Tripods/Monopods'),  1),
+  ('Gimbals',           (select id from categories where name = 'Tripods/Monopods'),  2),
+  ('Camera Batteries',  (select id from categories where name = 'Batteries'),  1),
+  ('Other',             (select id from categories where name = 'Misc'),  1);
 
 -- Models -------------------------------------------------------------------
-insert into categories (name, parent_id) values
+insert into categories (name, parent_id, sort_order) values
   -- Cameras/Bodies > Camera Model
-  ('T5',                                      (select id from categories where name = 'Camera Model')),
-  ('T5i',                                     (select id from categories where name = 'Camera Model')),
-  ('T7',                                      (select id from categories where name = 'Camera Model')),
-  ('T7i',                                     (select id from categories where name = 'Camera Model')),
-  ('T8',                                      (select id from categories where name = 'Camera Model')),
-  ('T8i',                                     (select id from categories where name = 'Camera Model')),
-  ('6D Mark II',                              (select id from categories where name = 'Camera Model')),
-  ('5D Mark IV',                              (select id from categories where name = 'Camera Model')),
-  ('R50',                                     (select id from categories where name = 'Camera Model')),
-  ('SL3',                                     (select id from categories where name = 'Camera Model')),
-  ('Blackmagic Pocket Cinema Camera 6K Pro',  (select id from categories where name = 'Camera Model')),
-  ('GoPro',                                   (select id from categories where name = 'Camera Model')),
-  ('DJI Drone',                               (select id from categories where name = 'Camera Model')),
+  ('T5',                                      (select id from categories where name = 'Camera Model'),  1),
+  ('T5i',                                     (select id from categories where name = 'Camera Model'),  2),
+  ('T7',                                      (select id from categories where name = 'Camera Model'),  3),
+  ('T7i',                                     (select id from categories where name = 'Camera Model'),  4),
+  ('T8',                                      (select id from categories where name = 'Camera Model'),  5),
+  ('T8i',                                     (select id from categories where name = 'Camera Model'),  6),
+  ('6D Mark II',                              (select id from categories where name = 'Camera Model'),  7),
+  ('5D Mark IV',                              (select id from categories where name = 'Camera Model'),  8),
+  ('R50',                                     (select id from categories where name = 'Camera Model'),  9),
+  ('SL3',                                     (select id from categories where name = 'Camera Model'), 10),
+  ('Blackmagic Pocket Cinema Camera 6K Pro',  (select id from categories where name = 'Camera Model'), 11),
+  ('GoPro',                                   (select id from categories where name = 'Camera Model'), 12),
+  ('DJI Drone',                               (select id from categories where name = 'Camera Model'), 13),
   -- Lenses > Zooms
-  ('Tamron 18-400mm',                         (select id from categories where name = 'Zooms')),
-  ('Tamron 150-600mm',                        (select id from categories where name = 'Zooms')),
-  ('Sigma 18-35mm f/1.8',                     (select id from categories where name = 'Zooms')),
-  ('Sigma 150-600mm f/5-6.3',                 (select id from categories where name = 'Zooms')),
-  ('Canon 70-200mm f/2.8',                    (select id from categories where name = 'Zooms')),
-  ('Canon 55-250mm',                          (select id from categories where name = 'Zooms')),
-  ('Canon 75-300mm',                          (select id from categories where name = 'Zooms')),
-  ('Canon 18-135mm',                          (select id from categories where name = 'Zooms')),
-  ('Canon 17-40mm f/1.4',                     (select id from categories where name = 'Zooms')),
-  ('Canon 18-55mm',                           (select id from categories where name = 'Zooms')),
+  ('Tamron 18-400mm',                         (select id from categories where name = 'Zooms'),  1),
+  ('Tamron 150-600mm',                        (select id from categories where name = 'Zooms'),  2),
+  ('Sigma 18-35mm f/1.8',                     (select id from categories where name = 'Zooms'),  3),
+  ('Sigma 150-600mm f/5-6.3',                 (select id from categories where name = 'Zooms'),  4),
+  ('Canon 70-200mm f/2.8',                    (select id from categories where name = 'Zooms'),  5),
+  ('Canon 55-250mm',                          (select id from categories where name = 'Zooms'),  6),
+  ('Canon 75-300mm',                          (select id from categories where name = 'Zooms'),  7),
+  ('Canon 18-135mm',                          (select id from categories where name = 'Zooms'),  8),
+  ('Canon 17-40mm f/1.4',                     (select id from categories where name = 'Zooms'),  9),
+  ('Canon 18-55mm',                           (select id from categories where name = 'Zooms'), 10),
   -- Lenses > Primes: none in inventory yet; the Category node stays so the
   -- filter shows it
   -- Lenses > Accessories
-  ('Sigma Teleconverter',                     (select id from categories where name = 'Accessories')),
+  ('Sigma Teleconverter',                     (select id from categories where name = 'Accessories'),  1),
   -- Lights > Studio Lights
-  ('Softbox Lights w/stand - Interfit',       (select id from categories where name = 'Studio Lights')),
-  ('LED light box w/stand - Neewer',          (select id from categories where name = 'Studio Lights')),
-  ('Ring Light w/stand - Neewer',             (select id from categories where name = 'Studio Lights')),
-  ('LED Wand Light - ICE Light',              (select id from categories where name = 'Studio Lights')),
+  ('Softbox Lights w/stand - Interfit',       (select id from categories where name = 'Studio Lights'),  1),
+  ('LED light box w/stand - Neewer',          (select id from categories where name = 'Studio Lights'),  2),
+  ('Ring Light w/stand - Neewer',             (select id from categories where name = 'Studio Lights'),  3),
+  ('LED Wand Light - ICE Light',              (select id from categories where name = 'Studio Lights'),  4),
   -- Lights > Light Modifiers
-  ('Lighting Reflectors',                     (select id from categories where name = 'Light Modifiers')),
+  ('Lighting Reflectors',                     (select id from categories where name = 'Light Modifiers'),  1),
   -- Audio Stuff > Wireless Mics
-  ('DJI Wireless Lavalier',                   (select id from categories where name = 'Wireless Mics')),
+  ('DJI Wireless Lavalier',                   (select id from categories where name = 'Wireless Mics'),  1),
   -- Audio Stuff > Wired Mics
-  ('Wired Rode Mics',                         (select id from categories where name = 'Wired Mics')),
-  ('Komika Phone Mics',                       (select id from categories where name = 'Wired Mics')),
-  ('Sennheiser Wired Lav Mics',               (select id from categories where name = 'Wired Mics')),
+  ('Wired Rode Mics',                         (select id from categories where name = 'Wired Mics'),  1),
+  ('Komika Phone Mics',                       (select id from categories where name = 'Wired Mics'),  2),
+  ('Sennheiser Wired Lav Mics',               (select id from categories where name = 'Wired Mics'),  3),
   -- Physical Bags, etc. > Bags
-  ('Backpacks',                               (select id from categories where name = 'Bags')),
-  ('Canon Small Bags',                        (select id from categories where name = 'Bags')),
+  ('Backpacks',                               (select id from categories where name = 'Bags'),  1),
+  ('Canon Small Bags',                        (select id from categories where name = 'Bags'),  2),
   -- Tripods/Monopods > Tripods
-  ('Cell phone tripod',                       (select id from categories where name = 'Tripods')),
-  ('Large tripods',                           (select id from categories where name = 'Tripods')),
-  ('Monopods',                                (select id from categories where name = 'Tripods')),
+  ('Cell phone tripod',                       (select id from categories where name = 'Tripods'),  1),
+  ('Large tripods',                           (select id from categories where name = 'Tripods'),  2),
+  ('Monopods',                                (select id from categories where name = 'Tripods'),  3),
   -- Tripods/Monopods > Gimbals
-  ('Big Gimbal',                              (select id from categories where name = 'Gimbals')),
-  ('DJI phone gimbal',                        (select id from categories where name = 'Gimbals')),
+  ('Big Gimbal',                              (select id from categories where name = 'Gimbals'),  1),
+  ('DJI phone gimbal',                        (select id from categories where name = 'Gimbals'),  2),
   -- Batteries > Camera Batteries
-  ('Canon Camera Batteries',                  (select id from categories where name = 'Camera Batteries')),
+  ('Canon Camera Batteries',                  (select id from categories where name = 'Camera Batteries'),  1),
   -- Misc > Other
-  ('Dolly',                                   (select id from categories where name = 'Other'));
+  ('Dolly',                                   (select id from categories where name = 'Other'),  1);
 
 -- Accounts -----------------------------------------------------------------
 -- Fixed ids so tests and custody rows below can reference them.

@@ -1,6 +1,7 @@
 package stockroom
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -9,8 +10,9 @@ import (
 // The category tree is the browse screen's left-hand filter: Type ->
 // Category -> Model, three levels deep, held in one table via parent_id
 // (CLAUDE.md §6.2). It is small -- a few dozen rows -- so the whole thing is
-// read in one query and shaped in Go rather than with recursive SQL. Both the
-// tree and the per-asset category path come out of that one read.
+// read in one query and shaped in Go rather than with recursive SQL. The tree,
+// the per-asset category path and the browse list's sort order all come out of
+// that one read.
 
 // CategoryNode is one node of the filter tree: a category row plus its
 // children, nested to whatever depth the data has. Children is never null in
@@ -27,7 +29,9 @@ type CategoryRef struct {
 }
 
 // GetCategoryTree returns the whole tree in one call, roots first, every
-// level sorted by name.
+// level in its own sibling order (Catagories.md's document order for the
+// Types, so the filter reads Cameras/Bodies, Lenses, Lights, ... rather than
+// alphabetically).
 func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
 	cats, err := db.loadCategories(ctx)
 	if err != nil {
@@ -36,11 +40,13 @@ func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
 	return buildCategoryTree(cats), nil
 }
 
-// loadCategories reads every category row, sorted by name so the tree and
-// the paths built from it come out in a stable order.
+// loadCategories reads every category row in display order: sort_order within
+// a parent, name to break a tie. One read feeds the tree, the per-asset
+// category path and the browse list's sort key, so those three can't disagree
+// about what order the tree is in.
 func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
 	rows, err := db.Pool.Query(ctx,
-		`select id, name, parent_id, created_at from categories order by name`)
+		`select id, name, parent_id, sort_order, created_at from categories order by sort_order, name`)
 	if err != nil {
 		return nil, fmt.Errorf("list categories: %w", err)
 	}
@@ -49,7 +55,7 @@ func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
 	cats := []Category{}
 	for rows.Next() {
 		var c Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.ParentID, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.ParentID, &c.SortOrder, &c.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan category: %w", err)
 		}
 		cats = append(cats, c)
@@ -100,23 +106,46 @@ func buildCategoryTree(cats []Category) []CategoryNode {
 	return tree
 }
 
-// categoryPaths maps every category id to its path from the root down to
-// itself, which is what an asset row shows as "Lenses / Zooms / Tamron
-// 18-400mm". The walk upward stops on a repeat, so a malformed parent chain
+// categoryIndex is the category table shaped for the browse screen. One walk
+// upward from every node produces both things an asset row needs: the path it
+// displays ("Lenses / Zooms / Tamron 18-400mm") and that same path as a sort
+// key, so the list can be put in tree order in Go instead of with a recursive
+// order-by.
+type categoryIndex struct {
+	paths map[string][]CategoryRef
+	keys  map[string][]categorySortKey
+}
+
+// categorySortKey is one step of that sort key: where the node sits among its
+// siblings, with its name to break a tie. The name matters because sort_order
+// is unique by convention only and defaults to 0 for a level nobody has
+// numbered, which then reads alphabetically rather than arbitrarily.
+type categorySortKey struct {
+	order int
+	name  string
+}
+
+// indexCategories maps every category id to its path from the root down to
+// itself. The walk upward stops on a repeat, so a malformed parent chain
 // yields a short path instead of hanging.
-func categoryPaths(cats []Category) map[string][]CategoryRef {
+func indexCategories(cats []Category) categoryIndex {
 	byID := make(map[string]Category, len(cats))
 	for _, c := range cats {
 		byID[c.ID] = c
 	}
 
-	paths := make(map[string][]CategoryRef, len(cats))
+	index := categoryIndex{
+		paths: make(map[string][]CategoryRef, len(cats)),
+		keys:  make(map[string][]categorySortKey, len(cats)),
+	}
 	for _, c := range cats {
 		path := []CategoryRef{}
+		key := []categorySortKey{}
 		seen := make(map[string]bool)
 		for node := c; !seen[node.ID]; {
 			seen[node.ID] = true
 			path = append(path, CategoryRef{ID: node.ID, Name: node.Name})
+			key = append(key, categorySortKey{order: node.SortOrder, name: node.Name})
 			if node.ParentID == nil {
 				break
 			}
@@ -127,9 +156,28 @@ func categoryPaths(cats []Category) map[string][]CategoryRef {
 			node = parent
 		}
 		slices.Reverse(path)
-		paths[c.ID] = path
+		slices.Reverse(key)
+		index.paths[c.ID] = path
+		index.keys[c.ID] = key
 	}
-	return paths
+	return index
+}
+
+// compareCategoryKeys orders two category paths the way the filter tree reads
+// top to bottom: by the first step at which they differ. A path that is a
+// prefix of the other comes first, and an empty path -- an asset filed under
+// no category at all -- comes last, because it belongs to no group a user can
+// point at in the tree.
+func compareCategoryKeys(a, b []categorySortKey) int {
+	if len(a) == 0 || len(b) == 0 {
+		return cmp.Compare(len(b), len(a))
+	}
+	return slices.CompareFunc(a, b, func(x, y categorySortKey) int {
+		if c := cmp.Compare(x.order, y.order); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.name, y.name)
+	})
 }
 
 // categoryExists reports whether id names a category, so a filter on an id
