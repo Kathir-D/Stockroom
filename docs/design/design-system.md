@@ -554,10 +554,10 @@ due date when checked out, and its own **Add**. Rules that make the two levels b
   (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc), not
   alphabetical. Within any list, available units sort before checked-out ones.
 
-> **This needs backend work that doesn't exist yet.** `ListAssets` returns units; the model row needs a
-> per-model available count, and `Add` on a model row needs a free unit to point at. Have the **frontend
-> pick** from the group it already loaded and send that ID, so `CheckOutAssets` stays unchanged. It races
-> when two people browse at once, which on a single shared PC cannot happen. Add it to `TODO.md` Phase 3.
+> **Backend, as built (2026-09-13).** `ListAssets` returns units, each with its status and current holder,
+> in this order. The model row's `4 of 6 available` count and the free unit `Add` points at are both
+> derived by the **frontend** from the group it already loaded, so `CheckOutAssets` stays unchanged. That
+> races when two people browse at once, which on a single shared PC cannot happen.
 
 Other rules:
 
@@ -589,6 +589,11 @@ admin-only; a non-admin's own history is available only via `GetUserHistory`.
 **Enforce it in the Go API, not the UI.** `GetAsset`, `ListAssets`, and `ScanItem` responses include the
 current custodian for every actor; `GetAssetHistory` omits all custodian identities unless the actor is an
 admin. `TODO.md` Phase 3/4 own that response shape.
+
+**The custodian's name, not their number** (2026-09-13). `custody.student_number` is null for a non-admin
+viewer. A student number signs its owner in by scan with no password, so a browse list that carried one per
+checked-out unit would be a list of usable credentials. Nothing in §8.2 or §8.3 displays it to a student
+anyway: the unit row shows `You · Sep 12` or `Jordan S. · Sep 15`.
 
 ### 8.4 Cart: bottom dock, full cart page
 

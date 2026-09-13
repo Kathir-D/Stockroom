@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture all pinned down; see Section 13 for what changed).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture all pinned down; see Section 13 for what changed). Amended 2026-09-13 (browse-list ordering and custodian-field visibility; Section 13).
 
 ---
 
@@ -95,7 +95,7 @@ Why this shape:
 
 ### 6.1 Base schema (applied)
 
-Applied via `supabase/migrations/20260826173006_init_schema.sql` and verified working (12 tables, 2 views, 4 enums). Followed by `20260826180000_grant_service_role.sql` (historical, see Section 4) and `20260908100000_v1_flow.sql` (Section 6.2, applied). Sample data in `supabase/seed.sql` loads on `supabase db reset`.
+Applied via `supabase/migrations/20260826173006_init_schema.sql` and verified working (12 tables, 2 views, 4 enums). Followed by `20260826180000_grant_service_role.sql` (historical, see Section 4), `20260908100000_v1_flow.sql` (Section 6.2, applied) and `20260913090000_category_sort_order.sql` (Section 6.2, applied). Sample data in `supabase/seed.sql` loads on `supabase db reset`.
 
 ```sql
 create extension if not exists "uuid-ossp";
@@ -295,7 +295,7 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 - `photo_path text`
 - `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
-**`categories`.** No change. Used as a strict 3-level tree via `parent_id`:
+**`categories`.** One addition, `sort_order integer not null default 0` (`20260913090000_category_sort_order.sql`). It is a row's position among its *siblings*, ascending, with the name breaking a tie, and it exists because the browse screen sorts by `Catagories.md`'s document order rather than alphabetically (§13, 2026-09-12) and nothing in the table recorded that order. Gaps and duplicates are harmless; the numbers never have to restart at 1 under a parent. Phase 5's category CRUD maintains it. Otherwise unchanged: used as a strict 3-level tree via `parent_id`:
 `Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`, whose Type and Model names are used verbatim. That file names the Categories under `Lenses` (Zooms, Primes, Accessories) and `Cameras/Bodies` (Camera Model) but lists models straight under the other six types, so the seed invents a middle Category there (Lights → Studio Lights + Light Modifiers, Audio Stuff → Wireless Mics + Wired Mics, and so on); those six are the seed's own naming and are safe to rename. Branches may stop short of depth 3 when a Category has no models yet: `Primes` is seeded empty because `Catagories.md` records none in inventory. `categories.name` is unique across the whole table, not per parent, so generic names are worth avoiding.
 
 **Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
@@ -321,7 +321,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 | Admin panel: user CRUD, roster CSV import, set/reset any password | | ✓ |
 | Admin panel: overdue list, override overdue-block on checkout, Backup Now | | ✓ |
 
-**Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user — deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor. Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI — the response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
+**Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user — deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor, so a browse row can say who has the lens without opening anything. What "who" means is the custodian's **name**, their due date and whether they are overdue — not their student number, which is the scan-login key and so stays admin-only (`AssetCustody.forViewer`, 2026-09-13). Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI — the response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
 
 **Login rules**
 - **Scan** (student number arrives as a fast keystroke burst + Enter): sign in with no password.
@@ -527,6 +527,12 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **A cart is a set.** The same asset id twice is one item, not a failed checkout.
 - [x] **The open custody row, not `assets.status`, decides whether an item is out.** Check-in follows the row (matching what `GetAsset` already did for the current custodian), and checkout refuses an asset that claims to be available while a row is still open. Status drift becomes visible instead of duplicating custody rows.
 - [x] **A limited session is refused inside `internal/stockroom`**, not only by the router: `RequireFullSession` sits beside `RequireAdmin` and guards every core-loop write.
+
+**Closed (2026-09-13, Phase 3 addendum)**
+- [x] **Document order is a column, not a constant.** `categories.sort_order` holds a row's position among its siblings; the seed fills it from `Catagories.md`. A hardcoded list of the eight Type names in Go was the alternative, and it breaks the moment Phase 5 lets an admin rename a Type.
+- [x] **The browse list is sorted in Go, not in SQL.** Its first key is the asset's position in the category tree, which the single category read `ListAssets` already does; expressing it as an order-by would mean a recursive join per request for a list of a couple hundred rows.
+- [x] **`AssetDetail` is an alias for `AssetListItem`.** Once every list row carries the current holder, the detail popup knows nothing a row doesn't. Two names, one struct, no drift between the scan payload and the click payload.
+- [x] **A custodian's student number is admin-only**, narrowing the 2026-09-12 visibility decision by one field. The number signs its owner in by scan with no password, so a browse list carrying it is a roster of usable credentials. The name — which is what the decision was actually about — stays open to every signed-in user.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

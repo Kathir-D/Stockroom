@@ -567,7 +567,7 @@ func TestScanItemOpensDetail(t *testing.T) {
 		t.Fatalf("available scan: %+v", res)
 	}
 	// The scan and click paths must be indistinguishable to the frontend.
-	detail, err := db.GetAsset(ctx, available)
+	detail, err := db.GetAsset(ctx, actor, available)
 	if err != nil {
 		t.Fatal(err)
 	}
