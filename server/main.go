@@ -53,7 +53,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
-		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir}),
+		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir, backupDir: cfg.BackupDir}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -3,8 +3,11 @@ package stockroom
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The category tree is the browse screen's left-hand filter: Type ->
@@ -46,7 +49,7 @@ func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
 // about what order the tree is in.
 func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
 	rows, err := db.Pool.Query(ctx,
-		`select id, name, parent_id, sort_order, created_at from categories order by sort_order, name`)
+		`select `+categoryColumns+` from categories order by sort_order, name`)
 	if err != nil {
 		return nil, fmt.Errorf("list categories: %w", err)
 	}
@@ -54,9 +57,9 @@ func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
 
 	cats := []Category{}
 	for rows.Next() {
-		var c Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.ParentID, &c.SortOrder, &c.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan category: %w", err)
+		c, err := scanCategory(rows)
+		if err != nil {
+			return nil, err
 		}
 		cats = append(cats, c)
 	}
@@ -64,6 +67,22 @@ func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
 		return nil, fmt.Errorf("list categories: %w", err)
 	}
 	return cats, nil
+}
+
+// categoryColumns is the select list every category query uses, in the order
+// scanCategory expects.
+const categoryColumns = `id, name, parent_id, sort_order, created_at`
+
+func scanCategory(row pgx.Row) (Category, error) {
+	var c Category
+	err := row.Scan(&c.ID, &c.Name, &c.ParentID, &c.SortOrder, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Category{}, ErrNotFound
+	}
+	if err != nil {
+		return Category{}, fmt.Errorf("scan category: %w", err)
+	}
+	return c, nil
 }
 
 // buildCategoryTree nests a flat list by parent_id. A row whose parent is

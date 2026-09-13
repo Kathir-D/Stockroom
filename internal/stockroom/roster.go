@@ -67,9 +67,11 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 		return RosterResult{}, err
 	}
 	if uploadsDir == "" {
-		// A missing UPLOADS_DIR is a server misconfiguration, not something
-		// the caller sent, so this stays unwrapped and answers 500.
-		return RosterResult{}, errors.New("import roster: uploads dir is not configured")
+		// A missing UPLOADS_DIR is a server misconfiguration rather than
+		// anything the caller sent, but the admin who pressed import is the
+		// one who can fix it, so the message has to reach the response
+		// instead of being swallowed by a generic 500.
+		return RosterResult{}, fmt.Errorf("%w: UPLOADS_DIR is not set, so roster photos have nowhere to go", ErrNotConfigured)
 	}
 	photos := photoStore{dir: photoDir, uploads: uploadsDir}
 
@@ -186,7 +188,9 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 // <uploads>/profiles/<studentNumber>.<ext> and returns the path relative to
 // uploads, which is what goes in the database and what /files/ serves. The
 // extension is required: it is what tells a browser how to render the file,
-// and it is part of the stored path.
+// and it is part of the stored path. Which extensions are allowed is not
+// checked here; see uploadPhotoExtensions for why the upload path is
+// stricter than this one.
 func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
 	if !filepath.IsAbs(src) {
 		dir := ps.dir
@@ -205,31 +209,5 @@ func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
 	}
 	defer in.Close()
 
-	rel := filepath.ToSlash(filepath.Join("profiles", studentNumber+ext))
-	dst := filepath.Join(ps.uploads, "profiles", studentNumber+ext)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", fmt.Errorf("create uploads dir: %w", err)
-	}
-	// Drop a copy stored under a different extension, so re-importing the
-	// same student with a new file type replaces the photo instead of
-	// leaving the old one orphaned. Student numbers are digits only, so the
-	// pattern carries no glob metacharacters.
-	stale, _ := filepath.Glob(filepath.Join(ps.uploads, "profiles", studentNumber+".*"))
-	for _, old := range stale {
-		if old != dst {
-			_ = os.Remove(old)
-		}
-	}
-	out, err := os.Create(dst)
-	if err != nil {
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	return rel, nil
+	return storePhoto(ps.uploads, "profiles", studentNumber, ext, in)
 }

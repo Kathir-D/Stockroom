@@ -40,6 +40,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status, msg = http.StatusConflict, err.Error()
 	case errors.Is(err, stockroom.ErrInvalid):
 		status, msg = http.StatusBadRequest, err.Error()
+	case errors.Is(err, stockroom.ErrNotConfigured):
+		status, msg = http.StatusServiceUnavailable, err.Error()
 	default:
 		log.Printf("error: %v", err)
 	}

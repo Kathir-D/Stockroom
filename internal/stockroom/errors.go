@@ -13,6 +13,12 @@ var (
 	ErrOverdueBlocked = errors.New("custodian has overdue items")
 	ErrPasswordNotSet = errors.New("password not set")
 	ErrBadCredentials = errors.New("bad credentials")
+	// ErrNotConfigured is a setting the operator never filled in: UPLOADS_DIR
+	// for a photo, BACKUP_DIR for a backup. Nobody's request is wrong and no
+	// code is broken, so it is neither a 4xx nor a 500; server/ answers 503
+	// and, unlike a 500, lets the message through, because the admin reading
+	// it is the person who edits .env.
+	ErrNotConfigured = errors.New("not configured")
 )
 
 // ErrFailsafeNotConfigured is returned by EnsureFailsafeAdmin when
