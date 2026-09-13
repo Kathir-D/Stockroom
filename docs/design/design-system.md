@@ -16,8 +16,8 @@ units** (`B3 + B1`) · cart as a **bottom dock that opens a full cart page** · 
 Revised 2026-09-10: the list shape and the cart shape both changed. §8.2 and §8.4 carry the new versions and
 §16 records why.
 
-**Not settled:** seven user-flow questions in §15. Everything in §1 to §14 holds regardless of how they
-land; where a section depends on one, it says so.
+**Settled 2026-09-12:** all seven user-flow questions from §15 were resolved in a grilling session; see §16
+for the resolutions. Nothing in this document is blocked on an open question anymore.
 
 ---
 
@@ -546,9 +546,13 @@ due date when checked out, and its own **Add**. Rules that make the two levels b
 - **`unavailable` units** render their thumbnail and row fill at 55% opacity, while their serial and status
   label remain fully opaque. `Add` is disabled and the reason appears in a tooltip. They still count in the
   total (`4 of 6`), because someone looking at the shelf will count six bodies.
-- **Custodian identity stays admin-only** in the unit rows, per §8.3. A unit the viewer holds themselves may
-  read `You · Sep 12`, since the custodian is an approved audience for their own record. Every other
-  checked-out unit shows the due date and no name.
+- **Custodian identity is visible to any signed-in viewer** in the unit rows, per §8.3 (resolved 2026-09-12).
+  A unit the viewer holds themselves reads `You · Sep 12`; every other checked-out unit shows the due date
+  and the current custodian's name, sourced from `ListAssets` so the row itself carries it without opening
+  detail.
+- **Sort order.** Categories (the model-row grouping's parent) follow `Catagories.md`'s document order
+  (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc), not
+  alphabetical. Within any list, available units sort before checked-out ones.
 
 > **This needs backend work that doesn't exist yet.** `ListAssets` returns units; the model row needs a
 > per-model available count, and `Add` on a model row needs a free unit to point at. Have the **frontend
@@ -568,23 +572,23 @@ Other rules:
 ### 8.3 Asset detail
 
 `dialog`, 560px. Photo left (or `<PhotoFrame>` fallback), facts right: name, full category path, `<Serial>`,
-status as a filled chip, condition, and, when checked out, the checked-out date and due date. Custodian
-name and student number are **admin-only**, per the rule below. Under that, the custody history from
-`GetAssetHistory` as a compact list, newest first.
+status as a filled chip, condition, and, when checked out, custodian name, checked-out date and due date.
+Under that, the custody history from `GetAssetHistory` as a compact list, newest first — history stays
+admin-only (below).
 
 Footer: **Add to cart** (primary) or **Check in** if checked out and the viewer may do it. Admins also get
 **Edit** and **Mark unavailable**.
 
-**Custodian identity is admin-only until peer disclosure is approved.** Approved audience: admins
-(`profiles.is_admin`) and the custodian themselves. A non-admin viewing someone else's item sees only that
-it is checked out and when it is due, never who holds it. Letting a student find who has the lens they want
-is worth having, but student custody records are personal data and nobody has yet been named who can
-approve the wider audience, so the narrow rule is the default. ⚠ §15 Q7.
+**Current custodian is visible to any signed-in viewer; historical custodians are not.** Resolved
+2026-09-12 (§15 Q7), reversing the admin-only default from `b6fe111`: any signed-in user can see who
+currently holds a checked-out item — the original motivation, letting a student find who has the lens they
+want, outweighs withholding it, and this project doesn't have a separate school privacy officer to seek
+sign-off from. This applies only to the **current** holder. `GetAssetHistory`'s past-custodian trail stays
+admin-only; a non-admin's own history is available only via `GetUserHistory`.
 
-**Enforce it in the Go API, not the UI.** The asset-detail, scan and history responses must omit the
-custodian fields for a non-admin actor rather than returning them for the frontend to hide; a hidden field
-is still sent over the wire and the web app is a `fetch` call away. `TODO.md` Phase 3 owns that response
-shape. If Q7 later approves peer disclosure, widening it is a change in that one place.
+**Enforce it in the Go API, not the UI.** `GetAsset`, `ListAssets`, and `ScanItem` responses include the
+current custodian for every actor; `GetAssetHistory` omits all custodian identities unless the actor is an
+admin. `TODO.md` Phase 3/4 own that response shape.
 
 ### 8.4 Cart: bottom dock, full cart page
 
@@ -619,8 +623,11 @@ Rules:
 - **When the user has an overdue item**, the dock renders in the overdue colour with
   `Return BM6K-002 to check out` and the button is disabled, so the block reads before the page rather than
   at the commit. Admins get an **Override** control that opens an `alert-dialog` naming the overdue items
-  first. The same block repeats on the cart page if someone arrives by URL. ⚠ §15 Q6.
-- Cart state clears on sign-out and on idle-timeout 401. ⚠ §15 Q5.
+  first. The same block repeats on the cart page if someone arrives by URL. Resolved 2026-09-12 (§15 Q6):
+  this UI-level block is **in addition to**, not instead of, `CheckOutAssets` refusing server-side — both
+  layers enforce it so there's no path that only relies on the frontend disabling a button.
+- Cart state clears on sign-out or idle-timeout 401, and **only** then — a page reload does not clear it.
+  Resolved 2026-09-12 (§15 Q5).
 
 ### 8.5 Checkout
 
@@ -637,12 +644,15 @@ cart fails together, so the UI must never show partial success.
 - **`ErrOverdueBlocked`** → shouldn't be reachable if the dock already blocked it, but handle it: the same
   overdue notice, with the admin override if applicable.
 
-### 8.6 Scan result ⚠
+### 8.6 Scan result
 
-**Assumption:** scanning an *available* item shows it and requires a press to add, which is your stated preference.
-Scanning a *checked-out* item also requires a press to confirm the return, which **contradicts `CLAUDE.md`
-§1.5** ("checked in immediately"). Confirm which wins (§15 Q2); if `CLAUDE.md` wins, drop the confirm step
-from the checked-out branch below and keep everything else.
+Resolved 2026-09-12 (§15 Q2): `CLAUDE.md` §1.5 wins. Scanning a *checked-out* item checks it in
+**immediately**, no confirm press — the dialog below appears already in its post-check-in state for that
+branch. Scanning an *available* item still requires a press to add, since that path opens the same
+detail/add-to-cart flow as clicking the item, not an irreversible action.
+
+If nobody is signed in when an item barcode is scanned (§15 Q4), the sign-in screen shows an explicit
+"Sign in first" message instead of trying to interpret the code as a student number.
 
 `data-density="kiosk"`, drawn over the current screen so context isn't lost, dismissing on confirm,
 cancel, Escape, or a fresh scan.
@@ -650,7 +660,7 @@ cancel, Escape, or a fresh scan.
 | Scan result | Surface |
 |---|---|
 | `available` | Large photo, name, `<Serial>`, `Available` chip. Buttons: **Add to cart** (primary, autofocused) · **Cancel**. Adding pulses the dock; it does not navigate to the cart page. |
-| `checked_out` | Name, `<Serial>`, days out, and the custodian **for admins only** (§8.3). Buttons: **Check in** (primary) · **Cancel**. An optional damage-note field is collapsed under **Add a note**, expanded inline. |
+| `checked_out` | Already checked in by the time this renders. Name, `<Serial>`, the custodian who just returned it, and a green confirmation for `--dur-slow` (§8.5's session scan log picks it up). An optional damage-note field is collapsed under **Add a note**, expanded inline. Single **Close**. |
 | `unavailable` | Name, `<Serial>`, `Unavailable` chip, reason. Single **Close**. No path to the cart. |
 | unknown serial (`ErrNotFound`) | The scanned string in mono, "Not a Stockroom item." Single **Close**. |
 
@@ -837,23 +847,24 @@ costs several times what building it in does.
 
 ## 15. Open decisions
 
-These block specific sections, not the whole document. Recorded from the grilling round in progress.
+All seven resolved 2026-09-12 in a grilling session; see §16 for the resolutions and which sections each
+one unblocked. Nothing below is open anymore — kept as a record of what was asked.
 
-- **Q1. Who operates the machine?** Unattended student self-service, or a staffed desk with an officer
-  signed in? Changes whether "check out on behalf of" is an edge case or the main path. *Blocks:* 8.1, 8.4.
-- **Q2. Does check-in need a confirm press?** `CLAUDE.md` §1.5 says a scanned checked-out item checks in
-  immediately; you've asked for a confirm. One of the two must be corrected. *Blocks:* 8.6.
-- **Q3. Does the cart mix borrowing and returning?** *Blocks:* 8.4, 8.6.
-- **Q4. What happens when an item is scanned with nobody signed in?** *Blocks:* 8.1.
-- **Q5. How does the cart die?** Sign-out, idle timeout, reload. *Blocks:* 8.4.
-- **Q6. Where does the overdue block bite?** At sign-in with the cart disabled throughout, or at the
-  checkout press. *Blocks:* 8.4, 8.5.
-- **Q7. Who may see who holds an item?** Admins and the custodian only, or any signed-in student? Needs
-  whoever owns student privacy at the school to decide. Until then §8.3 ships the admin-only default and
-  the API withholds the field. *Blocks:* 8.3, 8.6.
+- ~~**Q1. Who operates the machine?**~~ Unattended student self-service, or a staffed desk with an officer
+  signed in? Changed whether "check out on behalf of" is an edge case or the main path. *Blocked:* 8.1, 8.4.
+- ~~**Q2. Does check-in need a confirm press?**~~ `CLAUDE.md` §1.5 says a scanned checked-out item checks in
+  immediately; an earlier session asked for a confirm. *Blocked:* 8.6.
+- ~~**Q3. Does the cart mix borrowing and returning?**~~ *Blocked:* 8.4, 8.6.
+- ~~**Q4. What happens when an item is scanned with nobody signed in?**~~ *Blocked:* 8.1.
+- ~~**Q5. How does the cart die?**~~ Sign-out, idle timeout, reload. *Blocked:* 8.4.
+- ~~**Q6. Where does the overdue block bite?**~~ At sign-in with the cart disabled throughout, or at the
+  checkout press. *Blocked:* 8.4, 8.5.
+- ~~**Q7. Who may see who holds an item?**~~ Admins and the custodian only, or any signed-in student?
+  *Blocked:* 8.3, 8.6.
 
-Also still open from `CLAUDE.md` §13 and relevant here: the scan-vs-typed keystroke threshold (§9) and
-`SESSION_IDLE_MINUTES`, which determines how aggressively the cart is discarded (8.4).
+Also resolved alongside these, from `CLAUDE.md` §13: `SESSION_IDLE_MINUTES` is **5 minutes**. The
+scan-vs-typed keystroke threshold (§9) stays genuinely open — it needs real scanner hardware, arriving
+Week 7 — but ships as a named constant defaulted to 50ms so tuning it later is a one-line change.
 
 ---
 
@@ -872,3 +883,34 @@ because it is the part that stops someone walking off with an uncommitted cart. 
 cart page is the interaction every student already knows. The commit panel gets more room for the due-date
 picker and the admin custodian picker, and the dock stops carrying a commit button it was too small for.
 §8.4 has the rules.
+
+**2026-09-12, §15 Q1 to Q7 resolved in a grilling session.**
+
+- **Q1 → unattended self-service.** Matches `CLAUDE.md`'s described flow. "Check out on behalf of" stays
+  the admin-only edge case it was already specced as; no change to 8.1/8.4 beyond confirming the assumption.
+- **Q2 → `CLAUDE.md` wins: immediate check-in, no confirm.** §8.6 rewritten; the confirm-press branch for
+  `checked_out` scans is gone.
+- **Q3 → the cart never mixes borrow and return.** Scanning a checked-out item checks it in immediately and
+  never touches the cart; the cart exists only to accumulate items being borrowed. Confirmed by the
+  post-check-in green flash + "put it back" pattern §8.6 already described.
+- **Q4 → explicit "sign in first" message.** Scanning an item barcode with no session active shows a
+  dedicated prompt rather than trying to interpret the code as a student number and failing generically.
+- **Q5 → the cart survives a reload.** It clears only on sign-out or the 5-minute idle timeout, not on a
+  page refresh — safer for someone who accidentally reloads mid-shopping than for the machine sitting
+  unattended, and idle-timeout already covers the unattended case.
+- **Q6 → both layers enforce the overdue block.** The cart/checkout UI disables itself the instant an
+  overdue user signs in (as §8.4 already specced), *and* `CheckOutAssets` refuses server-side regardless of
+  what the client sends. Belt and suspenders, not either/or.
+- **Q7 → current custodian visible to any signed-in viewer, reversing `b6fe111`.** The original motivation
+  (a student can find who has the lens they want) outweighs withholding it, and this project has no separate
+  school privacy officer to seek sign-off from before shipping the open version. This applies only to who
+  currently holds an item — `GetAssetHistory`'s past-custodian trail stays admin-only, and a non-admin's own
+  history is available only via `GetUserHistory`. §8.2, §8.3, and §8.6 updated; `TODO.md` Phase 3/4 own the
+  API shape (`ListAssets`/`GetAsset`/`ScanItem` include the current custodian for every actor,
+  `GetAssetHistory` doesn't unless the actor is an admin).
+
+Also settled in the same session: `SESSION_IDLE_MINUTES` = 5 minutes. Browse-list sort order (not
+previously specified anywhere): categories in `Catagories.md`'s document order, available units before
+checked-out ones within any list. Backup (`CLAUDE.md` §11) moves from "local CSV, Drive client syncs it"
+to "local CSV, then `rclone copy` pushes it directly" — a one-time human `rclone config` OAuth step replaces
+writing custom Google API/OAuth code.

@@ -32,7 +32,7 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 - Overdue tracking surfaced in-app (admin list + warning at the user's next sign-in; overdue users are blocked from new checkouts until returned, admin can override)
 - Zero dependency on internet for core daily operation
 - Runs on both the Windows closet PC and a macOS dev machine
-- Automated nightly off-site backup (CSV into a Google Drive-synced folder)
+- Automated nightly off-site backup (CSV pushed to Google Drive via `rclone`)
 
 **Non-goals** (explicitly out of scope; tables may exist in the schema but nothing is built on them)
 - Reservations / future bookings / double-booking prevention (maybe much later)
@@ -57,7 +57,7 @@ One dedicated Windows PC lives in the camera closet, always on. Development happ
    - **Wails desktop app** (`desktop-app/`). Primary interface, native window, Svelte 5 + TypeScript. Wails' Go side is just a window host; it does not touch the DB.
    - **Web app** (`web-app/`). Vite + Svelte 5 + TypeScript, served on `localhost`, mirrors the desktop app. Localhost only, not exposed on the LAN.
 
-The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every table to CSV into a folder that the Google Drive client (already installed on the PC) syncs off-site. No cloud API code needed.
+The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every table to CSV into a local folder, then shells out to `rclone copy` to push that folder to Google Drive. `rclone` owns the OAuth token and refresh handling (set up once, interactively, via `rclone config`); the Go code never talks to the Drive API directly.
 
 ---
 
@@ -86,7 +86,7 @@ Why this shape:
 | Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Calls the Go server over HTTP |
 | Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Calls the Go server over HTTP; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
-| Backup | Go CLI (`cmd/backup`) → CSV per table → Google Drive-synced folder; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
+| Backup | Go CLI (`cmd/backup`) → CSV per table → local folder → `rclone copy` to Google Drive; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
 | Config | `.env` at repo root (see Section 9) |
 
 ---
@@ -313,10 +313,14 @@ Two kinds of account, decided by `profiles.is_admin`:
 | Add to cart, check out **to self** | ✓ | ✓ |
 | Check out **on behalf of someone else** (custodian picked from user list) | | ✓ |
 | Scan an item to check it back in | ✓ (any item, not just own) | ✓ |
+| See who currently holds a checked-out item | ✓ (any item, not just own) | ✓ |
 | View own custody history | ✓ | ✓ |
+| View any item's or user's full custody history | | ✓ |
 | Admin panel: asset CRUD, mark unavailable, category tree CRUD | | ✓ |
 | Admin panel: user CRUD, roster CSV import, set/reset any password | | ✓ |
 | Admin panel: overdue list, override overdue-block on checkout, Backup Now | | ✓ |
+
+**Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user — deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor. Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI — the response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
 
 **Login rules**
 - **Scan** (student number arrives as a fast keystroke burst + Enter): sign in with no password.
@@ -327,12 +331,13 @@ Two kinds of account, decided by `profiles.is_admin`:
 
 **Sessions**
 - In-memory session map in the Go server. The login response returns the token and also sets it as an HttpOnly `stockroom_session` cookie; requests may send either `Authorization: Bearer <token>` or the cookie. Restarting the server signs everyone out; acceptable.
-- Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default 30; final length still open, Section 13). Every request refreshes the deadline. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
+- Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default **5 minutes**, decided 2026-09-12). Every request refreshes the deadline. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
+- The frontend cart (a pending list of asset IDs, never sent to the server until checkout) clears only on sign-out or on the idle timeout — **not** on a page reload, so an accidental refresh mid-shopping doesn't lose it.
 - A scan login by an account with no password gets a **limited** session: it may only call `POST /auth/set-password`, `GET /me` and `POST /auth/logout`. Anything else answers `403 {"error":"password not set","needs_password":true}`. Setting the password upgrades the same token to a full session.
 - The actor's profile is reloaded on every request, so an admin-flag change or a deleted account takes effect immediately. An admin password reset or delete drops that user's sessions, and `internal/stockroom` does that itself so the rule does not depend on the HTTP layer.
 
 **Overdue rule**
-- Signing in with any overdue item shows a warning. Attempting a checkout while overdue is refused by the server; an admin can override per checkout.
+- Signing in with any overdue item shows a warning, and the cart/checkout UI disables itself immediately at that point. Attempting a checkout while overdue is *also* refused by the server (`CheckOutAssets` → `ErrOverdueBlocked`) regardless of what the client sends — both layers enforce the block, not just the UI. An admin can override per checkout.
 
 ---
 
@@ -405,8 +410,9 @@ Current state differs: `cmd/` doesn't exist yet, and `desktop-app/frontend/src/l
    | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7); digits only | (none) |
    | `ADMIN_PASSWORD` | failsafe admin password; at least 8 characters | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
-   | `BACKUP_DIR` | CSV export target (Google Drive-synced folder) | (none) |
-   | `SESSION_IDLE_MINUTES` | idle timeout | TBD |
+   | `BACKUP_DIR` | local CSV export target, also `rclone`'s source folder | (none) |
+   | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that `cmd/backup` copies `BACKUP_DIR` to | (none) |
+   | `SESSION_IDLE_MINUTES` | idle timeout | `5` |
 
 3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates an admin (student number `100001`, typed-login password `stockroom`) and a student (`200001`, no password yet).
 4. `go run ./server`. The API. Check `curl http://127.0.0.1:8080/health`.
@@ -450,7 +456,7 @@ Scanner hardware is not yet purchased/tested (Week 7). Confirm it's a plain HID 
 
 ## 11. Backup strategy
 
-Nightly, a Go CLI (`cmd/backup`) exports every table to CSV into `BACKUP_DIR/<yyyy-mm-dd>/<table>.csv`. `BACKUP_DIR` points inside the Google Drive folder on the closet PC, so the already-installed Drive client uploads it off-site. Scheduling: Windows Task Scheduler on the closet PC; launchd or cron on macOS for dev. The same export function is exposed as "Backup Now" in the admin panel.
+Nightly, a Go CLI (`cmd/backup`) exports every table to CSV into `BACKUP_DIR/<yyyy-mm-dd>/<table>.csv`, then shells out to `rclone copy BACKUP_DIR <remote>:` to push that same folder to Google Drive (decided 2026-09-12, replacing the earlier local-only/Drive-client-syncs-it plan). `rclone` is configured once, interactively (`rclone config`), on whichever machine runs the backup; the stored remote name goes in `.env` alongside `BACKUP_DIR`. The local CSVs are kept regardless of upload success, both as a fallback and because the restore test below reads from them directly. Scheduling: Windows Task Scheduler on the closet PC; launchd or cron on macOS for dev. The same export function is exposed as "Backup Now" in the admin panel.
 
 Before go-live, test a full restore: wipe a scratch database, reapply migrations, reload from CSV, confirm row counts match.
 
@@ -503,11 +509,21 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Failsafe admin is best-effort (2026-09-08): `EnsureFailsafeAdmin` returns `ErrFailsafeNotConfigured` when the `.env` values are blank, and the server only ever logs a warning. Nothing about the failsafe can stop the API from starting.
 - [x] Student numbers (2026-09-08): stored as digits-only text, no fixed length. Cards encode six digits, but `NormalizeStudentNumber` accepts 1 to 32 so a reissued or imported number still works; the bound is a mis-scan guard, not a format.
 
+**Closed (2026-09-12 grilling session — resolves `docs/design/design-system.md` §15 Q1 to Q7 too)**
+- [x] Session idle timeout: **5 minutes** (`SESSION_IDLE_MINUTES` default).
+- [x] Machine operation model: **unattended student self-service** is the primary path; admin check-out-on-behalf-of stays the rare override it was already specced as.
+- [x] Cart never mixes borrowing and returning: scanning a checked-out item checks it in immediately and never touches the cart; the cart only ever accumulates items being borrowed.
+- [x] Scanning an item barcode with nobody signed in shows an explicit "sign in first" message rather than trying to interpret the code as a student number.
+- [x] The frontend cart clears only on sign-out or the idle timeout, **not** on a page reload.
+- [x] Overdue block is enforced at **both** layers: the checkout UI disables itself the moment an overdue user signs in, and `CheckOutAssets` also refuses server-side regardless of what the client sends.
+- [x] **Custodian visibility, reversing the 2026-09-09 review tightening**: who currently holds a checked-out item is visible to any signed-in user, not admin-only. Applies only to the current holder — `GetAssetHistory`'s full past-custodian trail stays admin-only, and a non-admin's own history is available only via `GetUserHistory`. See §7.
+- [x] Browse list sort order (previously unspecified): categories in `Catagories.md`'s document order, not alphabetical; within any list, available units sort before checked-out ones.
+- [x] Backup: nightly CSV → local folder → **`rclone copy` pushes it to Google Drive** directly, replacing the "Drive desktop client syncs a local folder, no cloud API code" plan. One-time interactive `rclone config` OAuth setup instead of hand-written Google API/OAuth code. See §11.
+
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
-- [ ] Session idle-timeout length (`SESSION_IDLE_MINUTES`)
-- [ ] Scan-vs-typed keystroke threshold. Tune with real hardware
-- [ ] Exact `BACKUP_DIR` path on the closet PC
+- [ ] Scan-vs-typed keystroke threshold. Ships as a named/configurable constant defaulted to 50ms; tune with real hardware in Week 7
+- [ ] Exact `BACKUP_DIR` path and `rclone` remote name on the closet PC (blocked on the PC being provisioned)
 
 ---
 
