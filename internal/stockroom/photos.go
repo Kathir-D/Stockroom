@@ -1,11 +1,13 @@
 package stockroom
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Photo storage. Two paths put files under UPLOADS_DIR: a roster import
@@ -35,6 +37,61 @@ var uploadPhotoExtensions = map[string]bool{
 	".webp": true,
 }
 
+// photoLocks serializes the whole stage-publish-commit sequence per photo.
+// The steps are several file operations and, for an asset, a row write in the
+// middle of them, so two uploads replacing the same photo interleave badly:
+// one discovers the other's file as a stale copy of another extension and
+// deletes it on commit, after the slower request's UPDATE has already pointed
+// the row at it. The row then names a file that is gone, which is exactly the
+// outcome staging exists to prevent.
+//
+// The key is the photo's identity, <dir>/<base> — the asset id or student
+// number — not the target path, because the extension is the part that
+// differs between two uploads that collide. A lock is dropped once nobody
+// holds it, so the map stays the size of the uploads in flight rather than
+// growing one entry per asset ever photographed.
+//
+// This serializes one process. It is the whole story for this deployment:
+// a single Go server owns the uploads directory (CLAUDE.md §3). A second
+// server pointed at the same directory would need a lock on disk instead.
+var photoLocks = struct {
+	mu sync.Mutex
+	m  map[string]*photoLock
+}{m: make(map[string]*photoLock)}
+
+type photoLock struct {
+	mu      sync.Mutex
+	holders int
+}
+
+// lockPhoto blocks until this photo's identity is free, and returns the
+// function that releases it. Callers hold it from before staging until commit
+// or rollback has finished, so the file on disk and the row naming it settle
+// together.
+func lockPhoto(dir, base string) func() {
+	key := filepath.ToSlash(filepath.Join(dir, base))
+
+	photoLocks.mu.Lock()
+	l, ok := photoLocks.m[key]
+	if !ok {
+		l = &photoLock{}
+		photoLocks.m[key] = l
+	}
+	l.holders++
+	photoLocks.mu.Unlock()
+
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		photoLocks.mu.Lock()
+		l.holders--
+		if l.holders == 0 {
+			delete(photoLocks.m, key)
+		}
+		photoLocks.mu.Unlock()
+	}
+}
+
 // stagedPhoto is an upload that has reached the disk but is not yet the photo
 // anyone will see. The sequence is stage, publish, write the row, commit; a
 // failure at any point is a rollback, which puts back whatever was there
@@ -52,6 +109,10 @@ type stagedPhoto struct {
 
 // stagePhoto writes src to a temporary file beside <uploads>/<dir>/<base><ext>,
 // touching nothing that is already there. ext carries its leading dot.
+//
+// The caller holds lockPhoto(dir, base) for the whole sequence this starts:
+// the stale-copy scan below reads a directory another upload of the same photo
+// is about to write to.
 func stagePhoto(uploads, dir, base, ext string, src io.Reader) (*stagedPhoto, error) {
 	if uploads == "" {
 		return nil, fmt.Errorf("%w: UPLOADS_DIR is not set, so there is nowhere to put the photo", ErrNotConfigured)
@@ -92,12 +153,10 @@ func stagePhoto(uploads, dir, base, ext string, src io.Reader) (*stagedPhoto, er
 	}
 	if _, err := io.Copy(out, src); err != nil {
 		out.Close()
-		p.rollback()
-		return nil, fmt.Errorf("write photo: %w", err)
+		return nil, p.rollbackWith(fmt.Errorf("write photo: %w", err))
 	}
 	if err := out.Close(); err != nil {
-		p.rollback()
-		return nil, fmt.Errorf("write photo: %w", err)
+		return nil, p.rollbackWith(fmt.Errorf("write photo: %w", err))
 	}
 	return p, nil
 }
@@ -105,7 +164,8 @@ func stagePhoto(uploads, dir, base, ext string, src io.Reader) (*stagedPhoto, er
 // publish moves the staged copy into place, setting aside whatever it
 // replaced so rollback can put it back. The move is a rename, so anything
 // reading the uploads directory sees the old photo or the new one and never a
-// half-written file.
+// half-written file. A publish that fails has already rolled itself back, so
+// the caller returns the error rather than undoing anything further.
 func (p *stagedPhoto) publish() error {
 	if _, err := os.Stat(p.target); err == nil {
 		aside, err := os.CreateTemp(filepath.Dir(p.target), ".replaced-"+filepath.Base(p.target)+"-*")
@@ -121,8 +181,7 @@ func (p *stagedPhoto) publish() error {
 		p.backup = name
 	}
 	if err := os.Rename(p.tmp, p.target); err != nil {
-		p.rollback()
-		return fmt.Errorf("write photo: %w", err)
+		return p.rollbackWith(fmt.Errorf("write photo: %w", err))
 	}
 	p.tmp, p.published = "", true
 	return nil
@@ -145,9 +204,16 @@ func (p *stagedPhoto) commit() {
 }
 
 // rollback undoes however much of the upload reached the disk, leaving the
-// photo that was there before. Errors are dropped: the caller is already
-// returning a failure, and a stranded temporary file is the smaller problem.
-func (p *stagedPhoto) rollback() {
+// photo that was there before.
+//
+// A stranded temporary file is dropped silently: the caller is already
+// returning a failure and the leftover is harmless. Failing to put the backup
+// back is not harmless and is reported, because at that point the old photo
+// is neither at its own name nor recoverable by anyone who does not know to
+// look for a .replaced- file, and the row still names the path it vacated.
+// p.backup is cleared only once the rename has actually succeeded, so a
+// second attempt still knows where the copy went.
+func (p *stagedPhoto) rollback() error {
 	if p.tmp != "" {
 		_ = os.Remove(p.tmp)
 		p.tmp = ""
@@ -157,22 +223,37 @@ func (p *stagedPhoto) rollback() {
 		p.published = false
 	}
 	if p.backup != "" {
-		_ = os.Rename(p.backup, p.target)
+		if err := os.Rename(p.backup, p.target); err != nil {
+			return fmt.Errorf("restore the photo %s replaced, left at %s: %w", p.target, p.backup, err)
+		}
 		p.backup = ""
 	}
+	return nil
+}
+
+// rollbackWith undoes the upload and reports both failures when putting the
+// old photo back fails too. err stays in the chain either way, because it is
+// the reason the upload stopped and what errors.Is upstream is matching on;
+// the rollback failure rides along so a lost photo is never silent.
+func (p *stagedPhoto) rollbackWith(err error) error {
+	if rerr := p.rollback(); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	return err
 }
 
 // storePhoto writes src to <uploads>/<dir>/<base><ext> and returns the path
 // relative to uploads. It is the whole sequence run at once, for a caller with
 // no database write to keep in step with the file; SetAssetPhoto, which has
-// one, drives the steps itself.
+// one, drives the steps itself and takes the same lock around them.
 func storePhoto(uploads, dir, base, ext string, src io.Reader) (string, error) {
+	defer lockPhoto(dir, base)()
+
 	p, err := stagePhoto(uploads, dir, base, ext, src)
 	if err != nil {
 		return "", err
 	}
 	if err := p.publish(); err != nil {
-		p.rollback()
 		return "", err
 	}
 	p.commit()

@@ -264,6 +264,16 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 	// order is what keeps the file and the column agreeing: until the UPDATE
 	// lands the old picture is still the one of record, and any failure after
 	// it has been moved aside puts it straight back.
+	//
+	// One replacement of this asset's photo at a time, held from before
+	// staging until commit or rollback has finished. Staging scans for copies
+	// under the other extensions to drop on commit, so two uploads running
+	// together would each find the other's file: whichever committed second
+	// would delete a photo the first request's UPDATE had already named.
+	// Locking on the asset id rather than the target path is what makes them
+	// wait, since the extension is the part that differs.
+	defer lockPhoto("assets", id)()
+
 	staged, err := stagePhoto(uploadsDir, "assets", id, ext, src)
 	if err != nil {
 		return AssetDetail{}, err
@@ -273,14 +283,12 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 	}
 	tag, err := db.Pool.Exec(ctx, `update assets set photo_path = $2 where id = $1`, id, staged.rel)
 	if err != nil {
-		staged.rollback()
-		return AssetDetail{}, mapPgError("set asset photo", err)
+		return AssetDetail{}, staged.rollbackWith(mapPgError("set asset photo", err))
 	}
 	// The asset can still have been deleted since the check above, in which
 	// case nothing points at the file and it goes back the way it came.
 	if tag.RowsAffected() == 0 {
-		staged.rollback()
-		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+		return AssetDetail{}, staged.rollbackWith(fmt.Errorf("%w: no asset %s", ErrNotFound, id))
 	}
 	staged.commit()
 	return db.GetAsset(ctx, actor, id)

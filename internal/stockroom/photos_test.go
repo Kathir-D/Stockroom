@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -104,6 +105,76 @@ func TestStagedPhotoDropsTheOtherExtensionOnlyOnCommit(t *testing.T) {
 	p.commit()
 	assertPhoto(t, uploads, "unit-1.png", "second")
 	assertOnlyPhotos(t, uploads, "unit-1.png")
+}
+
+// Two admins replacing the same asset's photo at once. Without the lock each
+// staging run scans for copies under the other extensions and drops them on
+// commit, so the loser's file outlives the winner's commit and the directory
+// is left holding more than one photo — the state a row pointing at the wrong
+// one comes from.
+func TestStorePhotoSerializesUploadsOfTheSamePhoto(t *testing.T) {
+	uploads := t.TempDir()
+	exts := []string{".jpg", ".png", ".webp", ".gif"}
+
+	var wg sync.WaitGroup
+	for i := range 24 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ext := exts[i%len(exts)]
+			if _, err := storePhoto(uploads, "assets", "unit-1", ext, strings.NewReader(ext)); err != nil {
+				t.Errorf("storePhoto: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Whichever upload landed last, it is the only thing left: no second
+	// extension, and no stranded .staged- or .replaced- copy either.
+	entries, err := os.ReadDir(filepath.Join(uploads, "assets"))
+	if err != nil {
+		t.Fatalf("read uploads dir: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 {
+		t.Errorf("uploads dir holds %v, want exactly one photo", names)
+	}
+}
+
+// A rollback that cannot put the old photo back is the one case worth
+// reporting: the row still names a path that is now empty, and the only copy
+// is sitting under a name nobody would think to look for.
+func TestStagedPhotoRollbackReportsAFailedRestore(t *testing.T) {
+	uploads := t.TempDir()
+	dir := filepath.Join(uploads, "assets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	p := &stagedPhoto{
+		target: filepath.Join(dir, "unit-1.jpg"),
+		backup: filepath.Join(dir, ".replaced-unit-1.jpg-gone"), // never written
+	}
+
+	err := p.rollback()
+	if err == nil {
+		t.Fatal("rollback with an unrestorable backup returned nil, want an error")
+	}
+	if p.backup == "" {
+		t.Error("rollback cleared p.backup though the restore failed, losing where the copy went")
+	}
+
+	// The reason the upload stopped still has to survive the joining, since
+	// that is what the HTTP layer maps to a status code.
+	joined := p.rollbackWith(ErrNotFound)
+	if !errors.Is(joined, ErrNotFound) {
+		t.Errorf("rollbackWith dropped the original error: %v", joined)
+	}
+	if !strings.Contains(joined.Error(), "restore") {
+		t.Errorf("rollbackWith dropped the restore failure: %v", joined)
+	}
 }
 
 func assertPhoto(t *testing.T, uploads, name, want string) {
