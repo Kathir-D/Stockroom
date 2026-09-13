@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"strings"
 	"time"
@@ -16,12 +15,6 @@ import (
 // The browse screen (CLAUDE.md §1, step 2): a filtered asset list on the
 // right, the category tree and a search box on the left, and a detail popup
 // per item. Reads only -- checkout, check-in and scanning are Phase 4.
-
-// FilesPrefix is where the server mounts UPLOADS_DIR (server/router.go), and
-// so the prefix of every photo URL handed to a frontend. It lives here
-// because the same rule applies to profile and asset photos alike and both
-// are built below.
-const FilesPrefix = "/files/"
 
 // AssetFilter is the browse query. Every field is optional; the zero value
 // lists the whole inventory.
@@ -113,7 +106,11 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 	if err := RequireFullSession(actor); err != nil {
 		return nil, err
 	}
-	where, args, err := db.assetFilterSQL(ctx, filter)
+	tree, err := loadCategoryTree(ctx, db.Pool)
+	if err != nil {
+		return nil, err
+	}
+	where, args, err := assetFilterSQL(tree, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -142,10 +139,6 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 		return nil, mapPgError("list assets", err)
 	}
 
-	index, err := db.categoryIndex(ctx)
-	if err != nil {
-		return nil, err
-	}
 	// One query for the whole page rather than one per row: a list of two
 	// hundred units would otherwise be two hundred round trips.
 	held, err := holdersByAsset(ctx, db.Pool, ids, actor)
@@ -155,11 +148,11 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 
 	items := make([]AssetListItem, 0, len(assets))
 	for _, a := range assets {
-		item := newAssetListItem(a, index)
+		item := newAssetListItem(a, tree)
 		item.Custody = held[a.ID]
 		items = append(items, item)
 	}
-	sortBrowseList(items, index)
+	sortBrowseList(items, tree)
 	return items, nil
 }
 
@@ -168,9 +161,9 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 // document order rather than alphabetically, then available units ahead of the
 // ones nobody can take today, then by name. asset_tag breaks the last tie so
 // two identically named units never swap places between two requests.
-func sortBrowseList(items []AssetListItem, index categoryIndex) {
+func sortBrowseList(items []AssetListItem, tree categoryTree) {
 	slices.SortFunc(items, func(x, y AssetListItem) int {
-		if c := compareCategoryKeys(index.keyFor(x.CategoryID), index.keyFor(y.CategoryID)); c != 0 {
+		if c := compareCategoryKeys(tree.keyFor(x.CategoryID), tree.keyFor(y.CategoryID)); c != 0 {
 			return c
 		}
 		if c := cmp.Compare(browseRank(x.Status), browseRank(y.Status)); c != 0 {
@@ -212,11 +205,11 @@ func (db *DB) GetAsset(ctx context.Context, actor Actor, id string) (AssetDetail
 		return AssetDetail{}, mapPgError("get asset", err)
 	}
 
-	index, err := db.categoryIndex(ctx)
+	tree, err := loadCategoryTree(ctx, db.Pool)
 	if err != nil {
 		return AssetDetail{}, err
 	}
-	detail := newAssetListItem(a, index)
+	detail := newAssetListItem(a, tree)
 
 	// The open custody row is read regardless of status rather than only
 	// when the asset says checked_out, so a status that has drifted out of
@@ -230,29 +223,16 @@ func (db *DB) GetAsset(ctx context.Context, actor Actor, id string) (AssetDetail
 
 // assetFilterSQL turns a filter into a where clause and its arguments. The
 // clause is always non-empty so callers can concatenate it unconditionally.
-func (db *DB) assetFilterSQL(ctx context.Context, filter AssetFilter) (string, []any, error) {
+func assetFilterSQL(tree categoryTree, filter AssetFilter) (string, []any, error) {
 	conds := []string{"true"}
 	var args []any
 
 	if id := strings.TrimSpace(filter.CategoryID); id != "" {
-		ok, err := db.categoryExists(ctx, id)
-		if err != nil {
+		if _, err := tree.require(id); err != nil {
 			return "", nil, err
 		}
-		if !ok {
-			return "", nil, fmt.Errorf("%w: category %s", ErrNotFound, id)
-		}
-		args = append(args, id)
-		// A filter on any level of the tree includes everything below it.
-		// union (not union all) also makes a malformed parent chain
-		// terminate instead of recursing forever.
-		conds = append(conds, fmt.Sprintf(`a.category_id in (
-			with recursive picked as (
-				select id from categories where id = $%[1]d
-				union
-				select c.id from categories c join picked p on c.parent_id = p.id
-			)
-			select id from picked)`, len(args)))
+		args = append(args, tree.descendants(id))
+		conds = append(conds, fmt.Sprintf(`a.category_id = any($%d::uuid[])`, len(args)))
 	}
 
 	if filter.Status != "" {
@@ -290,59 +270,8 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 func escapeLike(s string) string { return likeEscaper.Replace(s) }
 
-// categoryIndex reads the category tree once per call and returns the paths
-// and sort keys built from it. The table is a few dozen rows, so one read per
-// list is cheaper than a recursive join per asset.
-func (db *DB) categoryIndex(ctx context.Context) (categoryIndex, error) {
-	cats, err := loadCategories(ctx, db.Pool)
-	if err != nil {
-		return categoryIndex{}, err
-	}
-	return indexCategories(cats), nil
-}
-
-// keyFor is the sort key of the category an asset is filed under. An asset
-// with no category, or one naming a category that has since been deleted, gets
-// the empty key, which sorts last.
-func (i categoryIndex) keyFor(categoryID *string) []categorySortKey {
-	if categoryID == nil {
-		return nil
-	}
-	return i.keys[*categoryID]
-}
-
-func newAssetListItem(a Asset, index categoryIndex) AssetListItem {
-	item := AssetListItem{Asset: a, CategoryPath: []CategoryRef{}, PhotoURL: photoURL(a.PhotoPath)}
-	if a.CategoryID != nil {
-		if p, ok := index.paths[*a.CategoryID]; ok {
-			item.CategoryPath = p
-		}
-	}
-	return item
-}
-
-// photoURL turns a path stored relative to UPLOADS_DIR into the URL the Go
-// server serves it at. A missing or blank path is nil, not an empty string,
-// so the frontend tests one thing to decide whether to render an image.
-func photoURL(stored *string) *string {
-	if stored == nil {
-		return nil
-	}
-	// Photos are written with forward slashes (roster.go), but a value typed
-	// into the admin panel on Windows may not be.
-	rel := strings.Trim(strings.ReplaceAll(*stored, `\`, "/"), "/")
-	if rel == "" {
-		return nil
-	}
-	// Clean against a leading slash so a stored "../x" resolves inside the
-	// uploads root instead of pointing above it. http.Dir refuses such a
-	// request anyway; this keeps the URL itself honest.
-	clean := strings.TrimPrefix(path.Clean("/"+rel), "/")
-	if clean == "" || clean == "." {
-		return nil
-	}
-	url := FilesPrefix + clean
-	return &url
+func newAssetListItem(a Asset, tree categoryTree) AssetListItem {
+	return AssetListItem{Asset: a, CategoryPath: tree.pathOf(a.CategoryID), PhotoURL: photoURL(a.PhotoPath)}
 }
 
 // holderColumns and holderFrom are the open-custody read that the single

@@ -12,10 +12,15 @@ import (
 
 // The category tree is the browse screen's left-hand filter: Type ->
 // Category -> Model, three levels deep, held in one table via parent_id
-// (CLAUDE.md §6.2). It is small -- a few dozen rows -- so the whole thing is
-// read in one query and shaped in Go rather than with recursive SQL. The tree,
-// the per-asset category path and the browse list's sort order all come out of
-// that one read.
+// (CLAUDE.md §6.2). It is a few dozen rows, so the whole table is read in one
+// query and shaped in Go rather than with recursive SQL.
+//
+// categoryTree is the one shape that read produces. Every question the
+// package asks about the tree goes through it: the nested filter tree, an
+// asset's category path and sort key, which nodes sit under a filter, how
+// deep a node is, what its next sibling position would be. The admin writes
+// in categories_admin.go and the browse reads in assets.go share it, so they
+// cannot disagree about what the tree looks like.
 
 // CategoryNode is one node of the filter tree: a category row plus its
 // children, nested to whatever depth the data has. Children is never null in
@@ -34,42 +39,16 @@ type CategoryRef struct {
 // GetCategoryTree returns the whole tree in one call, roots first, every
 // level in its own sibling order (Catagories.md's document order for the
 // Types, so the filter reads Cameras/Bodies, Lenses, Lights, ... rather than
-// alphabetically).
-func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
-	cats, err := loadCategories(ctx, db.Pool)
+// alphabetically). Any full session may read it (CLAUDE.md §7).
+func (db *DB) GetCategoryTree(ctx context.Context, actor Actor) ([]CategoryNode, error) {
+	if err := RequireFullSession(actor); err != nil {
+		return nil, err
+	}
+	tree, err := loadCategoryTree(ctx, db.Pool)
 	if err != nil {
 		return nil, err
 	}
-	return buildCategoryTree(cats), nil
-}
-
-// loadCategories reads every category row in display order: sort_order within
-// a parent, name to break a tie. One read feeds the tree, the per-asset
-// category path and the browse list's sort key, so those three can't disagree
-// about what order the tree is in.
-//
-// It takes a querier rather than reaching for the pool so the admin writes
-// can measure the tree inside the transaction that is about to change it.
-func loadCategories(ctx context.Context, q querier) ([]Category, error) {
-	rows, err := q.Query(ctx,
-		`select `+categoryColumns+` from categories order by sort_order, name`)
-	if err != nil {
-		return nil, fmt.Errorf("list categories: %w", err)
-	}
-	defer rows.Close()
-
-	cats := []Category{}
-	for rows.Next() {
-		c, err := scanCategory(rows)
-		if err != nil {
-			return nil, err
-		}
-		cats = append(cats, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list categories: %w", err)
-	}
-	return cats, nil
+	return tree.nodes(), nil
 }
 
 // categoryColumns is the select list every category query uses, in the order
@@ -88,78 +67,72 @@ func scanCategory(row pgx.Row) (Category, error) {
 	return c, nil
 }
 
-// buildCategoryTree nests a flat list by parent_id. A row whose parent is
-// missing from the list, or which is its own parent, is treated as a root
-// rather than dropped, so a filter tree is never silently short a branch.
+// loadCategoryTree reads every category row in display order (sort_order
+// within a parent, name to break a tie) and shapes it. It takes a querier
+// rather than the pool so the admin writes can measure the tree inside the
+// transaction that is about to change it.
+func loadCategoryTree(ctx context.Context, q querier) (categoryTree, error) {
+	rows, err := q.Query(ctx,
+		`select `+categoryColumns+` from categories order by sort_order, name`)
+	if err != nil {
+		return categoryTree{}, fmt.Errorf("list categories: %w", err)
+	}
+	defer rows.Close()
+
+	cats := []Category{}
+	for rows.Next() {
+		c, err := scanCategory(rows)
+		if err != nil {
+			return categoryTree{}, err
+		}
+		cats = append(cats, c)
+	}
+	if err := rows.Err(); err != nil {
+		return categoryTree{}, fmt.Errorf("list categories: %w", err)
+	}
+	return newCategoryTree(cats), nil
+}
+
+// categoryTree is the category table after one walk of its parent links.
 //
-// Descending from the roots cannot loop: every member of a parent_id cycle
-// has a parent inside that cycle, so no root reaches one. Rows in such a
-// cycle are unreachable and stay out of the tree; nothing in the schema
-// creates them.
-func buildCategoryTree(cats []Category) []CategoryNode {
-	present := make(map[string]bool, len(cats))
-	for _, c := range cats {
-		present[c.ID] = true
-	}
-
-	roots := []Category{}
-	children := make(map[string][]Category)
-	for _, c := range cats {
-		if c.ParentID == nil || *c.ParentID == c.ID || !present[*c.ParentID] {
-			roots = append(roots, c)
-			continue
-		}
-		children[*c.ParentID] = append(children[*c.ParentID], c)
-	}
-
-	var nest func(c Category) CategoryNode
-	nest = func(c Category) CategoryNode {
-		node := CategoryNode{Category: c, Children: []CategoryNode{}}
-		for _, child := range children[c.ID] {
-			node.Children = append(node.Children, nest(child))
-		}
-		return node
-	}
-
-	tree := make([]CategoryNode, 0, len(roots))
-	for _, r := range roots {
-		tree = append(tree, nest(r))
-	}
-	return tree
+// A row whose parent is missing from the table, or which is its own parent,
+// is treated as a root rather than dropped, so a filter tree is never silently
+// short a branch and a malformed row is measured rather than skipped. Every
+// walk guards against cycles, so a corrupt parent chain terminates.
+type categoryTree struct {
+	byID     map[string]Category
+	children map[string][]string // parent id -> child ids in display order; "" holds the roots
+	paths    map[string][]CategoryRef
+	keys     map[string][]categorySortKey
+	depth    map[string]int // 1 for a Type at the root
+	height   map[string]int // 0 for a node with no children
 }
 
-// categoryIndex is the category table shaped for the browse screen. One walk
-// upward from every node produces both things an asset row needs: the path it
-// displays ("Lenses / Zooms / Tamron 18-400mm") and that same path as a sort
-// key, so the list can be put in tree order in Go instead of with a recursive
-// order-by.
-type categoryIndex struct {
-	paths map[string][]CategoryRef
-	keys  map[string][]categorySortKey
-}
-
-// categorySortKey is one step of that sort key: where the node sits among its
-// siblings, with its name to break a tie. The name matters because sort_order
-// is unique by convention only and defaults to 0 for a level nobody has
-// numbered, which then reads alphabetically rather than arbitrarily.
+// categorySortKey is one level of an asset's browse position: the node's
+// sort_order among its siblings, then its name to break a tie. A whole path
+// compares level by level from the root.
 type categorySortKey struct {
 	order int
 	name  string
 }
 
-// indexCategories maps every category id to its path from the root down to
-// itself. The walk upward stops on a repeat, so a malformed parent chain
-// yields a short path instead of hanging.
-func indexCategories(cats []Category) categoryIndex {
-	byID := make(map[string]Category, len(cats))
+func newCategoryTree(cats []Category) categoryTree {
+	t := categoryTree{
+		byID:     make(map[string]Category, len(cats)),
+		children: make(map[string][]string, len(cats)),
+		paths:    make(map[string][]CategoryRef, len(cats)),
+		keys:     make(map[string][]categorySortKey, len(cats)),
+		depth:    make(map[string]int, len(cats)),
+		height:   make(map[string]int, len(cats)),
+	}
 	for _, c := range cats {
-		byID[c.ID] = c
+		t.byID[c.ID] = c
+	}
+	for _, c := range cats {
+		key := t.parentKey(c)
+		t.children[key] = append(t.children[key], c.ID)
 	}
 
-	index := categoryIndex{
-		paths: make(map[string][]CategoryRef, len(cats)),
-		keys:  make(map[string][]categorySortKey, len(cats)),
-	}
 	for _, c := range cats {
 		path := []CategoryRef{}
 		key := []categorySortKey{}
@@ -168,10 +141,7 @@ func indexCategories(cats []Category) categoryIndex {
 			seen[node.ID] = true
 			path = append(path, CategoryRef{ID: node.ID, Name: node.Name})
 			key = append(key, categorySortKey{order: node.SortOrder, name: node.Name})
-			if node.ParentID == nil {
-				break
-			}
-			parent, ok := byID[*node.ParentID]
+			parent, ok := t.byID[t.parentKey(node)]
 			if !ok {
 				break
 			}
@@ -179,17 +149,160 @@ func indexCategories(cats []Category) categoryIndex {
 		}
 		slices.Reverse(path)
 		slices.Reverse(key)
-		index.paths[c.ID] = path
-		index.keys[c.ID] = key
+		t.paths[c.ID] = path
+		t.keys[c.ID] = key
+		t.depth[c.ID] = len(path)
 	}
-	return index
+
+	var measure func(id string, seen map[string]bool) int
+	measure = func(id string, seen map[string]bool) int {
+		if h, done := t.height[id]; done {
+			return h
+		}
+		if seen[id] {
+			return 0
+		}
+		seen[id] = true
+		h := 0
+		for _, child := range t.children[id] {
+			if ch := measure(child, seen) + 1; ch > h {
+				h = ch
+			}
+		}
+		t.height[id] = h
+		return h
+	}
+	for _, c := range cats {
+		measure(c.ID, map[string]bool{})
+	}
+	return t
 }
 
-// compareCategoryKeys orders two category paths the way the filter tree reads
-// top to bottom: by the first step at which they differ. A path that is a
-// prefix of the other comes first, and an empty path -- an asset filed under
-// no category at all -- comes last, because it belongs to no group a user can
-// point at in the tree.
+// parentKey is the children-map key for c's parent: "" when c is a root by
+// any of the three readings above.
+func (t categoryTree) parentKey(c Category) string {
+	if c.ParentID == nil || *c.ParentID == c.ID {
+		return ""
+	}
+	if _, ok := t.byID[*c.ParentID]; !ok {
+		return ""
+	}
+	return *c.ParentID
+}
+
+// nodes nests the tree for the filter, roots first.
+func (t categoryTree) nodes() []CategoryNode {
+	var nest func(id string) CategoryNode
+	nest = func(id string) CategoryNode {
+		node := CategoryNode{Category: t.byID[id], Children: []CategoryNode{}}
+		for _, child := range t.children[id] {
+			node.Children = append(node.Children, nest(child))
+		}
+		return node
+	}
+	roots := t.children[""]
+	out := make([]CategoryNode, 0, len(roots))
+	for _, id := range roots {
+		out = append(out, nest(id))
+	}
+	return out
+}
+
+// require is the node with that id, or the not-found error every caller
+// would otherwise word for itself. It is the only way code outside this
+// file reads byID, so the maps stay private to the tree.
+func (t categoryTree) require(id string) (Category, error) {
+	c, ok := t.byID[id]
+	if !ok {
+		return Category{}, fmt.Errorf("%w: category %s", ErrNotFound, id)
+	}
+	return c, nil
+}
+
+// depthOf is how deep a node sits: 1 for a root, 0 for an unknown id.
+func (t categoryTree) depthOf(id string) int {
+	return t.depth[id]
+}
+
+// keyOf is the children-map key for an optional parent id: "" for the root.
+func keyOf(parent *string) string {
+	if parent == nil {
+		return ""
+	}
+	return *parent
+}
+
+// pathOf is the root-to-node path for an asset's category_path. Unknown or
+// nil ids give an empty, non-nil slice so the JSON is [] rather than null.
+func (t categoryTree) pathOf(id *string) []CategoryRef {
+	if id != nil {
+		if p, ok := t.paths[*id]; ok {
+			return p
+		}
+	}
+	return []CategoryRef{}
+}
+
+// keyFor is the sort key of the category an asset is filed under. An asset
+// with no category, or one naming a category that has since been deleted,
+// gets the empty key, which sorts last.
+func (t categoryTree) keyFor(id *string) []categorySortKey {
+	if id == nil {
+		return nil
+	}
+	return t.keys[*id]
+}
+
+// descendants is id and everything under it, which is what a category filter
+// means: picking a Type shows every Model beneath it.
+func (t categoryTree) descendants(id string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(cur string) {
+		if seen[cur] {
+			return
+		}
+		seen[cur] = true
+		out = append(out, cur)
+		for _, child := range t.children[cur] {
+			walk(child)
+		}
+	}
+	walk(id)
+	return out
+}
+
+// isDescendant reports whether id sits anywhere under ancestor.
+func (t categoryTree) isDescendant(id, ancestor string) bool {
+	seen := map[string]bool{}
+	for cur := id; cur != "" && !seen[cur]; {
+		seen[cur] = true
+		parent := t.parentKey(t.byID[cur])
+		if parent == ancestor {
+			return true
+		}
+		cur = parent
+	}
+	return false
+}
+
+// nextSortOrder is where a new node goes under parent (nil for the root): one
+// past the largest sort_order already there, so it lands last. Gaps and
+// duplicates in the column are fine; only the relative order matters.
+func (t categoryTree) nextSortOrder(parent *string) int {
+	next := 1
+	for _, id := range t.children[keyOf(parent)] {
+		if order := t.byID[id].SortOrder; order >= next {
+			next = order + 1
+		}
+	}
+	return next
+}
+
+// compareCategoryKeys orders two browse positions. A longer path never
+// precedes its own prefix in practice (an asset is filed at one node), and an
+// empty key (no category) sorts after every real one.
 func compareCategoryKeys(a, b []categorySortKey) int {
 	if len(a) == 0 || len(b) == 0 {
 		return cmp.Compare(len(b), len(a))
@@ -200,17 +313,4 @@ func compareCategoryKeys(a, b []categorySortKey) int {
 		}
 		return cmp.Compare(x.name, y.name)
 	})
-}
-
-// categoryExists reports whether id names a category, so a filter on an id
-// that was deleted (or never existed) can be an error rather than an empty
-// list the user reads as "no equipment here".
-func (db *DB) categoryExists(ctx context.Context, id string) (bool, error) {
-	var exists bool
-	err := db.Pool.QueryRow(ctx,
-		`select exists (select 1 from categories where id = $1)`, id).Scan(&exists)
-	if err != nil {
-		return false, mapPgError("check category", err)
-	}
-	return exists, nil
 }

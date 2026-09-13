@@ -37,7 +37,7 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 
 ## Phase 3: Browse (Week 6)
 - [x] `GetCategoryTree()`. Full tree in one call (Type → Category → Model) for the left-side filters. `categories.go`; the table is a few dozen rows, so it is read flat and nested in Go rather than with recursive SQL. Every level comes out in `categories.sort_order` order (`Catagories.md`'s document order), name breaking a tie. A row whose parent is missing, or which is its own parent, becomes a root instead of disappearing
-- [x] `ListAssets(actor, filter)`. Filter by any category node (includes descendants, via a recursive CTE), status, free-text; returns category path, photo URL and current holder per asset, in browse order (see the addendum below). `assets.go`. Search matches two ways: `plainto_tsquery` over the existing GIN index for words and stemming, plus `ilike` over name/tag/description/serial for the partial identifiers a tsquery can't match (`T7iB` → `T7iBat-001`). `%` and `_` in the search text are escaped to literals. An unknown category id is `ErrNotFound` and an unknown status `ErrInvalid`, so a broken filter is never a silently empty list. `unavailable` assets are listed, not hidden
+- [x] `ListAssets(actor, filter)`. Filter by any category node (includes descendants, read off the in-memory category tree), status, free-text; returns category path, photo URL and current holder per asset, in browse order (see the addendum below). `assets.go`. Search matches two ways: `plainto_tsquery` over the existing GIN index for words and stemming, plus `ilike` over name/tag/description/serial for the partial identifiers a tsquery can't match (`T7iB` → `T7iBat-001`). `%` and `_` in the search text are escaped to literals. An unknown category id is `ErrNotFound` and an unknown status `ErrInvalid`, so a broken filter is never a silently empty list. `unavailable` assets are listed, not hidden
 - [x] `GetAsset(actor, id)`. Detail popup payload incl. current custodian (if checked out) and category path. The open custody row is read whatever the status column says, so a drifted status still reports the real holder; custodian name falls back from first/last to `full_name` to the student number
 - [x] Static file serving: `GET /files/…` from `UPLOADS_DIR`. `server/files.go`. No session: the desktop app renders photos in `<img>` tags, which cannot carry the bearer token. Directory listings are refused
 - [x] HTTP: `GET /categories/tree`, `GET /assets?category=&status=&q=`, `GET /assets/{id}`. `server/assets.go`; all three need a full session, none is admin-only
@@ -71,12 +71,23 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] Tested: `internal/stockroom/custody_test.go` (the rules, against the live database) and `server/custody_test.go` (statuses, routing, payload shape). Verified by hand with `curl` end to end as well: scan → detail, scan → check-in, cart checkout, the 7-day cap, the overdue block and its admin override, both history reads and their refusals
 
 ## Phase 5: Admin panel API (Week 7)
-- [x] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (block if open custody), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`), asset photo upload → `UPLOADS_DIR/assets/`
+- [x] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (refused for any asset with custody history, open or closed, because `custody_events` cascades and the trail is the point; the message says to mark it unavailable instead), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`; "out" is the open custody row, not the column), asset photo upload → `UPLOADS_DIR/assets/<id>.<ext>`. `AssetInput` carries no `photo_path`: `SetAssetPhoto` is that column's only writer. A unit may file under any category node, not only a Model (`docs/adr/0001`)
 - [x] `CreateCategory`, `UpdateCategory`, `DeleteCategory` (block if it has children or assets), enforce max depth 3. New nodes take `sort_order = max(sort_order) + 1` among their siblings, and a level can be renumbered by hand: it is what the browse screen and the filter tree sort on
 - [x] Overdue list is `ListOverdueCustody` (Phase 4). Just ensure it's admin-panel friendly (custodian name, student number, days overdue)
 - [x] `BackupNow()` → calls Phase 7's export, returns the folder written
 - [x] HTTP: `POST/PUT/DELETE /assets…`, `POST /assets/{id}/photo`, `POST/PUT/DELETE /categories…`, `POST /admin/backup`
 - [x] Validated by package and HTTP Go tests before UI work starts
+
+## Backend deepening (2026-09-13, branch `refactor/backend-deepening`)
+Done before the frontend is wired, while every signature is still free to change. CLAUDE.md §13 has the reasoning.
+- [x] `Auth` folded into `DB`. `Open(ctx, url, Options{SessionIdle, UploadsDir, BackupDir})`; `server/` is `deps{db}`
+- [x] `categoryIndex` + `categoryTreeShape` merged into one `categoryTree`; the browse filter is `= any(descendants)` rather than a recursive CTE
+- [x] `FilesPrefix` and `photoURL` live in `photos.go`; `Profile` carries `photo_url` like `AssetListItem` does
+- [x] `openCustodySQL` is the one definition of "out", used by `ScanItem`, the cart lock, `DeleteAsset`, `SetAssetStatus`
+- [x] `ImportRoster`, `SetAssetPhoto`, `BackupNow`, `ExportAllTablesToCSV` read their directories from `DB`
+- [x] `GetCategoryTree(ctx, actor)` requires a full session in the package, like every other read
+- [x] `SESSION_IDLE_MINUTES` defaults to 5 (was 30 in code, 5 in CLAUDE.md)
+- [x] Test suite cut to one happy path + one gate per module; the removed cases are listed in `TESTING.md`. CI skips docs-only changes while keeping the `tests` check green
 
 ## Phase 6: Frontend wiring (Week 8, alongside UI build)
 - [ ] `desktop-app/frontend/src/lib/api.ts` and `web-app/src/lib/api.ts`. Identical thin `fetch` wrappers, one function per endpoint, session token handling

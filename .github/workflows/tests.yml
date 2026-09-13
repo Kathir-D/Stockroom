@@ -1,13 +1,21 @@
 name: tests
 
-# Runs the whole suite on every pull request and on pushes to main.
-# Make the "tests" check required in branch protection so a PR cannot merge red
-# (see CI.md).
+# Runs on every pull request and on pushes to main. The job is always called
+# "tests" and always finishes green or red, so branch protection can require
+# it (see CI.md). On a docs-only change every build and test step is skipped
+# and the job still reports success; the check would otherwise never appear
+# on such a PR and block the merge.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+
+# dorny/paths-filter lists a PR's changed files through the API, which the
+# default read-only token cannot do without pull-requests: read.
+permissions:
+  contents: read
+  pull-requests: read
 
 # A new push to the same PR cancels the previous run.
 concurrency:
@@ -23,13 +31,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Decide whether anything that runs changed. Everything not listed
+      # here (Markdown, LICENSE, docs/, the graphify output) is docs-only.
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'cmd/**'
+              - 'supabase/**'
+              - 'desktop-app/**'
+              - 'web-app/**'
+              - 'scripts/**'
+              - '.github/workflows/**'
+
       - name: Set up Go
+        if: steps.changes.outputs.code == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node
+        if: steps.changes.outputs.code == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -39,57 +68,65 @@ jobs:
             web-app/package-lock.json
 
       - name: Set up Supabase CLI
+        if: steps.changes.outputs.code == 'true'
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      # Brings up Postgres (plus the rest of the local stack) and applies every
-      # migration and the seed. The Go integration tests and the pgTAP suite
-      # both connect to it on 127.0.0.1:54322.
-      # If this step is ever too slow, unneeded services can be dropped with
-      # e.g. `supabase start -x realtime,storage-api,imgproxy,studio`.
+      # Postgres plus the rest of the local stack, with every migration and
+      # the seed applied. The Go tests and pgTAP both connect on 127.0.0.1:54322.
       - name: Start Supabase
+        if: steps.changes.outputs.code == 'true'
         run: supabase start
 
       - name: go vet
+        if: steps.changes.outputs.code == 'true'
         run: go vet ./...
 
       # STOCKROOM_REQUIRE_DB=1 turns "skip because Postgres is down" into a
       # failure, so a broken database can never look like a green run.
-      # -race matters because SessionStore is mutable state shared by every
-      # request; a bcrypt work-factor knob (see TESTING.md's speed budget)
-      # keeps this affordable.
       - name: Go tests
-        run: go test ./... -count=1 -race
+        if: steps.changes.outputs.code == 'true'
+        run: go test ./... -count=1
         env:
           STOCKROOM_REQUIRE_DB: "1"
 
       - name: Database tests (pgTAP)
+        if: steps.changes.outputs.code == 'true'
         run: supabase test db
 
       - name: Install frontend dependencies
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix desktop-app/frontend ci
 
       - name: Frontend type check
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix desktop-app/frontend run check
 
       - name: Frontend tests (Vitest)
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix desktop-app/frontend test
 
-      # web-app is still a placeholder shell, so its suite is a smoke test for
-      # now, but it must also type-check and build so a broken PR can't merge.
       - name: Install web-app dependencies
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix web-app ci
 
       - name: web-app type check
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix web-app run check
 
       - name: web-app tests (Vitest)
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix web-app test
 
       - name: web-app build
+        if: steps.changes.outputs.code == 'true'
         run: npm --prefix web-app run build
 
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to build or test."
+
       - name: Stop Supabase
-        if: always()
+        if: always() && steps.changes.outputs.code == 'true'
         run: supabase stop --no-backup

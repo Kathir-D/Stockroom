@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture all pinned down; see Section 13 for what changed). Amended 2026-09-13 (browse-list ordering and custodian-field visibility; Section 13).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13).
 
 ---
 
@@ -63,14 +63,16 @@ The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every
 
 ## 4. Backend architecture (decided): single Go backend over Supabase-hosted Postgres
 
-**The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
+**The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends will call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
+
+**Current state (until TODO Phase 6).** The backend is built to that shape, but the frontends are not yet wired to it. `desktop-app/frontend/src/lib/db.ts` and `supabase.ts` still call PostgREST directly with the `service_role` key, and the web app has no data layer at all. Phase 6 replaces both with `lib/api.ts` and deletes the supabase-js path.
 
 Why this shape:
 - One place for all logic, written in Go (preferred over TS for this codebase).
 - Both UIs share one code path and one session store, so behaviour can't drift.
 - Postgres still runs inside the Supabase CLI stack because migrations, seed loading, and Studio are already set up and working. Go connects to the **direct Postgres port (54322)** via `DATABASE_URL`.
 
-**Historical note.** An earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (see `supabase/migrations/20260826180000_grant_service_role.sql` and `desktop-app/frontend/src/lib/supabase.ts` / `db.ts`). That migration is harmless and stays; the TS files are slated for deletion in TODO Phase 6. RLS is still not enabled and doesn't need to be. Nothing but the Go server (connecting as `postgres`) reaches the DB.
+**Historical note.** An earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (`supabase/migrations/20260826180000_grant_service_role.sql`, `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`). The migration stays; the TS files go in TODO Phase 6. RLS is off and stays off: only the Go server, connecting as `postgres`, reaches the DB.
 
 ---
 
@@ -87,7 +89,7 @@ Why this shape:
 | Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Calls the Go server over HTTP; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
 | Backup | Go CLI (`cmd/backup`) → CSV per table → local folder → `rclone copy` to Google Drive; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
-| Config | `.env` at repo root (see Section 9) |
+| Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options` |
 
 ---
 
@@ -95,188 +97,7 @@ Why this shape:
 
 ### 6.1 Base schema (applied)
 
-Applied via `supabase/migrations/20260826173006_init_schema.sql` and verified working (12 tables, 2 views, 4 enums). Followed by `20260826180000_grant_service_role.sql` (historical, see Section 4), `20260908100000_v1_flow.sql` (Section 6.2, applied) and `20260913090000_category_sort_order.sql` (Section 6.2, applied). Sample data in `supabase/seed.sql` loads on `supabase db reset`.
-
-```sql
-create extension if not exists "uuid-ossp";
-create extension if not exists "btree_gist";
-
-create type user_role as enum ('owner', 'executive_producer', 'producer', 'member');
-create type asset_status as enum ('available', 'checked_out', 'reserved', 'maintenance', 'retired', 'lost');
-create type booking_status as enum ('reserved', 'active', 'returned', 'overdue', 'cancelled');
-create type location_type as enum ('building', 'floor', 'room', 'shelf', 'other');
-
-create table profiles (
-  id uuid primary key default uuid_generate_v4(),
-  email text not null unique,
-  password_hash text,
-  full_name text,
-  role user_role not null default 'member',
-  created_at timestamptz not null default now()
-);
-
-create table locations (
-  id uuid primary key default uuid_generate_v4(),
-  name text not null,
-  type location_type not null default 'other',
-  parent_id uuid references locations(id) on delete set null,
-  gps_lat double precision,
-  gps_lng double precision,
-  created_at timestamptz not null default now()
-);
-
-create table categories (
-  id uuid primary key default uuid_generate_v4(),
-  name text not null unique,
-  parent_id uuid references categories(id) on delete set null,
-  created_at timestamptz not null default now()
-);
-
-create table tags (
-  id uuid primary key default uuid_generate_v4(),
-  name text not null unique
-);
-
-create table assets (
-  id uuid primary key default uuid_generate_v4(),
-  asset_tag text not null unique,
-  name text not null,
-  description text,
-  category_id uuid references categories(id) on delete set null,
-  location_id uuid references locations(id) on delete set null,
-  status asset_status not null default 'available',
-  condition text,
-  serial_number text,
-  purchase_date date,
-  purchase_price numeric(10,2),
-  warranty_expiration date,
-  custom_fields jsonb not null default '{}'::jsonb,
-  created_by uuid references profiles(id),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index idx_assets_status on assets(status);
-create index idx_assets_category on assets(category_id);
-create index idx_assets_location on assets(location_id);
-create index idx_assets_custom_fields on assets using gin(custom_fields);
-create index idx_assets_search on assets using gin (
-  to_tsvector('english', coalesce(name,'') || ' ' || coalesce(description,'') || ' ' || coalesce(serial_number,''))
-);
-
-create or replace function set_updated_at() returns trigger as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_assets_updated_at
-before update on assets
-for each row execute function set_updated_at();
-
-create table asset_tags (
-  asset_id uuid references assets(id) on delete cascade,
-  tag_id uuid references tags(id) on delete cascade,
-  primary key (asset_id, tag_id)
-);
-
-create table kits (
-  id uuid primary key default uuid_generate_v4(),
-  name text not null,
-  description text,
-  created_at timestamptz not null default now()
-);
-
-create table kit_items (
-  kit_id uuid references kits(id) on delete cascade,
-  asset_id uuid references assets(id) on delete cascade,
-  primary key (kit_id, asset_id)
-);
-
-create table bookings (
-  id uuid primary key default uuid_generate_v4(),
-  asset_id uuid references assets(id) on delete cascade,
-  kit_id uuid references kits(id) on delete cascade,
-  reserved_by uuid not null references profiles(id),
-  start_date timestamptz not null,
-  end_date timestamptz not null,
-  status booking_status not null default 'reserved',
-  notes text,
-  created_at timestamptz not null default now(),
-  check ((asset_id is not null and kit_id is null) or (asset_id is null and kit_id is not null)),
-  check (end_date > start_date),
-  exclude using gist (
-    asset_id with =,
-    tstzrange(start_date, end_date) with &&
-  ) where (status in ('reserved', 'active') and asset_id is not null)
-);
-
-create index idx_bookings_asset on bookings(asset_id);
-create index idx_bookings_kit on bookings(kit_id);
-create index idx_bookings_dates on bookings(start_date, end_date);
-
-create table custody_events (
-  id uuid primary key default uuid_generate_v4(),
-  asset_id uuid not null references assets(id) on delete cascade,
-  booking_id uuid references bookings(id) on delete set null,
-  custodian_id uuid not null references profiles(id),
-  checked_out_by uuid not null references profiles(id),
-  checked_out_at timestamptz not null default now(),
-  due_at timestamptz,
-  checked_in_at timestamptz,
-  checked_in_by uuid references profiles(id),
-  condition_out text,
-  condition_in text,
-  notes text
-);
-
-create index idx_custody_asset on custody_events(asset_id);
-create index idx_custody_open on custody_events(asset_id) where checked_in_at is null;
-
-create table activity_log (
-  id uuid primary key default uuid_generate_v4(),
-  asset_id uuid references assets(id) on delete cascade,
-  actor_id uuid references profiles(id),
-  action text not null,
-  details jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-
-create index idx_activity_asset on activity_log(asset_id, created_at desc);
-
-create or replace function log_asset_status_change() returns trigger as $$
-begin
-  if TG_OP = 'UPDATE' and old.status is distinct from new.status then
-    insert into activity_log (asset_id, actor_id, action, details)
-    values (new.id, null, 'status_change', jsonb_build_object('from', old.status, 'to', new.status));
-  end if;
-  return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_asset_status_log
-after update on assets
-for each row execute function log_asset_status_change();
-
-create table saved_filters (
-  id uuid primary key default uuid_generate_v4(),
-  user_id uuid not null references profiles(id) on delete cascade,
-  name text not null,
-  filter_json jsonb not null,
-  created_at timestamptz not null default now()
-);
-
-create view active_custody as
-select ce.*, a.name as asset_name, a.asset_tag
-from custody_events ce
-join assets a on a.id = ce.asset_id
-where ce.checked_in_at is null;
-
-create view overdue_custody as
-select * from active_custody
-where due_at is not null and due_at < now();
-```
+`supabase/migrations/20260826173006_init_schema.sql` is the source; read it rather than a copy here. In short: 12 tables (`profiles`, `locations`, `categories`, `tags`, `assets`, `asset_tags`, `kits`, `kit_items`, `bookings`, `custody_events`, `activity_log`, `saved_filters`), 2 views (`active_custody`, `overdue_custody`: open custody rows, and the subset past `due_at`), 4 enums (`user_role`, `asset_status`, `booking_status`, `location_type`). Two triggers: `assets.updated_at` is stamped on update, and a status change writes an `activity_log` row. `bookings` carries a GiST exclusion constraint against overlapping reservations; nothing in v1 writes to it. Followed by `20260826180000_grant_service_role.sql` (historical, Section 4), `20260908100000_v1_flow.sql` and `20260913090000_category_sort_order.sql` (Section 6.2). `supabase/seed.sql` loads on `supabase db reset`.
 
 ### 6.2 Schema changes for v1 (applied, `20260908100000_v1_flow.sql`)
 
@@ -321,7 +142,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 | Admin panel: user CRUD, roster CSV import, set/reset any password | | ✓ |
 | Admin panel: overdue list, override overdue-block on checkout, Backup Now | | ✓ |
 
-**Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user — deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor, so a browse row can say who has the lens without opening anything. What "who" means is the custodian's **name**, their due date and whether they are overdue — not their student number, which is the scan-login key and so stays admin-only (`AssetCustody.forViewer`, 2026-09-13). Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI — the response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
+**Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user. Deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor, so a browse row can say who has the lens without opening anything. What "who" means is the custodian's **name**, their due date and whether they are overdue, not their student number, which is the scan-login key and so stays admin-only (`AssetCustody.forViewer`, 2026-09-13). Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI. The response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
 
 **Login rules**
 - **Scan** (student number arrives as a fast keystroke burst + Enter): sign in with no password.
@@ -331,74 +152,90 @@ Two kinds of account, decided by `profiles.is_admin`:
 - **Failsafe admin.** `.env` holds `ADMIN_STUDENT_NUMBER` + `ADMIN_PASSWORD`. On every server start, that account is ensured to exist with `is_admin = true` and that password. A way back into the admin panel that doesn't depend on any UI. It is never a startup requirement: unset, malformed, or rejected values are logged as warnings and the server starts without a failsafe admin, because a typo in `.env` must not take the whole API down.
 
 **Sessions**
-- In-memory session map in the Go server. The login response returns the token and also sets it as an HttpOnly `stockroom_session` cookie; requests may send either `Authorization: Bearer <token>` or the cookie. Restarting the server signs everyone out; acceptable.
+- In-memory session map (`SessionStore`, owned by `DB`). The login response returns the token and also sets it as an HttpOnly `stockroom_session` cookie; requests may send either `Authorization: Bearer <token>` or the cookie. Restarting the server signs everyone out; acceptable.
 - Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default **5 minutes**, decided 2026-09-12). Every request refreshes the deadline. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
-- The frontend cart (a pending list of asset IDs, never sent to the server until checkout) clears only on sign-out or on the idle timeout — **not** on a page reload, so an accidental refresh mid-shopping doesn't lose it.
+- The frontend cart (a pending list of asset IDs, never sent to the server until checkout) clears only on sign-out or on the idle timeout, **not** on a page reload, so an accidental refresh mid-shopping doesn't lose it.
 - A scan login by an account with no password gets a **limited** session: it may only call `POST /auth/set-password`, `GET /me` and `POST /auth/logout`. Anything else answers `403 {"error":"password not set","needs_password":true}`. Setting the password upgrades the same token to a full session.
 - The actor's profile is reloaded on every request, so an admin-flag change or a deleted account takes effect immediately. An admin password reset or delete drops that user's sessions, and `internal/stockroom` does that itself so the rule does not depend on the HTTP layer.
 
 **Overdue rule**
-- Signing in with any overdue item shows a warning, and the cart/checkout UI disables itself immediately at that point. Attempting a checkout while overdue is *also* refused by the server (`CheckOutAssets` → `ErrOverdueBlocked`) regardless of what the client sends — both layers enforce the block, not just the UI. An admin can override per checkout.
+- Signing in with any overdue item shows a warning, and the cart/checkout UI disables itself immediately at that point. Attempting a checkout while overdue is *also* refused by the server (`CheckOutAssets` → `ErrOverdueBlocked`) regardless of what the client sends. Both layers enforce the block, not just the UI. An admin can override per checkout.
 
 ---
 
-## 8. Repository structure (target)
+## 8. Repository structure
 
 ```
 stockroom/
 ├── go.mod                     # single root module; desktop-app, server, cmd share internal/
 ├── .env.example               # copy to .env, see Section 9
 ├── internal/stockroom/        # ALL business logic; the only code that touches Postgres
-│   ├── db.go                  # pgxpool setup
-│   ├── types.go               # structs for every table + views
-│   ├── errors.go              # ErrNotFound, ErrForbidden, ErrConflict, ErrOverdueBlocked, ...
+│   ├── doc.go                 # package comment
+│   ├── db.go                  # DB: the pool, the session store, UploadsDir, BackupDir. Open(ctx, url, Options)
+│   ├── config.go              # .env + environment -> Config
+│   ├── types.go               # row structs for every table + views
+│   ├── errors.go              # sentinels server/ maps to statuses (ErrNotFound, ErrForbidden, ErrNotConfigured, ...)
+│   ├── pgerr.go               # Postgres error codes -> ErrConflict / ErrInvalid / ErrNotFound
 │   ├── password.go            # bcrypt helpers, student-number validation
-│   ├── failsafe.go            # EnsureFailsafeAdmin (run on every server start)
-│   ├── sessions.go            # in-memory session store with idle timeout
-│   ├── auth.go                # Actor, RequireAdmin, LoginByScan / LoginByPassword / SetInitialPassword / Me
+│   ├── failsafe.go            # EnsureFailsafeAdmin, run on every server start
+│   ├── sessions.go            # in-memory SessionStore with idle timeout
+│   ├── auth.go                # Actor, RequireAdmin, RequireFullSession, the login/logout/Resolve/Me methods on DB
 │   ├── users.go, roster.go    # user CRUD + password reset; roster CSV import
-│   ├── pgerr.go               # Postgres error codes -> ErrConflict / ErrInvalid
-│   ├── assets.go, categories.go, custody.go, backup.go, ...   # later phases
-├── server/                    # Go net/http JSON API on localhost; thin handlers over internal/stockroom
-│   ├── main.go, router.go, json.go
-│   ├── session.go             # token -> Actor middleware (Bearer header or cookie)
-│   ├── files.go               # GET /files/... served from UPLOADS_DIR, no session
-│   └── auth.go, users.go, assets.go   # handlers
-├── cmd/backup/                # CLI: export all tables to CSV (Task Scheduler / launchd)
-│   └── main.go
+│   ├── categories.go          # categoryTree (the one in-memory shape of the table) + GetCategoryTree
+│   ├── categories_admin.go    # category create/update/delete, depth and cycle rules
+│   ├── assets.go              # browse: ListAssets, GetAsset, current-holder reads, browse sort
+│   ├── assets_admin.go        # asset create/update/delete/status/photo
+│   ├── custody.go             # ScanItem, CheckOutAssets, CheckInAsset, the lists and histories
+│   ├── photos.go              # staged photo writes, FilesPrefix, photo URLs
+│   └── backup.go              # ExportAllTablesToCSV, BackupNow
+├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
+│   ├── main.go, router.go, json.go, session.go, files.go
+│   └── auth.go, users.go, assets.go, custody.go, admin.go
+├── cmd/backup/                # (Phase 7, not yet written) CLI: export + rclone push
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
-├── desktop-app/               # Wails app, primary UI; Go side is only a window host
-│   ├── app.go, main.go, wails.json
-│   └── frontend/src/
-│       ├── lib/api.ts         # fetch wrappers over server/ endpoints (replaces supabase.ts + db.ts)
-│       ├── lib/scanner.ts     # keystroke buffer + scan-vs-typed detection (Section 10)
-│       └── ...screens
-├── web-app/                   # Vite + Svelte 5 secondary UI; same lib/api.ts pattern
-│   └── src/
-├── supabase/
-│   ├── config.toml
-│   ├── migrations/
-│   │   ├── 20260826173006_init_schema.sql
-│   │   ├── 20260826180000_grant_service_role.sql   # historical, harmless
-│   │   └── 20260908100000_v1_flow.sql              # Section 6.2
-│   └── seed.sql               # category tree from Catagories.md + sample assets + two sample accounts
-├── scripts/
-│   ├── start-mac.sh           # start/stop everything on macOS (needs: also launch server/)
-│   ├── start-windows.ps1      # Windows equivalent, untested on real Windows
-│   └── graphify_fix_extraction.py  # graphify extraction with repo-specific fixes (see Agent skills)
+├── desktop-app/               # Wails app, primary UI; Go side is only a window host. Svelte in frontend/src
+├── web-app/                   # Vite + Svelte 5 secondary UI
+├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
+├── scripts/                   # start-mac.sh, start-windows.ps1 (untested on Windows), test-all.sh, graphify_fix_extraction.py
+├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system)
 ├── Catagories.md              # source of truth for the initial category tree
-├── CLAUDE.md                  # this file
-├── TODO.md                    # phase-by-phase backend work
-└── README.md                  # dependencies + how to run
+├── CONTEXT.md                 # domain glossary
+├── CLAUDE.md, TODO.md, README.md, TESTING.md, CI.md
 ```
 
-Current state differs: `cmd/` doesn't exist yet, and `desktop-app/frontend/src/lib/{supabase,db}.ts` still call PostgREST directly. TODO Phase 6 and Phase 7 close that gap.
+`desktop-app/frontend/src/lib/{supabase,db}.ts` still call PostgREST directly; TODO Phase 6 replaces them with `lib/api.ts`.
+
+### 8.1 Endpoints
+
+Every route except `/health`, the two logins and `/files/` needs a session. "Admin" below means `RequireAdmin` inside the package, not the router. A limited session (Section 7) reaches only the three routes marked so.
+
+| Route | Who | Notes |
+|---|---|---|
+| `GET /health` | nobody | pings Postgres |
+| `POST /auth/scan`, `POST /auth/password` | nobody | `{student_number}` / `{student_number, password}`; sets the cookie and returns the token |
+| `POST /auth/set-password`, `POST /auth/logout`, `GET /me` | any, incl. limited | |
+| `GET /categories/tree` | any full | nested `Type -> Category -> Model`, sibling order by `sort_order` |
+| `GET /assets?category=&status=&q=`, `GET /assets/{id}` | any full | rows carry `category_path`, `photo_url`, `custody` (current holder) |
+| `POST /scan` | any full | `{serial}`; out -> checked in, else -> detail. See Section 1 step 5 |
+| `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
+| `POST /assets/{id}/checkin` | any full | optional `{note}` (the damage note; an empty body is fine) |
+| `GET /users/{id}/history` | own, or admin | |
+| `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
+| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo |
+| `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`) or a `text/csv` body |
+| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path` and no status; status takes `{status: available\|unavailable}` |
+| `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
+| `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
+| `POST /admin/backup` | admin | runs the CSV export into `BACKUP_DIR` |
+| `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
+
+**Statuses.** `ErrNotFound` 404, `ErrInvalid` 400, `ErrUnauthorized`/`ErrBadCredentials`/`ErrPasswordNotSet` 401, `ErrForbidden` 403, `ErrConflict`/`ErrOverdueBlocked` 409, anything else 500 with the detail logged, not sent. **`ErrNotConfigured` is 503** with its message intact: an unset `UPLOADS_DIR` or `BACKUP_DIR` is neither the client's fault nor a bug, and the admin reading the response is the person who edits `.env`.
 
 ---
 
 ## 9. Setup instructions
 
-**Easiest path.** See `README.md`: `./scripts/start-mac.sh` (macOS) or `scripts/start-windows.ps1` (Windows). Ctrl+C stops everything and preserves data. (Both scripts still need to be updated to launch the Go server; TODO Phase 0.)
+**Easiest path.** See `README.md`: `./scripts/start-mac.sh` (macOS) or `scripts/start-windows.ps1` (Windows). Ctrl+C stops everything and preserves data.
 
 ### Manual steps
 1. Install Go, Node.js, Docker Desktop, the Supabase CLI, and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
@@ -510,14 +347,14 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Failsafe admin is best-effort (2026-09-08): `EnsureFailsafeAdmin` returns `ErrFailsafeNotConfigured` when the `.env` values are blank, and the server only ever logs a warning. Nothing about the failsafe can stop the API from starting.
 - [x] Student numbers (2026-09-08): stored as digits-only text, no fixed length. Cards encode six digits, but `NormalizeStudentNumber` accepts 1 to 32 so a reissued or imported number still works; the bound is a mis-scan guard, not a format.
 
-**Closed (2026-09-12 grilling session — resolves `docs/design/design-system.md` §15 Q1 to Q7 too)**
+**Closed (2026-09-12 grilling session; also resolves `docs/design/design-system.md` §15 Q1 to Q7)**
 - [x] Session idle timeout: **5 minutes** (`SESSION_IDLE_MINUTES` default).
 - [x] Machine operation model: **unattended student self-service** is the primary path; admin check-out-on-behalf-of stays the rare override it was already specced as.
 - [x] Cart never mixes borrowing and returning: scanning a checked-out item checks it in immediately and never touches the cart; the cart only ever accumulates items being borrowed.
 - [x] Scanning an item barcode with nobody signed in shows an explicit "sign in first" message rather than trying to interpret the code as a student number.
 - [x] The frontend cart clears only on sign-out or the idle timeout, **not** on a page reload.
 - [x] Overdue block is enforced at **both** layers: the checkout UI disables itself the moment an overdue user signs in, and `CheckOutAssets` also refuses server-side regardless of what the client sends.
-- [x] **Custodian visibility, reversing the 2026-09-09 review tightening**: who currently holds a checked-out item is visible to any signed-in user, not admin-only. Applies only to the current holder — `GetAssetHistory`'s full past-custodian trail stays admin-only, and a non-admin's own history is available only via `GetUserHistory`. See §7.
+- [x] **Custodian visibility, reversing the 2026-09-09 review tightening**: who currently holds a checked-out item is visible to any signed-in user, not admin-only. Applies only to the current holder. `GetAssetHistory`'s full past-custodian trail stays admin-only, and a non-admin's own history is available only via `GetUserHistory`. See §7.
 - [x] Browse list sort order (previously unspecified): categories in `Catagories.md`'s document order, not alphabetical; within any list, available units sort before checked-out ones.
 - [x] Backup: nightly CSV → local folder → **`rclone copy` pushes it to Google Drive** directly, replacing the "Drive desktop client syncs a local folder, no cloud API code" plan. One-time interactive `rclone config` OAuth setup instead of hand-written Google API/OAuth code. See §11.
 
@@ -532,7 +369,17 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **Document order is a column, not a constant.** `categories.sort_order` holds a row's position among its siblings; the seed fills it from `Catagories.md`. A hardcoded list of the eight Type names in Go was the alternative, and it breaks the moment Phase 5 lets an admin rename a Type.
 - [x] **The browse list is sorted in Go, not in SQL.** Its first key is the asset's position in the category tree, which the single category read `ListAssets` already does; expressing it as an order-by would mean a recursive join per request for a list of a couple hundred rows.
 - [x] **`AssetDetail` is an alias for `AssetListItem`.** Once every list row carries the current holder, the detail popup knows nothing a row doesn't. Two names, one struct, no drift between the scan payload and the click payload.
-- [x] **A custodian's student number is admin-only**, narrowing the 2026-09-12 visibility decision by one field. The number signs its owner in by scan with no password, so a browse list carrying it is a roster of usable credentials. The name — which is what the decision was actually about — stays open to every signed-in user.
+- [x] **A custodian's student number is admin-only**, narrowing the 2026-09-12 visibility decision by one field. The number signs its owner in by scan with no password, so a browse list carrying it is a roster of usable credentials. The name, which is what the decision was actually about, stays open to every signed-in user.
+
+**Closed (2026-09-13, backend deepening)**
+- [x] **One handle.** `Auth` is gone; `DB` owns the pool, the `SessionStore`, `UploadsDir` and `BackupDir`, built by `Open(ctx, url, Options)`. `server/` holds a `deps{db}` and nothing else. Two structs that each needed the other was one struct.
+- [x] **One category tree.** `categoryIndex` (browse paths and sort keys) and `categoryTreeShape` (admin depth and cycle checks) were two readings of the same table; `categoryTree` in `categories.go` is the only one, and `requireCategory` and the browse filter read it too. The filter is `category_id = any(descendants)` from that tree, not a recursive CTE per request.
+- [x] **`photo_path` has one writer per table.** `SetAssetPhoto` for assets, the roster import for profiles. `AssetInput` and `UserInput` lost their `photo_path`, because a form field that writes the column can name a file nobody uploaded or drop the pointer to one somebody did.
+- [x] **An asset may file under any category node**, not only a Model. See `docs/adr/0001-assets-file-under-any-category-node.md`.
+- [x] **`GetCategoryTree` takes the actor** and refuses a limited session inside the package, like every other read. Before this the router alone kept a password-less scan login off the tree.
+- [x] **"Out" has one SQL definition**, `openCustodySQL` in `custody.go`, used by the scan branch, the cart lock, `DeleteAsset` and `SetAssetStatus`.
+- [x] **Directories come from `DB`, not parameters.** `ImportRoster`, `SetAssetPhoto`, `BackupNow` and `ExportAllTablesToCSV` read `db.UploadsDir` / `db.BackupDir`; an empty one is `ErrNotConfigured`, which is a 503 (Section 8.1).
+- [x] **The test suite was cut to one happy path and one gate per module** (30 Go tests, 3 pgTAP files), with the removed cases listed in `TESTING.md` under Planned. CI skips the build on docs-only changes while still reporting the `tests` check green (`CI.md`).
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

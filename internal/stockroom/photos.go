@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +23,35 @@ import (
 // naming a picture the upload already destroyed, and that is the one outcome
 // re-uploading cannot repair. Staging keeps the old copy reachable until the
 // row is safely pointing at the new one.
+
+// FilesPrefix is where the server mounts UploadsDir (server/files.go), and so
+// the prefix of every photo URL handed to a frontend. Profile and asset photos
+// follow the same rule, so it lives beside the code that writes both.
+const FilesPrefix = "/files/"
+
+// photoURL turns a path stored relative to UploadsDir into the URL the Go
+// server serves it at. A missing or blank path is nil, not an empty string,
+// so the frontend tests one thing to decide whether to render an image.
+func photoURL(stored *string) *string {
+	if stored == nil {
+		return nil
+	}
+	// Photos are written with forward slashes (storePhoto), but a value typed
+	// into the admin panel on Windows may not be.
+	rel := strings.Trim(strings.ReplaceAll(*stored, `\`, "/"), "/")
+	if rel == "" {
+		return nil
+	}
+	// Clean against a leading slash so a stored "../x" resolves inside the
+	// uploads root instead of pointing above it. http.Dir refuses such a
+	// request anyway; this keeps the URL itself honest.
+	clean := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if clean == "" || clean == "." {
+		return nil
+	}
+	url := FilesPrefix + clean
+	return &url
+}
 
 // uploadPhotoExtensions is what SetAssetPhoto accepts. The list is short on
 // purpose: /files/ serves the uploads directory without a session, and

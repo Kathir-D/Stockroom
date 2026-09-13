@@ -17,8 +17,9 @@ import (
 
 func TestBackupNowIsAdminOnly(t *testing.T) {
 	db := requireTestDB(t)
+	db.BackupDir = t.TempDir()
 	student := actorFor(insertTestProfile(t, db, false, "student-pw"))
-	if _, err := db.BackupNow(context.Background(), student, t.TempDir()); !errors.Is(err, ErrForbidden) {
+	if _, err := db.BackupNow(context.Background(), student); !errors.Is(err, ErrForbidden) {
 		t.Errorf("BackupNow as a student = %v, want ErrForbidden", err)
 	}
 }
@@ -28,8 +29,9 @@ func TestExportAllTablesToCSV(t *testing.T) {
 	ctx := context.Background()
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 	base := t.TempDir()
+	db.BackupDir = base
 
-	res, err := db.BackupNow(ctx, admin, base)
+	res, err := db.BackupNow(ctx, admin)
 	if err != nil {
 		t.Fatalf("BackupNow: %v", err)
 	}
@@ -91,7 +93,7 @@ func TestExportAllTablesToCSV(t *testing.T) {
 
 	// A second run the same day replaces the day's folder rather than
 	// failing on the files already there.
-	if _, err := db.BackupNow(ctx, admin, base); err != nil {
+	if _, err := db.BackupNow(ctx, admin); err != nil {
 		t.Errorf("second BackupNow the same day: %v", err)
 	}
 
@@ -108,19 +110,6 @@ func TestExportAllTablesToCSV(t *testing.T) {
 	}
 	if len(names) != 1 || names[0] != res.RanAt.Format("2006-01-02") {
 		t.Errorf("backup dir holds %v, want only the dated folder", names)
-	}
-}
-
-func TestExportWithoutABackupDir(t *testing.T) {
-	db := requireTestDB(t)
-	_, err := db.ExportAllTablesToCSV(context.Background(), "")
-	if !errors.Is(err, ErrNotConfigured) {
-		t.Errorf("export with no BACKUP_DIR = %v, want ErrNotConfigured", err)
-	}
-	// The admin who pressed the button is the one who edits .env, so the
-	// message has to name the variable rather than hide behind a 500.
-	if err == nil || !strings.Contains(err.Error(), "BACKUP_DIR") {
-		t.Errorf("error = %v, want it to name BACKUP_DIR", err)
 	}
 }
 

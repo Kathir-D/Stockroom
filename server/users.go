@@ -127,7 +127,7 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 		return
 	}
 
-	res, err := d.db.ImportRoster(r.Context(), actor, csvBody, photoDir, d.uploadsDir)
+	res, err := d.db.ImportRoster(r.Context(), actor, csvBody, photoDir)
 	if err != nil {
 		writeError(w, err)
 		return

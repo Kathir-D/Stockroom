@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// fileServer serves the photos under UPLOADS_DIR at /files/ (the prefix
+// fileServer serves the photos under UploadsDir at /files/ (the prefix
 // stockroom.FilesPrefix builds every photo_url from).
 //
 // No session is required. The desktop app renders these in <img> tags, which

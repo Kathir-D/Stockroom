@@ -94,7 +94,7 @@ func (d deps) handleSetAssetPhoto(w http.ResponseWriter, r *http.Request, actor 
 	}
 	defer file.Close()
 
-	asset, err := d.db.SetAssetPhoto(r.Context(), actor, r.PathValue("id"), header.Filename, file, d.uploadsDir)
+	asset, err := d.db.SetAssetPhoto(r.Context(), actor, r.PathValue("id"), header.Filename, file)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -147,7 +147,7 @@ func (d deps) handleDeleteCategory(w http.ResponseWriter, r *http.Request, actor
 // a row count per table. With BACKUP_DIR unset the answer is 503 naming the
 // variable, because that is a line missing from .env, not a bad request.
 func (d deps) handleBackupNow(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	res, err := d.db.BackupNow(r.Context(), actor, d.backupDir)
+	res, err := d.db.BackupNow(r.Context(), actor)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -27,7 +27,7 @@ const (
 // to the set-password screen.
 func (d deps) withSession(next func(http.ResponseWriter, *http.Request, stockroom.Actor), mode sessionMode) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		actor, err := d.auth.Resolve(r.Context(), tokenFrom(r))
+		actor, err := d.db.Resolve(r.Context(), tokenFrom(r))
 		if err != nil {
 			writeError(w, err)
 			return

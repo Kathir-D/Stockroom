@@ -56,24 +56,24 @@ type RosterResult struct {
 // student number: names are replaced, is_admin and the password are left
 // alone. A photo_path is a file on this machine (absolute, or relative to
 // photoDir); it must have a file extension, it is copied to
-// <uploadsDir>/profiles/<student_number>.<ext>, and the path relative to
-// uploadsDir is stored.
+// <UploadsDir>/profiles/<student_number>.<ext>, and the path relative to
+// UploadsDir is stored.
 //
 // Each row is applied on its own, so one bad line reports an error and the
 // rest still land. Only a malformed file (no header, missing required
 // columns, unbalanced quotes) fails the whole call with ErrInvalid.
-func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoDir, uploadsDir string) (RosterResult, error) {
+func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoDir string) (RosterResult, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return RosterResult{}, err
 	}
-	if uploadsDir == "" {
+	if db.UploadsDir == "" {
 		// A missing UPLOADS_DIR is a server misconfiguration rather than
 		// anything the caller sent, but the admin who pressed import is the
 		// one who can fix it, so the message has to reach the response
 		// instead of being swallowed by a generic 500.
 		return RosterResult{}, fmt.Errorf("%w: UPLOADS_DIR is not set, so roster photos have nowhere to go", ErrNotConfigured)
 	}
-	photos := photoStore{dir: photoDir, uploads: uploadsDir}
+	photos := photoStore{dir: photoDir, uploads: db.UploadsDir}
 
 	cr := csv.NewReader(r)
 	cr.TrimLeadingSpace = true
