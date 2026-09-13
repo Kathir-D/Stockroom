@@ -74,10 +74,10 @@ type AssetCustody struct {
 	Overdue       bool       `json:"overdue"`
 }
 
-// unnamedCustodian labels a holder whose profile carries no name at all, for a
-// viewer who may not see the student number. Rare -- every path that creates a
-// user asks for a name -- but displayName's last resort is the number itself,
-// and that would hand it over under a different key.
+// unnamedCustodian labels a holder no better label exists for. Rare -- every
+// path that creates a user asks for a name -- but every field displayName
+// reads is nullable, so a hand-inserted profile can leave it with nothing to
+// return, and a row has to say something rather than nothing.
 const unnamedCustodian = "Someone"
 
 // forViewer trims a custody record to what actor is allowed to see. Every path
@@ -85,9 +85,20 @@ const unnamedCustodian = "Someone"
 // it happens in the package rather than the UI because a field the UI hides is
 // still one fetch away (CLAUDE.md §7).
 func (c *AssetCustody) forViewer(actor Actor) {
-	if c == nil || actor.IsAdmin {
+	if c == nil {
 		return
 	}
+	// An empty label is nobody's privacy rule, so it is fixed for every
+	// viewer: with first_name, last_name, full_name and student_number all
+	// null or blank, displayName has nothing left to fall back to.
+	if strings.TrimSpace(c.CustodianName) == "" {
+		c.CustodianName = unnamedCustodian
+	}
+	if actor.IsAdmin {
+		return
+	}
+	// displayName's last resort is the student number itself, which would
+	// hand it to a non-admin under a different key.
 	if c.StudentNumber != nil && c.CustodianName == *c.StudentNumber {
 		c.CustodianName = unnamedCustodian
 	}
