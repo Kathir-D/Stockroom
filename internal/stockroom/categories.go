@@ -36,7 +36,7 @@ type CategoryRef struct {
 // Types, so the filter reads Cameras/Bodies, Lenses, Lights, ... rather than
 // alphabetically).
 func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
-	cats, err := db.loadCategories(ctx)
+	cats, err := loadCategories(ctx, db.Pool)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,11 @@ func (db *DB) GetCategoryTree(ctx context.Context) ([]CategoryNode, error) {
 // a parent, name to break a tie. One read feeds the tree, the per-asset
 // category path and the browse list's sort key, so those three can't disagree
 // about what order the tree is in.
-func (db *DB) loadCategories(ctx context.Context) ([]Category, error) {
-	rows, err := db.Pool.Query(ctx,
+//
+// It takes a querier rather than reaching for the pool so the admin writes
+// can measure the tree inside the transaction that is about to change it.
+func loadCategories(ctx context.Context, q querier) ([]Category, error) {
+	rows, err := q.Query(ctx,
 		`select `+categoryColumns+` from categories order by sort_order, name`)
 	if err != nil {
 		return nil, fmt.Errorf("list categories: %w", err)

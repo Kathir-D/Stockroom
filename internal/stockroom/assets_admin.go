@@ -136,8 +136,27 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 		return err
 	}
 
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete asset: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the row before looking at its custody, the way SetAssetStatus
+	// does. A checkout that lands between the check and the delete would
+	// otherwise open a custody row that the cascade then takes away with the
+	// asset -- which is exactly the trail this refusal exists to protect.
+	var locked string
+	err = tx.QueryRow(ctx, `select id from assets where id = $1 for update`, id).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return mapPgError("delete asset", err)
+	}
+
 	var open, everHeld bool
-	err := db.Pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		select exists (select 1 from custody_events where asset_id = $1 and checked_in_at is null),
 		       exists (select 1 from custody_events where asset_id = $1)`, id).Scan(&open, &everHeld)
 	if err != nil {
@@ -150,12 +169,11 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 		return fmt.Errorf("%w: item has custody history; mark it unavailable instead of deleting it", ErrConflict)
 	}
 
-	tag, err := db.Pool.Exec(ctx, `delete from assets where id = $1`, id)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `delete from assets where id = $1`, id); err != nil {
 		return mapPgError("delete asset", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete asset: %w", err)
 	}
 	return nil
 }
@@ -242,13 +260,29 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
 	}
 
-	rel, err := storePhoto(uploadsDir, "assets", id, ext, src)
+	// Staged, then published, then the row, then commit (photos.go). The
+	// order is what keeps the file and the column agreeing: until the UPDATE
+	// lands the old picture is still the one of record, and any failure after
+	// it has been moved aside puts it straight back.
+	staged, err := stagePhoto(uploadsDir, "assets", id, ext, src)
 	if err != nil {
 		return AssetDetail{}, err
 	}
-	if _, err := db.Pool.Exec(ctx, `update assets set photo_path = $2 where id = $1`, id, rel); err != nil {
+	if err := staged.publish(); err != nil {
+		return AssetDetail{}, err
+	}
+	tag, err := db.Pool.Exec(ctx, `update assets set photo_path = $2 where id = $1`, id, staged.rel)
+	if err != nil {
+		staged.rollback()
 		return AssetDetail{}, mapPgError("set asset photo", err)
 	}
+	// The asset can still have been deleted since the check above, in which
+	// case nothing points at the file and it goes back the way it came.
+	if tag.RowsAffected() == 0 {
+		staged.rollback()
+		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+	}
+	staged.commit()
 	return db.GetAsset(ctx, actor, id)
 }
 

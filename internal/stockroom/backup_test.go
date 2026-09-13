@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // The CSV export, against the live database. The point of a backup is that it
@@ -37,14 +36,14 @@ func TestExportAllTablesToCSV(t *testing.T) {
 
 	// The folder is dated, so a week of nightly runs sits side by side rather
 	// than overwriting each other.
-	if want := filepath.Join(base, time.Now().Format("2006-01-02")); res.Dir != want {
+	if want := filepath.Join(base, res.RanAt.Format("2006-01-02")); res.Dir != want {
 		t.Errorf("dir = %q, want %q", res.Dir, want)
 	}
 
 	// The table list comes from the database rather than a list in Go, so a
 	// table added by a later migration is in the backup without anyone
 	// remembering to add it here. That is exactly what this compares.
-	tables, err := db.publicTables(ctx)
+	tables, err := publicTables(ctx, db.Pool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,10 +89,25 @@ func TestExportAllTablesToCSV(t *testing.T) {
 		t.Errorf("categories.csv looks empty: %q", b)
 	}
 
-	// A second run the same day overwrites the day's folder rather than
+	// A second run the same day replaces the day's folder rather than
 	// failing on the files already there.
 	if _, err := db.BackupNow(ctx, admin, base); err != nil {
 		t.Errorf("second BackupNow the same day: %v", err)
+	}
+
+	// Both runs wrote aside and moved the folder in whole, so the dated folder
+	// is the only thing here. A leftover staging folder would be a pile of
+	// tables that reads like a backup and isn't one.
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != res.RanAt.Format("2006-01-02") {
+		t.Errorf("backup dir holds %v, want only the dated folder", names)
 	}
 }
 

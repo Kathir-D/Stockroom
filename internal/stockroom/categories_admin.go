@@ -2,8 +2,11 @@ package stockroom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Admin edits to the category tree (design doc §8.7): rename a node, add a
@@ -14,11 +17,42 @@ import (
 // so nothing may end up deeper than MaxCategoryDepth; and sort_order is a
 // position among siblings, so a new node goes last and a level can be
 // renumbered by hand.
+//
+// Both rules are decided in Go against a snapshot of the whole table, which
+// only holds if one write happens at a time, so all three take
+// categoryWriteLock and keep it to the commit.
 
 // MaxCategoryDepth is how deep the tree may go: Type (1) -> Category (2) ->
 // Model (3). The browse filter is built around those three levels
 // (CLAUDE.md §6.2), so a fourth would have nowhere to render.
 const MaxCategoryDepth = 3
+
+// categoryWriteLock is the advisory lock every category write takes before it
+// measures the tree. The depth and cycle checks below run in Go over a
+// snapshot of the table, so two writes that each read a legal tree can commit
+// an illegal one between them: two moves that make each other's node their
+// parent both pass, and together they leave a cycle no read can draw. The
+// tree is a few dozen rows edited by one admin at a time, so serialising the
+// writes costs nothing and removes the whole class.
+//
+// The number is arbitrary. It only has to be one nothing else in this
+// database uses, and this package takes no other advisory lock.
+const categoryWriteLock = 20260913
+
+// beginCategoryWrite opens a transaction already holding categoryWriteLock.
+// The lock is transaction-scoped, so committing or rolling back always
+// releases it; nothing has to remember to.
+func (db *DB) beginCategoryWrite(ctx context.Context, what string) (pgx.Tx, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, categoryWriteLock); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, mapPgError(what, err)
+	}
+	return tx, nil
+}
 
 // CategoryInput is the create/edit payload for one node.
 type CategoryInput struct {
@@ -55,7 +89,13 @@ func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput)
 		return Category{}, err
 	}
 
-	shape, err := db.categoryShape(ctx)
+	tx, err := db.beginCategoryWrite(ctx, "create category")
+	if err != nil {
+		return Category{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	shape, err := categoryShape(ctx, tx)
 	if err != nil {
 		return Category{}, err
 	}
@@ -74,12 +114,15 @@ func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput)
 		order = *in.SortOrder
 	}
 
-	c, err := scanCategory(db.Pool.QueryRow(ctx, `
+	c, err := scanCategory(tx.QueryRow(ctx, `
 		insert into categories (name, parent_id, sort_order)
 		values ($1, $2, $3)
 		returning `+categoryColumns, in.Name, in.ParentID, order))
 	if err != nil {
 		return Category{}, mapPgError("create category", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Category{}, fmt.Errorf("create category: %w", err)
 	}
 	return c, nil
 }
@@ -95,7 +138,13 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 		return Category{}, err
 	}
 
-	shape, err := db.categoryShape(ctx)
+	tx, err := db.beginCategoryWrite(ctx, "update category")
+	if err != nil {
+		return Category{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	shape, err := categoryShape(ctx, tx)
 	if err != nil {
 		return Category{}, err
 	}
@@ -117,12 +166,15 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 		order = shape.nextSortOrder(in.ParentID)
 	}
 
-	c, err := scanCategory(db.Pool.QueryRow(ctx, `
+	c, err := scanCategory(tx.QueryRow(ctx, `
 		update categories set name = $2, parent_id = $3, sort_order = $4
 		where id = $1
 		returning `+categoryColumns, id, in.Name, in.ParentID, order))
 	if err != nil {
 		return Category{}, mapPgError("update category", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Category{}, fmt.Errorf("update category: %w", err)
 	}
 	return c, nil
 }
@@ -139,8 +191,28 @@ func (db *DB) DeleteCategory(ctx context.Context, actor Actor, id string) error 
 		return err
 	}
 
+	tx, err := db.beginCategoryWrite(ctx, "delete category")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the row before counting what hangs off it. The lock above already
+	// holds off another category write, but CreateAsset takes no part in it,
+	// and its foreign-key check would otherwise be free to file a unit under
+	// a node between the count and the delete -- leaving the uncategorised
+	// pile this refusal exists to prevent.
+	var locked string
+	err = tx.QueryRow(ctx, `select id from categories where id = $1 for update`, id).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: no category %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return mapPgError("delete category", err)
+	}
+
 	var children, assets int
-	err := db.Pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		select (select count(*) from categories where parent_id = $1),
 		       (select count(*) from assets where category_id = $1)`, id).Scan(&children, &assets)
 	if err != nil {
@@ -153,12 +225,11 @@ func (db *DB) DeleteCategory(ctx context.Context, actor Actor, id string) error 
 		return fmt.Errorf("%w: category has %s filed under it", ErrConflict, plural(assets, "asset", "assets"))
 	}
 
-	tag, err := db.Pool.Exec(ctx, `delete from categories where id = $1`, id)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `delete from categories where id = $1`, id); err != nil {
 		return mapPgError("delete category", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: no category %s", ErrNotFound, id)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete category: %w", err)
 	}
 	return nil
 }
@@ -174,8 +245,8 @@ type categoryTreeShape struct {
 	children map[string][]string // parent id -> child ids; "" holds the roots
 }
 
-func (db *DB) categoryShape(ctx context.Context) (categoryTreeShape, error) {
-	cats, err := db.loadCategories(ctx)
+func categoryShape(ctx context.Context, q querier) (categoryTreeShape, error) {
+	cats, err := loadCategories(ctx, q)
 	if err != nil {
 		return categoryTreeShape{}, err
 	}

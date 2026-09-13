@@ -88,7 +88,7 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [ ] Wails `wails.json` / dev config: make sure the frontend can reach `http://127.0.0.1:8080` (CORS on the Go server for the Vite dev origins)
 
 ## Phase 7: Backup (Week 8)
-- [ ] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
+- [x] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
 - [ ] `cmd/backup/main.go`. Loads `.env`, runs the export, then shells out to `rclone copy BACKUP_DIR <RCLONE_REMOTE>:` to push it to Google Drive (2026-09-12, replaces the local-only/Drive-client-syncs-it plan; CLAUDE.md §11). Exits non-zero if either step fails; the local CSVs stay on disk regardless of upload success
 - [ ] One-time setup doc: running `rclone config` interactively to authorize the Drive remote, naming it to match `RCLONE_REMOTE`
 - [ ] Scheduling docs in README: Windows Task Scheduler entry; launchd plist / cron line for macOS
