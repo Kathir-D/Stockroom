@@ -42,6 +42,10 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] Static file serving: `GET /files/…` from `UPLOADS_DIR`. `server/files.go`. No session: the desktop app renders photos in `<img>` tags, which cannot carry the bearer token. Directory listings are refused
 - [x] HTTP: `GET /categories/tree`, `GET /assets?category=&status=&q=`, `GET /assets/{id}`. `server/assets.go`; all three need a full session, none is admin-only
 
+**Phase 3 addendum (2026-09-12 grilling session, lands after the above merged as PR #15).** Two decisions were made after this phase shipped and aren't reflected in `ListAssets` yet:
+- [ ] `ListAssets`/`AssetListItem` needs a `custody *AssetCustody` field (same shape `GetAsset` already returns), populated for every checked-out asset and visible to every actor — not admin-gated. Today only `GetAsset`'s `AssetDetail` carries it, so the browse list can't show "who has it" on hover without a per-row fetch. `assetCategoryPaths`-style batching (one query for all rows, not N+1) is the shape to match.
+- [ ] `ListAssets`'s `order by a.name, a.asset_tag` needs to become: category in `Catagories.md`'s document order (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc) as the primary key, `available` before `checked_out`/`unavailable` as the secondary key, then name. `GetCategoryTree`'s own ordering should be checked against the same list while touching this.
+
 ## Phase 4: Core loop: scan, cart checkout, check-in (Week 6)
 - [ ] `ScanItem(actor, serial)`. The one function behind every item scan:
   - asset `checked_out` → `CheckInAsset` immediately, return `{action: "checked_in", …}`
@@ -56,7 +60,8 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
   - insert one `custody_events` row per asset (`checked_out_by = actor`), set `assets.status = 'checked_out'`
 - [ ] `CheckInAsset(actor, assetID, damageNote?)`. Close the open `custody_events` row (`checked_in_by = actor`, `condition_in = note`), set status back to `available`; also callable directly by admin
 - [ ] `ListActiveCustody()`, `ListOverdueCustody()`. Over the existing views, joined with custodian names
-- [ ] `GetAssetHistory(assetID)`, `GetUserHistory(userID)`. Full custody trail (non-admin may only read their own)
+- [ ] `GetAssetHistory(assetID)`. Full past-custodian trail for one asset. **Admin-only** (2026-09-12: distinct from current-custodian visibility, which is open to everyone via `GetAsset`/`ListAssets`/`ScanItem` — this is the *historical* trail, `ErrForbidden` for a non-admin actor regardless of whose item it is)
+- [ ] `GetUserHistory(userID)`. Full custody trail for one user. Non-admin may only read their own (`ErrForbidden` otherwise); admin may read anyone's
 - [ ] HTTP: `POST /scan`, `POST /checkout`, `POST /assets/{id}/checkin`, `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history`, `GET /users/{id}/history`
 
 ## Phase 5: Admin panel API (Week 7)
@@ -69,15 +74,17 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 
 ## Phase 6: Frontend wiring (Week 8, alongside UI build)
 - [ ] `desktop-app/frontend/src/lib/api.ts` and `web-app/src/lib/api.ts`. Identical thin `fetch` wrappers, one function per endpoint, session token handling
-- [ ] `lib/scanner.ts` in both. Keystroke buffer + scan-vs-typed detection (CLAUDE.md §10); routes to login or `/scan` depending on active screen
-- [ ] Cart = frontend-only state (list of asset IDs); checkout calls `POST /checkout` once
+- [ ] `lib/scanner.ts` in both. Keystroke buffer + scan-vs-typed detection (CLAUDE.md §10) behind a named/exported constant defaulted to 50ms, so Week 7 hardware tuning is a one-line change; routes to login or `/scan` depending on active screen. If the sign-in screen receives a scan that doesn't parse as a student number (e.g. an item barcode scanned with nobody signed in), show an explicit "sign in first" message rather than a generic bad-login error (design doc §15 Q4, 2026-09-12)
+- [ ] Cart = frontend-only state (list of asset IDs), persisted (e.g. `sessionStorage`) so a page reload doesn't clear it; only sign-out or an idle-timeout 401 clears it (2026-09-12, design doc §15 Q5). Checkout calls `POST /checkout` once
 - [ ] Sign-out prompt after successful checkout; idle-timeout handling on 401
+- [ ] Overdue users: disable Add-to-cart/checkout in the UI immediately at sign-in, in addition to (not instead of) the server-side `ErrOverdueBlocked` refusal (2026-09-12, design doc §15 Q6)
 - [ ] Delete `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`; remove `@supabase/supabase-js` from `desktop-app/frontend/package.json`; strip `Greet` from `app.go`
 - [ ] Wails `wails.json` / dev config: make sure the frontend can reach `http://127.0.0.1:8080` (CORS on the Go server for the Vite dev origins)
 
 ## Phase 7: Backup (Week 8)
 - [ ] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
-- [ ] `cmd/backup/main.go`. Loads `.env`, runs the export, exits non-zero on failure
+- [ ] `cmd/backup/main.go`. Loads `.env`, runs the export, then shells out to `rclone copy BACKUP_DIR <RCLONE_REMOTE>:` to push it to Google Drive (2026-09-12, replaces the local-only/Drive-client-syncs-it plan; CLAUDE.md §11). Exits non-zero if either step fails; the local CSVs stay on disk regardless of upload success
+- [ ] One-time setup doc: running `rclone config` interactively to authorize the Drive remote, naming it to match `RCLONE_REMOTE`
 - [ ] Scheduling docs in README: Windows Task Scheduler entry; launchd plist / cron line for macOS
 - [ ] Restore test (CLAUDE.md §11): scratch DB → migrations → load CSVs → row counts match
 
