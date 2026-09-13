@@ -71,12 +71,12 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] Tested: `internal/stockroom/custody_test.go` (the rules, against the live database) and `server/custody_test.go` (statuses, routing, payload shape). Verified by hand with `curl` end to end as well: scan → detail, scan → check-in, cart checkout, the 7-day cap, the overdue block and its admin override, both history reads and their refusals
 
 ## Phase 5: Admin panel API (Week 7)
-- [ ] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (block if open custody), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`), asset photo upload → `UPLOADS_DIR/assets/`
-- [ ] `CreateCategory`, `UpdateCategory`, `DeleteCategory` (block if it has children or assets), enforce max depth 3. New nodes take `sort_order = max(sort_order) + 1` among their siblings, and a level can be renumbered by hand: it is what the browse screen and the filter tree sort on
-- [ ] Overdue list is `ListOverdueCustody` (Phase 4). Just ensure it's admin-panel friendly (custodian name, student number, days overdue)
-- [ ] `BackupNow()` → calls Phase 7's export, returns the folder written
-- [ ] HTTP: `POST/PUT/DELETE /assets…`, `POST /assets/{id}/photo`, `POST/PUT/DELETE /categories…`, `POST /admin/backup`
-- [ ] Validate everything via `curl`/a small Go test file before UI work starts
+- [x] `CreateAsset`, `UpdateAsset`, `DeleteAsset` (block if open custody), `SetAssetStatus` (`available` ⇄ `unavailable`; cannot touch `checked_out`), asset photo upload → `UPLOADS_DIR/assets/`
+- [x] `CreateCategory`, `UpdateCategory`, `DeleteCategory` (block if it has children or assets), enforce max depth 3. New nodes take `sort_order = max(sort_order) + 1` among their siblings, and a level can be renumbered by hand: it is what the browse screen and the filter tree sort on
+- [x] Overdue list is `ListOverdueCustody` (Phase 4). Just ensure it's admin-panel friendly (custodian name, student number, days overdue)
+- [x] `BackupNow()` → calls Phase 7's export, returns the folder written
+- [x] HTTP: `POST/PUT/DELETE /assets…`, `POST /assets/{id}/photo`, `POST/PUT/DELETE /categories…`, `POST /admin/backup`
+- [x] Validated by package and HTTP Go tests before UI work starts
 
 ## Phase 6: Frontend wiring (Week 8, alongside UI build)
 - [ ] `desktop-app/frontend/src/lib/api.ts` and `web-app/src/lib/api.ts`. Identical thin `fetch` wrappers, one function per endpoint, session token handling
@@ -88,7 +88,7 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [ ] Wails `wails.json` / dev config: make sure the frontend can reach `http://127.0.0.1:8080` (CORS on the Go server for the Vite dev origins)
 
 ## Phase 7: Backup (Week 8)
-- [ ] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
+- [x] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
 - [ ] `cmd/backup/main.go`. Loads `.env`, runs the export, then shells out to `rclone copy BACKUP_DIR <RCLONE_REMOTE>:` to push it to Google Drive (2026-09-12, replaces the local-only/Drive-client-syncs-it plan; CLAUDE.md §11). Exits non-zero if either step fails; the local CSVs stay on disk regardless of upload success
 - [ ] One-time setup doc: running `rclone config` interactively to authorize the Drive remote, naming it to match `RCLONE_REMOTE`
 - [ ] Scheduling docs in README: Windows Task Scheduler entry; launchd plist / cron line for macOS

@@ -46,9 +46,9 @@ func TestMapPgError(t *testing.T) {
 			// A constraint the mapping does not name still has to be a
 			// conflict; only the wording falls back.
 			name:       "unknown constraint still maps by code",
-			err:        &pgconn.PgError{Code: "23505", ConstraintName: "assets_asset_tag_key"},
+			err:        &pgconn.PgError{Code: "23505", ConstraintName: "tags_name_key"},
 			want:       ErrConflict,
-			wantSubstr: "assets_asset_tag_key",
+			wantSubstr: "tags_name_key",
 		},
 		{
 			// Anything else is a server problem: it must not become a 4xx.
@@ -111,6 +111,9 @@ func TestConstraintMessageFallbacks(t *testing.T) {
 		{"custodian fk", &pgconn.PgError{ConstraintName: "custody_events_custodian_id_fkey"}, "user has custody history"},
 		{"checked out by fk", &pgconn.PgError{ConstraintName: "custody_events_checked_out_by_fkey"}, "user has custody history"},
 		{"checked in by fk", &pgconn.PgError{ConstraintName: "custody_events_checked_in_by_fkey"}, "user has custody history"},
+		{"asset tag", &pgconn.PgError{ConstraintName: "assets_asset_tag_key"}, "asset tag already in use"},
+		{"serial number", &pgconn.PgError{ConstraintName: "idx_assets_serial"}, "serial number already in use"},
+		{"category name", &pgconn.PgError{ConstraintName: "categories_name_key"}, "category name already in use"},
 		{"unnamed constraint falls back to the message", &pgconn.PgError{Message: "some database detail"}, "some database detail"},
 		{"unknown constraint falls back to its name", &pgconn.PgError{ConstraintName: "kits_name_key", Message: "ignored"}, "kits_name_key"},
 	}

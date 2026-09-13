@@ -11,8 +11,11 @@ import (
 // package sentinels so server/ can answer with 4xx instead of 500:
 // unique_violation and foreign_key_violation are conflicts (a duplicate
 // student number, a user with custody history), invalid_text_representation
-// is a malformed id or enum value from the client. Everything else passes
-// through wrapped with op, the name of the operation that failed.
+// is a malformed id or enum value from the client. The datetime and numeric
+// codes come from the admin panel's typed fields: a purchase date Postgres
+// cannot parse, or a price wider than numeric(10,2), is a typo in a form and
+// must not answer 500. Everything else passes through wrapped with op, the
+// name of the operation that failed.
 func mapPgError(op string, err error) error {
 	if err == nil {
 		return nil
@@ -25,6 +28,10 @@ func mapPgError(op string, err error) error {
 		case "23503": // foreign_key_violation
 			return fmt.Errorf("%w: %s", ErrConflict, constraintMessage(pgErr))
 		case "22P02": // invalid_text_representation (bad uuid, bad enum)
+			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
+		case "22007", "22008": // invalid_datetime_format, datetime_field_overflow
+			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
+		case "22003": // numeric_value_out_of_range
 			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
 		}
 	}
@@ -42,6 +49,12 @@ func constraintMessage(e *pgconn.PgError) string {
 		return "email already in use"
 	case "custody_events_custodian_id_fkey", "custody_events_checked_out_by_fkey", "custody_events_checked_in_by_fkey":
 		return "user has custody history"
+	case "assets_asset_tag_key":
+		return "asset tag already in use"
+	case "idx_assets_serial":
+		return "serial number already in use"
+	case "categories_name_key":
+		return "category name already in use"
 	}
 	if e.ConstraintName != "" {
 		return e.ConstraintName

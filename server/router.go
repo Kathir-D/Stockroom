@@ -14,6 +14,7 @@ type deps struct {
 	db         *stockroom.DB
 	auth       *stockroom.Auth
 	uploadsDir string
+	backupDir  string
 }
 
 // newRouter registers every HTTP route and wraps the mux in shared
@@ -71,6 +72,18 @@ func newRouter(d deps) http.Handler {
 	// Photos, served straight off UPLOADS_DIR. Unauthenticated on purpose;
 	// see fileServer.
 	mux.Handle("GET /files/", fileServer(d.uploadsDir))
+
+	// The admin panel's writes: the asset table, the category tree, and the
+	// backup button. Admin-only, enforced inside internal/stockroom.
+	mux.Handle("POST /assets", d.withSession(d.handleCreateAsset, fullOnly))
+	mux.Handle("PUT /assets/{id}", d.withSession(d.handleUpdateAsset, fullOnly))
+	mux.Handle("DELETE /assets/{id}", d.withSession(d.handleDeleteAsset, fullOnly))
+	mux.Handle("POST /assets/{id}/status", d.withSession(d.handleSetAssetStatus, fullOnly))
+	mux.Handle("POST /assets/{id}/photo", d.withSession(d.handleSetAssetPhoto, fullOnly))
+	mux.Handle("POST /categories", d.withSession(d.handleCreateCategory, fullOnly))
+	mux.Handle("PUT /categories/{id}", d.withSession(d.handleUpdateCategory, fullOnly))
+	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
+	mux.Handle("POST /admin/backup", d.withSession(d.handleBackupNow, fullOnly))
 
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))

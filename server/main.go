@@ -51,10 +51,16 @@ func main() {
 
 	auth := stockroom.NewAuth(db, time.Duration(cfg.SessionIdleMinutes)*time.Minute)
 
+	// ReadTimeout bounds the body as well as the headers. Without it a photo
+	// upload that trickles in a byte at a time holds a connection and its
+	// goroutine open forever, and ReadHeaderTimeout alone does not touch that
+	// because the headers arrived fine. A minute is far longer than a 10 MB
+	// picture needs over loopback and far shorter than forever.
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
-		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir}),
+		Handler:           newRouter(deps{db: db, auth: auth, uploadsDir: cfg.UploadsDir, backupDir: cfg.BackupDir}),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
 	}
 
 	// Serve in the background so main can wait on the signal context below.

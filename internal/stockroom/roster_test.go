@@ -321,3 +321,65 @@ func TestImportRosterPhotoCannotEscapeUploadsDir(t *testing.T) {
 		t.Errorf("the copy is not inside uploads/profiles: %v", err)
 	}
 }
+
+// The profile row is written between publishing the new photo and dropping
+// the copy it replaced, so a row write that fails puts the old photo back
+// rather than leaving the column naming a file the import already destroyed.
+// A cancelled context is the cheapest way to fail the upsert at exactly that
+// point; a concurrent import replacing the same student's photo is the real
+// one, and it is why the whole sequence runs inside the photo's lock.
+func TestImportRosterKeepsTheOldPhotoWhenTheRowWriteFails(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	sn := testStudentNumber(t, db)
+	photoDir, uploads := t.TempDir(), t.TempDir()
+	for _, name := range []string{"first.png", "second.jpg"} {
+		if err := os.WriteFile(filepath.Join(photoDir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	header := "first_name,last_name,student_number,photo_path\n"
+
+	if _, err := db.ImportRoster(ctx, admin, strings.NewReader(header+"A,B,"+sn+",first.png\n"), photoDir, uploads); err != nil {
+		t.Fatal(err)
+	}
+
+	dead, cancel := context.WithCancel(ctx)
+	cancel()
+	res, err := db.ImportRoster(dead, admin, strings.NewReader(header+"A,B,"+sn+",second.jpg\n"), photoDir, uploads)
+	if err != nil {
+		t.Fatalf("ImportRoster: %v", err)
+	}
+	if res.Failed != 1 {
+		t.Fatalf("result = %+v, want the row to fail", res)
+	}
+
+	// The photo of record is still the one the row names, and the abandoned
+	// upload left nothing behind.
+	p, err := db.profileByStudentNumber(ctx, sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+sn+".png" {
+		t.Fatalf("photo_path = %v, want profiles/%s.png", p.PhotoPath, sn)
+	}
+	got, err := os.ReadFile(filepath.Join(uploads, *p.PhotoPath))
+	if err != nil {
+		t.Fatalf("the photo the row names is gone: %v", err)
+	}
+	if string(got) != "first.png" {
+		t.Errorf("%s = %q, want the original photo back", *p.PhotoPath, got)
+	}
+	entries, err := os.ReadDir(filepath.Join(uploads, "profiles"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("uploads/profiles holds %v, want only the original photo", names)
+	}
+}

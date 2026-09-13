@@ -67,9 +67,11 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 		return RosterResult{}, err
 	}
 	if uploadsDir == "" {
-		// A missing UPLOADS_DIR is a server misconfiguration, not something
-		// the caller sent, so this stays unwrapped and answers 500.
-		return RosterResult{}, errors.New("import roster: uploads dir is not configured")
+		// A missing UPLOADS_DIR is a server misconfiguration rather than
+		// anything the caller sent, but the admin who pressed import is the
+		// one who can fix it, so the message has to reach the response
+		// instead of being swallowed by a generic 500.
+		return RosterResult{}, fmt.Errorf("%w: UPLOADS_DIR is not set, so roster photos have nowhere to go", ErrNotConfigured)
 	}
 	photos := photoStore{dir: photoDir, uploads: uploadsDir}
 
@@ -153,17 +155,39 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 		return "", fmt.Errorf("%w: a first or last name is required", ErrInvalid)
 	}
 
-	var photoPath *string
-	if photo != "" {
-		rel, err := photos.copyFor(photo, sn)
-		if err != nil {
-			return "", err
-		}
-		photoPath = &rel
+	if photo == "" {
+		return db.upsertProfileRow(ctx, sn, first, last, nil)
 	}
 
+	src, ext, err := photos.openFor(photo)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	// The row is written inside the photo's lock, after the new file is in
+	// place and before the copy it replaced is dropped — the order
+	// SetAssetPhoto uses, for the same reason (photos.go). Two imports naming
+	// this student under different extensions would otherwise each find the
+	// other's file stale and delete it on commit, and whichever upsert landed
+	// after that would leave the row naming a path that is already gone.
+	var action RosterAction
+	_, err = storePhoto(photos.uploads, "profiles", sn, ext, src, func(rel string) error {
+		var err error
+		action, err = db.upsertProfileRow(ctx, sn, first, last, &rel)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return action, nil
+}
+
+// upsertProfileRow writes one roster line to profiles. A nil photoPath leaves
+// whatever photo the account already had.
+func (db *DB) upsertProfileRow(ctx context.Context, sn, first, last string, photoPath *string) (RosterAction, error) {
 	var inserted bool
-	err = db.Pool.QueryRow(ctx, `
+	err := db.Pool.QueryRow(ctx, `
 		insert into profiles (student_number, first_name, last_name, full_name, photo_path)
 		values ($1, $2, $3, $4, $5)
 		on conflict (student_number) do update
@@ -182,12 +206,13 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 	return RosterUpdated, nil
 }
 
-// copyFor copies src (absolute, or relative to the store's dir) to
-// <uploads>/profiles/<studentNumber>.<ext> and returns the path relative to
-// uploads, which is what goes in the database and what /files/ serves. The
-// extension is required: it is what tells a browser how to render the file,
-// and it is part of the stored path.
-func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
+// openFor opens src (absolute, or relative to the store's dir) and returns it
+// alongside its lowercased extension; the caller closes the file. The photo
+// lands at <uploads>/profiles/<studentNumber>.<ext>, so the extension is
+// required: it is what tells a browser how to render the file, and it is part
+// of the stored path. Which extensions are allowed is not checked here; see
+// uploadPhotoExtensions for why the upload path is stricter than this one.
+func (ps photoStore) openFor(src string) (*os.File, string, error) {
 	if !filepath.IsAbs(src) {
 		dir := ps.dir
 		if dir == "" {
@@ -197,39 +222,11 @@ func (ps photoStore) copyFor(src, studentNumber string) (string, error) {
 	}
 	ext := strings.ToLower(filepath.Ext(src))
 	if ext == "" {
-		return "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
+		return nil, "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
 	}
 	in, err := os.Open(src)
 	if err != nil {
-		return "", fmt.Errorf("%w: photo %s: %v", ErrInvalid, src, err)
+		return nil, "", fmt.Errorf("%w: photo %s: %v", ErrInvalid, src, err)
 	}
-	defer in.Close()
-
-	rel := filepath.ToSlash(filepath.Join("profiles", studentNumber+ext))
-	dst := filepath.Join(ps.uploads, "profiles", studentNumber+ext)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", fmt.Errorf("create uploads dir: %w", err)
-	}
-	// Drop a copy stored under a different extension, so re-importing the
-	// same student with a new file type replaces the photo instead of
-	// leaving the old one orphaned. Student numbers are digits only, so the
-	// pattern carries no glob metacharacters.
-	stale, _ := filepath.Glob(filepath.Join(ps.uploads, "profiles", studentNumber+".*"))
-	for _, old := range stale {
-		if old != dst {
-			_ = os.Remove(old)
-		}
-	}
-	out, err := os.Create(dst)
-	if err != nil {
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return "", fmt.Errorf("write photo: %w", err)
-	}
-	return rel, nil
+	return in, ext, nil
 }

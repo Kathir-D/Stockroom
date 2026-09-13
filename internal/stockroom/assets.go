@@ -294,7 +294,7 @@ func escapeLike(s string) string { return likeEscaper.Replace(s) }
 // and sort keys built from it. The table is a few dozen rows, so one read per
 // list is cheaper than a recursive join per asset.
 func (db *DB) categoryIndex(ctx context.Context) (categoryIndex, error) {
-	cats, err := db.loadCategories(ctx)
+	cats, err := loadCategories(ctx, db.Pool)
 	if err != nil {
 		return categoryIndex{}, err
 	}
