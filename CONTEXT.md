@@ -26,7 +26,7 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Category tree.** `categories`, a three-level tree via `parent_id`: **Type** (Lenses) → **Category** (Zooms) → **Model** (Canon 70-200mm f/2.8). A node's position among its siblings is `sort_order`, which follows `Catagories.md`'s document order. An asset may file under any node (ADR 0001), though the seed puts every unit under a Model.
 
-**Photo.** A file under `UPLOADS_DIR`, either `profiles/<student number>.<ext>` or `assets/<asset id>.<ext>`. The row stores the relative path (`photo_path`); the API hands out the URL (`photo_url`, under `/files/`). Each table's `photo_path` has exactly one writer.
+**Photo.** A file under `UPLOADS_DIR`, either `profiles/<student number>.<ext>` or `assets/<asset id>.<ext>`. The row stores the relative path (`photo_path`); the API hands out the URL (`photo_url`, under `/files/`). Each table's `photo_path` has exactly one writer: `SetAssetPhoto` for assets, the roster import for profiles.
 
 ## Custody
 
@@ -46,7 +46,7 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Check-in / return.** Closing an open custody event. Any signed-in user may return any item. An optional **damage note** lands on the event's `condition_in`.
 
-**Scan.** A barcode arriving as a keystroke burst. On the sign-in screen it is a student number; anywhere else it is a serial, and the server decides from the open custody row whether that means a return or the detail popup. The frontend, not the server, decides which of the two a scan is, by which screen is active.
+**Scan.** A barcode arriving as a keystroke burst. Two decisions, made in two places. The frontend decides what the code *is* from which screen is active: on the sign-in screen it is a student number and goes to the login endpoint; anywhere else it is an asset serial and goes to `POST /scan`. The server then decides what a serial scan *does* from the open custody row: an item that is out is checked in, an item on the shelf comes back as the detail popup.
 
 ## Operations
 

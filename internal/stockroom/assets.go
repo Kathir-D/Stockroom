@@ -228,8 +228,8 @@ func assetFilterSQL(tree categoryTree, filter AssetFilter) (string, []any, error
 	var args []any
 
 	if id := strings.TrimSpace(filter.CategoryID); id != "" {
-		if !tree.exists(id) {
-			return "", nil, fmt.Errorf("%w: category %s", ErrNotFound, id)
+		if _, err := tree.require(id); err != nil {
+			return "", nil, err
 		}
 		args = append(args, tree.descendants(id))
 		conds = append(conds, fmt.Sprintf(`a.category_id = any($%d::uuid[])`, len(args)))

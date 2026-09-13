@@ -63,7 +63,9 @@ The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every
 
 ## 4. Backend architecture (decided): single Go backend over Supabase-hosted Postgres
 
-**The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
+**The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends will call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
+
+**Current state (until TODO Phase 6).** The backend is built to that shape, but the frontends are not yet wired to it. `desktop-app/frontend/src/lib/db.ts` and `supabase.ts` still call PostgREST directly with the `service_role` key, and the web app has no data layer at all. Phase 6 replaces both with `lib/api.ts` and deletes the supabase-js path.
 
 Why this shape:
 - One place for all logic, written in Go (preferred over TS for this codebase).
@@ -168,6 +170,7 @@ stockroom/
 ├── go.mod                     # single root module; desktop-app, server, cmd share internal/
 ├── .env.example               # copy to .env, see Section 9
 ├── internal/stockroom/        # ALL business logic; the only code that touches Postgres
+│   ├── doc.go                 # package comment
 │   ├── db.go                  # DB: the pool, the session store, UploadsDir, BackupDir. Open(ctx, url, Options)
 │   ├── config.go              # .env + environment -> Config
 │   ├── types.go               # row structs for every table + views
@@ -218,9 +221,9 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /assets/{id}/checkin` | any full | optional `{note}` (the damage note; an empty body is fine) |
 | `GET /users/{id}/history` | own, or admin | |
 | `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
-| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | |
+| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo |
 | `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`) or a `text/csv` body |
-| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path` and no status; status takes `{status: available|unavailable}` |
+| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path` and no status; status takes `{status: available\|unavailable}` |
 | `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
 | `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
 | `POST /admin/backup` | admin | runs the CSV export into `BACKUP_DIR` |
@@ -371,11 +374,12 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 **Closed (2026-09-13, backend deepening)**
 - [x] **One handle.** `Auth` is gone; `DB` owns the pool, the `SessionStore`, `UploadsDir` and `BackupDir`, built by `Open(ctx, url, Options)`. `server/` holds a `deps{db}` and nothing else. Two structs that each needed the other was one struct.
 - [x] **One category tree.** `categoryIndex` (browse paths and sort keys) and `categoryTreeShape` (admin depth and cycle checks) were two readings of the same table; `categoryTree` in `categories.go` is the only one, and `requireCategory` and the browse filter read it too. The filter is `category_id = any(descendants)` from that tree, not a recursive CTE per request.
-- [x] **`photo_path` has one writer per table.** `SetAssetPhoto` for assets, the roster import for profiles. `AssetInput` lost its `photo_path`, because a form field that writes the column can name a file nobody uploaded or drop the pointer to one somebody did.
+- [x] **`photo_path` has one writer per table.** `SetAssetPhoto` for assets, the roster import for profiles. `AssetInput` and `UserInput` lost their `photo_path`, because a form field that writes the column can name a file nobody uploaded or drop the pointer to one somebody did.
 - [x] **An asset may file under any category node**, not only a Model. See `docs/adr/0001-assets-file-under-any-category-node.md`.
+- [x] **`GetCategoryTree` takes the actor** and refuses a limited session inside the package, like every other read. Before this the router alone kept a password-less scan login off the tree.
 - [x] **"Out" has one SQL definition**, `openCustodySQL` in `custody.go`, used by the scan branch, the cart lock, `DeleteAsset` and `SetAssetStatus`.
 - [x] **Directories come from `DB`, not parameters.** `ImportRoster`, `SetAssetPhoto`, `BackupNow` and `ExportAllTablesToCSV` read `db.UploadsDir` / `db.BackupDir`; an empty one is `ErrNotConfigured`, which is a 503 (Section 8.1).
-- [x] **The test suite was cut to one happy path and one gate per module** (32 Go tests, 3 pgTAP files), with the removed cases listed in `TESTING.md` under Planned. CI skips the build on docs-only changes while still reporting the `tests` check green (`CI.md`).
+- [x] **The test suite was cut to one happy path and one gate per module** (30 Go tests, 3 pgTAP files), with the removed cases listed in `TESTING.md` under Planned. CI skips the build on docs-only changes while still reporting the `tests` check green (`CI.md`).
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

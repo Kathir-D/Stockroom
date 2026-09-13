@@ -16,7 +16,7 @@ A push to a PR cancels the run already going for it.
 
 ## Docs-only changes
 
-Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `desktop-app/`, `web-app/`, `scripts/` or the workflow itself. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change: the job runs a single echo step and finishes green in a few seconds.
+Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `desktop-app/`, `web-app/`, `scripts/` or the workflow itself. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change (`Catagories.md` only reaches the database when someone rewrites `seed.sql` from it by hand, and that edit is under `supabase/`): the job runs a single echo step and finishes green in a few seconds.
 
 Filtering inside the job rather than with `on.push.paths` matters for branch protection. A workflow that never triggers never reports a check, and a required check that never reports blocks the merge. A job that runs and skips its steps still reports `tests: success`.
 

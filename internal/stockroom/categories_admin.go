@@ -100,12 +100,13 @@ func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput)
 		return Category{}, err
 	}
 	if in.ParentID != nil {
-		if _, ok := tree.byID[*in.ParentID]; !ok {
-			return Category{}, fmt.Errorf("%w: category %s", ErrNotFound, *in.ParentID)
+		parent, err := tree.require(*in.ParentID)
+		if err != nil {
+			return Category{}, err
 		}
-		if tree.depth[*in.ParentID] >= MaxCategoryDepth {
+		if tree.depthOf(parent.ID) >= MaxCategoryDepth {
 			return Category{}, fmt.Errorf("%w: %q is already at the deepest level (%d), so it cannot have children",
-				ErrInvalid, tree.byID[*in.ParentID].Name, MaxCategoryDepth)
+				ErrInvalid, parent.Name, MaxCategoryDepth)
 		}
 	}
 
@@ -148,9 +149,9 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 	if err != nil {
 		return Category{}, err
 	}
-	node, ok := tree.byID[id]
-	if !ok {
-		return Category{}, fmt.Errorf("%w: no category %s", ErrNotFound, id)
+	node, err := tree.require(id)
+	if err != nil {
+		return Category{}, err
 	}
 	if err := tree.checkMove(node, in.ParentID); err != nil {
 		return Category{}, err
@@ -247,14 +248,14 @@ func (t categoryTree) checkMove(node Category, parent *string) error {
 	if *parent == node.ID {
 		return fmt.Errorf("%w: a category cannot be its own parent", ErrInvalid)
 	}
-	target, ok := t.byID[*parent]
-	if !ok {
-		return fmt.Errorf("%w: category %s", ErrNotFound, *parent)
+	target, err := t.require(*parent)
+	if err != nil {
+		return err
 	}
 	if t.isDescendant(*parent, node.ID) {
 		return fmt.Errorf("%w: cannot move %q under %q, which is inside it", ErrInvalid, node.Name, target.Name)
 	}
-	if depth := t.depth[*parent] + 1; depth+t.height[node.ID] > MaxCategoryDepth {
+	if depth := t.depthOf(target.ID) + 1; depth+t.height[node.ID] > MaxCategoryDepth {
 		return t.tooDeep(node, depth)
 	}
 	return nil

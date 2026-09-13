@@ -39,7 +39,7 @@ func TestCreateGetListUser(t *testing.T) {
 
 	p, err := db.CreateUser(ctx, admin, UserInput{
 		StudentNumber: " " + sn + " ", FirstName: " Ada ", LastName: "Lovelace",
-		Email: str("  "), PhotoPath: nil, IsAdmin: false,
+		Email: str("  "), IsAdmin: false,
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

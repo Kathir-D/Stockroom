@@ -310,8 +310,6 @@ func (db *DB) requireCategory(ctx context.Context, id *string) error {
 	if err != nil {
 		return err
 	}
-	if !tree.exists(*id) {
-		return fmt.Errorf("%w: category %s", ErrNotFound, *id)
-	}
-	return nil
+	_, err = tree.require(*id)
+	return err
 }

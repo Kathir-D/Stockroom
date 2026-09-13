@@ -36,6 +36,8 @@ type DB struct {
 	// (CLAUDE.md §4). Account operations that must sign a user out (an admin
 	// delete or password reset, §7) reach it directly, so the rule holds for
 	// every caller and not only the HTTP handlers.
+	// Sessions is never nil on a DB that Open built; the package assumes that
+	// and does not guard it, so a DB literal must set it (NewSessionStore).
 	Sessions *SessionStore
 
 	// UploadsDir and BackupDir come from Options. They are plain values, so

@@ -9,13 +9,13 @@ import (
 // UserInput is the admin-panel payload for creating or updating an account.
 // It never carries a password: an account sets its first one at its first
 // scan login (Auth.SetInitialPassword) and an admin replaces it with
-// SetUserPassword.
+// SetUserPassword. Nor a photo: the roster import is the only writer of
+// profiles.photo_path (CLAUDE.md §13).
 type UserInput struct {
 	StudentNumber string  `json:"student_number"`
 	FirstName     string  `json:"first_name"`
 	LastName      string  `json:"last_name"`
 	Email         *string `json:"email"`
-	PhotoPath     *string `json:"photo_path"`
 	IsAdmin       bool    `json:"is_admin"`
 }
 
@@ -33,7 +33,6 @@ func (in *UserInput) normalize() error {
 		return fmt.Errorf("%w: a first or last name is required", ErrInvalid)
 	}
 	in.Email = trimOptional(in.Email)
-	in.PhotoPath = trimOptional(in.PhotoPath)
 	return nil
 }
 
@@ -105,11 +104,11 @@ func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profil
 		return Profile{}, err
 	}
 	row := db.Pool.QueryRow(ctx, `
-		insert into profiles (student_number, first_name, last_name, full_name, email, photo_path, is_admin)
-		values ($1, $2, $3, $4, $5, $6, $7)
+		insert into profiles (student_number, first_name, last_name, full_name, email, is_admin)
+		values ($1, $2, $3, $4, $5, $6)
 		returning `+profileColumns,
 		in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-		in.Email, in.PhotoPath, in.IsAdmin)
+		in.Email, in.IsAdmin)
 	p, err := scanProfile(row)
 	if err != nil {
 		return Profile{}, mapPgError("create user", err)
@@ -133,11 +132,11 @@ func (db *DB) UpdateUser(ctx context.Context, actor Actor, id string, in UserInp
 	row := db.Pool.QueryRow(ctx, `
 		update profiles
 		set student_number = $2, first_name = $3, last_name = $4, full_name = $5,
-		    email = $6, photo_path = $7, is_admin = $8
+		    email = $6, is_admin = $7
 		where id = $1
 		returning `+profileColumns,
 		id, in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-		in.Email, in.PhotoPath, in.IsAdmin)
+		in.Email, in.IsAdmin)
 	p, err := scanProfile(row)
 	if err != nil {
 		return Profile{}, mapPgError("update user", err)

@@ -208,9 +208,28 @@ func (t categoryTree) nodes() []CategoryNode {
 	return out
 }
 
-func (t categoryTree) exists(id string) bool {
-	_, ok := t.byID[id]
-	return ok
+// require is the node with that id, or the not-found error every caller
+// would otherwise word for itself. It is the only way code outside this
+// file reads byID, so the maps stay private to the tree.
+func (t categoryTree) require(id string) (Category, error) {
+	c, ok := t.byID[id]
+	if !ok {
+		return Category{}, fmt.Errorf("%w: category %s", ErrNotFound, id)
+	}
+	return c, nil
+}
+
+// depthOf is how deep a node sits: 1 for a root, 0 for an unknown id.
+func (t categoryTree) depthOf(id string) int {
+	return t.depth[id]
+}
+
+// keyOf is the children-map key for an optional parent id: "" for the root.
+func keyOf(parent *string) string {
+	if parent == nil {
+		return ""
+	}
+	return *parent
 }
 
 // pathOf is the root-to-node path for an asset's category_path. Unknown or
@@ -272,12 +291,8 @@ func (t categoryTree) isDescendant(id, ancestor string) bool {
 // past the largest sort_order already there, so it lands last. Gaps and
 // duplicates in the column are fine; only the relative order matters.
 func (t categoryTree) nextSortOrder(parent *string) int {
-	key := ""
-	if parent != nil {
-		key = *parent
-	}
 	next := 1
-	for _, id := range t.children[key] {
+	for _, id := range t.children[keyOf(parent)] {
 		if order := t.byID[id].SortOrder; order >= next {
 			next = order + 1
 		}

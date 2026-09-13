@@ -25,9 +25,9 @@ const MaxCheckoutDays = 7
 
 // openCustodySQL is the one definition of "this asset is out": an unreturned
 // custody row exists for it. Every check that decides between borrowed and
-// on the shelf -- the scan branch, the cart lock, the delete and status
-// refusals -- uses this predicate rather than the status column, so drift
-// between the two is visible instead of duplicated (CLAUDE.md §13). The
+// on the shelf uses this predicate rather than the status column: the scan
+// branch, the cart lock, the delete and status refusals. Drift between the
+// two is then visible instead of duplicated (CLAUDE.md §13). The
 // argument is the asset id expression, so it can name a joined column or a
 // placeholder.
 func openCustodySQL(assetID string) string {
