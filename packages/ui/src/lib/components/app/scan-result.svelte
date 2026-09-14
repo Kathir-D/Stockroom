@@ -61,8 +61,12 @@
   let noteSaved = $state(false)
   let noteBusy = $state(false)
   let noteError = $state<string | null>(null)
-  /** The Add button of an available-item scan, focused as the surface opens. */
-  let addButton = $state<HTMLElement | null>(null)
+  /** The whole overlay, so Tab can be kept inside it while it is up. */
+  let surfaceEl = $state<HTMLElement | null>(null)
+  /** The branch's main action — Add, Remove. Skipped when it renders disabled. */
+  let primaryButton = $state<HTMLElement | null>(null)
+  /** The branch's always-pressable way out — Close, Cancel, Done. */
+  let dismissButton = $state<HTMLElement | null>(null)
 
   // A fresh surface resets the note field, because a new scan replaces the
   // contents outright rather than layering on the previous one.
@@ -75,12 +79,47 @@
   })
 
   // Focus follows the surface: a scan arrives with focus wherever the last
-  // press left it, and the Add button is the only thing on screen worth
-  // pressing. Re-runs per surface, so a fresh scan re-focuses its own button.
+  // press left it, so every branch has to claim it back — a checked-in result
+  // and an unknown code have no Add button, and Add itself is disabled for an
+  // overdue user. The dismiss control is the fallback because it is the one
+  // thing every branch always renders enabled. Reading both refs makes this
+  // re-run when a fresh scan swaps the surface for a different branch.
   $effect(() => {
     void surface
-    addButton?.focus()
+    const primary = primaryButton
+    const dismiss = dismissButton
+    // `:disabled` rather than a prop read: a disabled button silently refuses
+    // focus, so asking the DOM is what distinguishes "focused Add" from
+    // "focused nothing at all".
+    const target = primary && !primary.matches(":disabled") ? primary : dismiss
+    target?.focus()
   })
+
+  // Tab is trapped inside the overlay. It covers the modal claim `aria-modal`
+  // makes, and it matters here beyond the usual reason: the screen underneath
+  // stays mounted and interactive, so an untrapped Tab lands the next press on
+  // a browse row nobody can see.
+  const FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+  function trapTab(event: KeyboardEvent) {
+    if (!surfaceEl) return
+    const items = Array.from(
+      surfaceEl.querySelectorAll<HTMLElement>(FOCUSABLE)
+    ).filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement)
+    if (items.length === 0) {
+      event.preventDefault()
+      return
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    const active = document.activeElement
+    const outside = !(active instanceof Node) || !surfaceEl.contains(active)
+    if (event.shiftKey ? outside || active === first : outside || active === last) {
+      event.preventDefault()
+      ;(event.shiftKey ? last : first).focus()
+    }
+  }
 
   function close() {
     scanStore.close()
@@ -91,7 +130,9 @@
     if (event.key === "Escape") {
       event.stopPropagation()
       close()
+      return
     }
+    if (event.key === "Tab") trapTab(event)
   }
 
   async function saveNote(custodyEventId: string) {
@@ -124,6 +165,7 @@
     focus to a trigger that no longer describes what is on screen.
   -->
   <div
+    bind:this={surfaceEl}
     data-density="kiosk"
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-(--gutter) bg-ground/95 p-(--gutter)"
     role="alertdialog"
@@ -215,11 +257,14 @@
 
         <div class="mt-(--gutter) flex justify-end gap-2">
           {#if surface.result.checkable && onAdd}
-            <Button size="tap" variant="ghost" onclick={close}>Cancel</Button>
+            <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={close}>
+              Cancel
+            </Button>
             {#if inCart && onRemove}
               <!-- Scanning something already in the cart is how someone changes
                    their mind about it, so the same button takes it back out. -->
               <Button
+                bind:ref={primaryButton}
                 size="tap"
                 variant="secondary"
                 onclick={() => {
@@ -231,10 +276,11 @@
                 Remove from cart
               </Button>
             {:else}
-              <!-- Focused on open: the next thing anyone does here is add it,
-                   and the surface has no focus trap of its own (see above). -->
+              <!-- Focused on open when it is pressable: the next thing anyone
+                   does here is add it. An overdue user gets it disabled, and
+                   focus falls back to Cancel. -->
               <Button
-                bind:ref={addButton}
+                bind:ref={primaryButton}
                 size="tap"
                 disabled={!canAdd}
                 onclick={() => {
@@ -247,7 +293,7 @@
               </Button>
             {/if}
           {:else}
-            <Button size="tap" onclick={close}>Close</Button>
+            <Button bind:ref={dismissButton} size="tap" onclick={close}>Close</Button>
           {/if}
         </div>
       {:else if surface.kind === "unknown"}
@@ -257,14 +303,14 @@
           Nothing in the inventory has that serial. Check the sticker, or ask an admin to add it.
         </p>
         <div class="mt-(--gutter) flex justify-end">
-          <Button size="tap" onclick={close}>Close</Button>
+          <Button bind:ref={dismissButton} size="tap" onclick={close}>Close</Button>
         </div>
       {:else if surface.kind === "error"}
         <h2 class="text-2xl font-semibold text-status-overdue">Scan failed</h2>
         <p class="mt-2 font-mono text-lg text-fg-muted select-all">{surface.code}</p>
         <p class="mt-1 text-fg">{surface.message}</p>
         <div class="mt-(--gutter) flex justify-end">
-          <Button size="tap" onclick={close}>Close</Button>
+          <Button bind:ref={dismissButton} size="tap" onclick={close}>Close</Button>
         </div>
       {:else if surface.kind === "checkout"}
         <p class="flex items-center gap-2 text-status-available">
@@ -289,7 +335,9 @@
         <!-- The sign-out prompt is required by CLAUDE.md §7: the closet PC is
              shared, so the next person must not inherit this session. -->
         <div class="mt-(--gutter) flex justify-end gap-2">
-          <Button size="tap" variant="ghost" onclick={close}>Done</Button>
+          <!-- Done takes focus rather than Sign out: a stray Enter — a scanner
+               burst arriving as this opens — must not end the session. -->
+          <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={close}>Done</Button>
           <Button size="tap" onclick={() => onSignOut?.()}>
             <LogOutIcon aria-hidden="true" />
             Sign out

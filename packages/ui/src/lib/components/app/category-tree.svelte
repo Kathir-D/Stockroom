@@ -10,6 +10,14 @@
    * Sibling order is the server's, which is `sort_order` — `Catagories.md`'s
    * document order, not alphabetical (CLAUDE.md §13, 2026-09-13). Nothing here
    * sorts anything.
+   *
+   * Deliberately **not** an ARIA `tree`. That role is a contract: one tab stop
+   * for the whole widget, a roving tabindex, and Arrow/Home/End navigation that
+   * a screen reader then promises its user. Half of it — the roles and
+   * `aria-expanded` without the keys — is worse than none, because it announces
+   * a keyboard model that isn't there. This is a filter sidebar of ordinary
+   * buttons: a list, a disclosure button per branch, and Tab to move. Every
+   * control is reachable, and nothing claims otherwise.
    */
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right"
   import { cn } from "@stockroom/ui/utils"
@@ -42,16 +50,18 @@
   }
 </script>
 
-<ul class={cn("flex flex-col", depth === 0 && "gap-px")} role={depth === 0 ? "tree" : "group"}>
+<ul class={cn("flex flex-col", depth === 0 && "gap-px")}>
   {#each nodes as node (node.id)}
     {@const hasChildren = node.children.length > 0}
     {@const isOpen = expanded[node.id] ?? openPath.includes(node.id)}
-    <li role="none">
+    <li>
       <div class="flex items-stretch">
         {#if hasChildren}
           <button
             type="button"
             onclick={() => toggle(node.id)}
+            aria-expanded={isOpen}
+            aria-controls={`cat-children-${node.id}`}
             aria-label={`${isOpen ? "Collapse" : "Expand"} ${node.name}`}
             class="flex w-5 shrink-0 items-center justify-center rounded-sm text-fg-faint hover:text-fg"
           >
@@ -69,9 +79,7 @@
 
         <button
           type="button"
-          role="treeitem"
-          aria-selected={selected === node.id}
-          aria-expanded={hasChildren ? isOpen : undefined}
+          aria-pressed={selected === node.id}
           onclick={() => onSelect(node.id)}
           class={cn(
             "flex min-h-(--tap) flex-1 items-center rounded-sm px-2 text-left",
@@ -85,7 +93,7 @@
       </div>
 
       {#if hasChildren && isOpen}
-        <div class="ml-3 border-l border-line pl-1">
+        <div id={`cat-children-${node.id}`} class="ml-3 border-l border-line pl-1">
           <Self
             nodes={node.children}
             {selected}

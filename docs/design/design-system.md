@@ -920,7 +920,7 @@ one unblocked. Nothing below is open anymore — kept as a record of what was as
   immediately; an earlier session asked for a confirm. *Blocked:* 8.6.
 - ~~**Q3. Does the cart mix borrowing and returning?**~~ *Blocked:* 8.4, 8.6.
 - ~~**Q4. What happens when an item is scanned with nobody signed in?**~~ *Blocked:* 8.1.
-- ~~**Q5. How does the cart die?**~~ Sign-out, idle timeout, reload. *Blocked:* 8.4.
+- ~~**Q5. How does the cart die?**~~ Sign-out, idle timeout. *Blocked:* 8.4.
 - ~~**Q6. Where does the overdue block bite?**~~ At sign-in with the cart disabled throughout, or at the
   checkout press. *Blocked:* 8.4, 8.5.
 - ~~**Q7. Who may see who holds an item?**~~ Admins and the custodian only, or any signed-in student?
