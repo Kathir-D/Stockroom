@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13).
 
 ---
 
@@ -65,14 +65,14 @@ The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every
 
 **The Go server is the only database client.** `internal/stockroom` holds every query, transaction, permission check, and account operation. `server/` wraps it in HTTP handlers. Both frontends will call those endpoints with `fetch` through a small `lib/api.ts` wrapper; no Supabase JS client, no PostgREST, no database credentials in TypeScript.
 
-**Current state (until TODO Phase 6).** The backend is built to that shape, but the frontends are not yet wired to it. `desktop-app/frontend/src/lib/db.ts` and `supabase.ts` still call PostgREST directly with the `service_role` key, and the web app has no data layer at all. Phase 6 replaces both with `lib/api.ts` and deletes the supabase-js path.
+**Current state (2026-09-14, Phase 6 landed).** Both frontends now call the Go server and nothing else. The data layer, every component and every screen live once, in the npm workspace package **`packages/ui` (`@stockroom/ui`)**; `desktop-app/frontend/src/App.svelte` and `web-app/src/App.svelte` each render `<StockroomApp>` and are otherwise empty. The supabase-js path is deleted. `docs/design/design-system.md` is the reference for the UI itself.
 
 Why this shape:
 - One place for all logic, written in Go (preferred over TS for this codebase).
 - Both UIs share one code path and one session store, so behaviour can't drift.
 - Postgres still runs inside the Supabase CLI stack because migrations, seed loading, and Studio are already set up and working. Go connects to the **direct Postgres port (54322)** via `DATABASE_URL`.
 
-**Historical note.** An earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (`supabase/migrations/20260826180000_grant_service_role.sql`, `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`). The migration stays; the TS files go in TODO Phase 6. RLS is off and stays off: only the Go server, connecting as `postgres`, reaches the DB.
+**Historical note.** An earlier iteration had the Svelte frontend calling PostgREST directly with the `service_role` key (`supabase/migrations/20260826180000_grant_service_role.sql`, `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`). The migration stays; the TS files were deleted in Phase 6. RLS is off and stays off: only the Go server, connecting as `postgres`, reaches the DB.
 
 ---
 
@@ -85,8 +85,9 @@ Why this shape:
 | Backend / API | Go `net/http` server (`server/`) on localhost, JSON endpoints; logic in `internal/stockroom` |
 | Auth | Scan login (student number, no password) or typed login (student number + bcrypt password); in-memory session map in the Go server; `is_admin` flag gates the admin panel |
 | Files | Profile + asset photos copied into a local `uploads/` dir, served by the Go server at `/files/…` |
-| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Calls the Go server over HTTP |
-| Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Calls the Go server over HTTP; localhost only |
+| UI | `packages/ui` (`@stockroom/ui`), one npm-workspace package: shadcn-svelte v1 over Bits UI, the design tokens, every Stockroom component, every screen, the API client and the scanner. Ships raw `.svelte`; each app's Vite compiles it |
+| Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Renders `<StockroomApp>`; calls the Go server over HTTP |
+| Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Renders the same `<StockroomApp>`; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
 | Backup | Go CLI (`cmd/backup`) → CSV per table → local folder → `rclone copy` to Google Drive; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
 | Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options` |
@@ -112,7 +113,8 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 - `password_hash` is now actually used: bcrypt hash, **null until the user sets one** (see Section 7)
 
 **`assets`**
-- `create unique index on assets(serial_number)`. The serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7iBat-001`, `T5iBat-001`, `SD-014`.
+- `create unique index on assets(serial_number)`. The serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7IBAT-001`, `T5IBAT-001`, `SD-014`.
+- **`serial_number` is `not null` and `asset_tag` is generated** (`20260914120000_asset_tag_autogen.sql`). The two columns had been doing one job: `asset_tag` came from the base schema, written before the barcode flow existed, and `serial_number` then took the identifier role. Entering real inventory would have meant typing two unique codes per unit, one of which nothing ever reads. Now `asset_tag` defaults to `'AST-' || lpad(nextval('assets_asset_tag_seq'), 6, '0')` — **in the column default, not in Go**, so the admin panel, `seed.sql`, a CSV import and a hand-written `INSERT` in Studio all get one without knowing they have to. `AssetInput` carries no `asset_tag`, `UpdateAsset` never touches it, and the detail dialog shows it to admins only. The serial is the one identifier anybody types or reads.
 - `photo_path text`
 - `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
@@ -153,7 +155,7 @@ Two kinds of account, decided by `profiles.is_admin`:
 
 **Sessions**
 - In-memory session map (`SessionStore`, owned by `DB`). The login response returns the token and also sets it as an HttpOnly `stockroom_session` cookie; requests may send either `Authorization: Bearer <token>` or the cookie. Restarting the server signs everyone out; acceptable.
-- Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default **5 minutes**, decided 2026-09-12). Every request refreshes the deadline. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
+- Sessions persist until manual logout or an idle timeout (`SESSION_IDLE_MINUTES`, default **10 minutes**; 5 was decided 2026-09-12 and doubled 2026-09-14). The deadline is measured **from the last interaction, not from sign-in**: every request refreshes it server-side, and `packages/ui/src/lib/keep-alive.ts` turns real user interaction into a request when the connection has been quiet, because most of the browse screen costs no HTTP at all. After a checkout completes, the UI offers a "sign out?" prompt because the closet PC is shared.
 - The frontend cart (a pending list of asset IDs, never sent to the server until checkout) clears only on sign-out or on the idle timeout, **not** on a page reload, so an accidental refresh mid-shopping doesn't lose it.
 - A scan login by an account with no password gets a **limited** session: it may only call `POST /auth/set-password`, `GET /me` and `POST /auth/logout`. Anything else answers `403 {"error":"password not set","needs_password":true}`. Setting the password upgrades the same token to a full session.
 - The actor's profile is reloaded on every request, so an admin-flag change or a deleted account takes effect immediately. An admin password reset or delete drops that user's sessions, and `internal/stockroom` does that itself so the rule does not depend on the HTTP layer.
@@ -193,17 +195,31 @@ stockroom/
 │   └── auth.go, users.go, assets.go, custody.go, admin.go
 ├── cmd/backup/                # (Phase 7, not yet written) CLI: export + rclone push
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
-├── desktop-app/               # Wails app, primary UI; Go side is only a window host. Svelte in frontend/src
+├── package.json               # npm workspaces: packages/*, web-app, desktop-app/frontend
+├── packages/ui/               # @stockroom/ui: ALL frontend code. Both hosts are five lines each
+│   ├── components.json        # shadcn-svelte config; aliases are package-absolute, not $lib
+│   └── src/lib/
+│       ├── app.svelte         # the whole application: routing, the one scan listener, the 401 hook
+│       ├── index.ts           # the package entry: <StockroomApp>, the api, the stores
+│       ├── styles/tokens.css  # the only file allowed to define a colour, radius, shadow or duration
+│       ├── api/               # client.ts (token, 401, errors) + index.ts (one function per endpoint)
+│       ├── scanner.ts         # keystroke buffer, scan-vs-typed, the Ctrl+Shift+D diagnostic
+│       ├── status.ts, due.ts  # the five-status system; the 7-day cap as an instant
+│       ├── stores/            # session, cart, cart-items, catalog, scan, router (hash)
+│       ├── components/ui/     # shadcn-svelte generated
+│       ├── components/app/    # StatusDot, Serial, ModelRow, UnitRow, CartDock, ScanResult, ...
+│       └── screens/           # sign-in, browse, cart-page, history, admin/{assets,categories,users,overdue,backup}
+├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 ├── web-app/                   # Vite + Svelte 5 secondary UI
 ├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
-├── scripts/                   # start-mac.sh, start-windows.ps1 (untested on Windows), test-all.sh, graphify_fix_extraction.py
+├── scripts/                   # ensure-deps.sh (the one install), start-mac.sh, start-windows.ps1 (untested on Windows), test-all.sh, graphify_fix_extraction.py
 ├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system)
 ├── Catagories.md              # source of truth for the initial category tree
 ├── CONTEXT.md                 # domain glossary
 ├── CLAUDE.md, TODO.md, README.md, TESTING.md, CI.md
 ```
 
-`desktop-app/frontend/src/lib/{supabase,db}.ts` still call PostgREST directly; TODO Phase 6 replaces them with `lib/api.ts`.
+Neither app has a `src/lib/` any more: everything they used to hold moved into `packages/ui`, and `{supabase,db}.ts` are deleted.
 
 ### 8.1 Endpoints
 
@@ -219,11 +235,12 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /scan` | any full | `{serial}`; out -> checked in, else -> detail. See Section 1 step 5 |
 | `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
 | `POST /assets/{id}/checkin` | any full | optional `{note}` (the damage note; an empty body is fine) |
+| `POST /custody/{id}/note` | any full | `{note}` onto a **closed** event's `condition_in`. A scan checks an item in before the "Add a note" surface renders, so the note has no check-in call left to ride; an open event is 409 |
 | `GET /users/{id}/history` | own, or admin | |
 | `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
 | `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo |
 | `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`) or a `text/csv` body |
-| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path` and no status; status takes `{status: available\|unavailable}` |
+| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}` |
 | `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
 | `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
 | `POST /admin/backup` | admin | runs the CSV export into `BACKUP_DIR` |
@@ -250,13 +267,21 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
    | `BACKUP_DIR` | local CSV export target, also `rclone`'s source folder | (none) |
    | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that `cmd/backup` copies `BACKUP_DIR` to | (none) |
-   | `SESSION_IDLE_MINUTES` | idle timeout | `5` |
+   | `SESSION_IDLE_MINUTES` | idle timeout, from the last interaction | `10` |
 
-3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates an admin (student number `100001`, typed-login password `stockroom`) and a student (`200001`, no password yet).
+3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates two development accounts, both with the typed-login password `password` and both able to sign in by scanning their number instead:
+
+   | Student number | Name | Role |
+   |---|---|---|
+   | `123456` | Admin Admin | admin |
+   | `234567` | Student Student | student |
+
+   These are dev credentials for a localhost-only stack. The closet PC gets its real accounts from the roster import and the `.env` failsafe admin below, never from `seed.sql`. Note that neither seeded account is password-less any more, so the "set a password at first scan login" flow (§7) has no seeded example — create a user in the admin panel, which starts password-less, and scan their number to exercise it.
 4. `go run ./server`. The API. Check `curl http://127.0.0.1:8080/health`.
-5. `cd desktop-app && wails dev`. Primary UI, native window.
-6. `cd web-app && npm run dev`. Secondary UI on `http://localhost:5173`.
-7. `supabase stop`. Stops the stack, preserves data.
+5. `./scripts/ensure-deps.sh` (or `npm install` at the **repo root**, which is what it runs). It is an npm workspace: installing *inside* `web-app` or `desktop-app/frontend` creates a second copy of Svelte and Vite, and the failure is silent — components render, their state never updates. The script clears such a copy if it finds one and reinstalls from the lockfile; it also runs `go mod download`. Both start scripts and `test-all.sh` call it, so there is one definition of an installed tree.
+6. `cd desktop-app && wails dev`. Primary UI, native window.
+7. `npm run dev:web` (or `cd web-app && npm run dev`). Secondary UI on `http://localhost:5173`.
+8. `supabase stop`. Stops the stack, preserves data.
 
 Same steps on Windows with PowerShell equivalents; the Go server and CLI are plain `go build` binaries on both OSes.
 
@@ -348,7 +373,7 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Student numbers (2026-09-08): stored as digits-only text, no fixed length. Cards encode six digits, but `NormalizeStudentNumber` accepts 1 to 32 so a reissued or imported number still works; the bound is a mis-scan guard, not a format.
 
 **Closed (2026-09-12 grilling session; also resolves `docs/design/design-system.md` §15 Q1 to Q7)**
-- [x] Session idle timeout: **5 minutes** (`SESSION_IDLE_MINUTES` default).
+- [x] Session idle timeout: **5 minutes** (`SESSION_IDLE_MINUTES` default). *Superseded 2026-09-14: 10 minutes, measured from the last interaction.*
 - [x] Machine operation model: **unattended student self-service** is the primary path; admin check-out-on-behalf-of stays the rare override it was already specced as.
 - [x] Cart never mixes borrowing and returning: scanning a checked-out item checks it in immediately and never touches the cart; the cart only ever accumulates items being borrowed.
 - [x] Scanning an item barcode with nobody signed in shows an explicit "sign in first" message rather than trying to interpret the code as a student number.
@@ -380,6 +405,15 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **"Out" has one SQL definition**, `openCustodySQL` in `custody.go`, used by the scan branch, the cart lock, `DeleteAsset` and `SetAssetStatus`.
 - [x] **Directories come from `DB`, not parameters.** `ImportRoster`, `SetAssetPhoto`, `BackupNow` and `ExportAllTablesToCSV` read `db.UploadsDir` / `db.BackupDir`; an empty one is `ErrNotConfigured`, which is a 503 (Section 8.1).
 - [x] **The test suite was cut to one happy path and one gate per module** (30 Go tests, 3 pgTAP files), with the removed cases listed in `TESTING.md` under Planned. CI skips the build on docs-only changes while still reporting the `tests` check green (`CI.md`).
+
+**Closed (2026-09-14, Phase 6: the frontend)**
+- [x] **One package, not two apps.** Every component, screen, store and the API client live in `packages/ui`; both hosts render `<StockroomApp>` and hold nothing else. The design doc's §14 step 10 predicted the alternative ("if it turns into a rewrite, something leaked into `desktop-app/frontend/src/lib/`"), so the leak is prevented structurally rather than by discipline.
+- [x] **The damage note needed a new endpoint.** `POST /custody/{id}/note` → `AnnotateCustodyEvent`. Scanning a checked-out item checks it in immediately (§1.5), so by the time the surface offers "Add a note" the check-in has committed and `CheckInAsset`'s note parameter is gone. The note lands on the same `condition_in` column, so a return's condition has one home however it was entered. An event still open is `ErrConflict`, not a silent no-op.
+- [x] **CORS is an allow-list of loopback origins**, echoed back rather than starred, because the server also sets an HttpOnly cookie and the spec forbids pairing credentials with a wildcard. Not a step toward LAN access (§2).
+- [x] **The sign-in field accepts a value it didn't see typed.** The scanner ignores an Enter with an empty keystroke buffer — correct for a barcode, but it left the form dead for a paste or an autofill, against §10's "manual entry works identically as a fallback". The native submit now picks those up, always as *typed* (a paste has no rhythm to measure), never as a scan.
+- [x] **One toolchain.** `desktop-app/frontend` carried a stale nested `node_modules` (Vite 7, plugin-svelte 6, vitest 3) against the root's 8/7/5 — the exact "two Svelte copies, reactivity silently breaks" hazard design-system.md §2.2 names. Removed, `dedupe: ['svelte']` added to both Vite configs, and `svelte-preprocess` dropped for `vitePreprocess` (it rewrites `.svelte` files inside `node_modules` and breaks bits-ui's rune detection).
+- [x] **`asset_tag` is internal and generated; `serial_number` is the identifier.** The base schema's `asset_tag` predated the barcode flow and had become a second unique code per unit that nobody reads — the admin form demanded it, and real inventory entry would have meant typing two. The generator is a **column default backed by a sequence**, not Go, so every writer gets a tag without knowing it must; `AssetInput` no longer accepts one and `UpdateAsset` never rewrites it. `serial_number` is `not null` in exchange, because an asset with no serial cannot be scanned and scanning is the only way an item comes back (§1.5). Migration `20260914120000`.
+- [x] **One install, called from everywhere.** `scripts/ensure-deps.sh` is the single definition of an up-to-date tree — clear a shadowing nested `node_modules`, `npm install` (or `npm ci`) at the root, `go mod download` — and `start-mac.sh` and `test-all.sh` both call it rather than each spelling it out. `start-windows.ps1` keeps a PowerShell copy. CI installs once at the root for the same reason: a per-app `npm ci --prefix` is the nested-install bug in the place nobody watches. A nested `node_modules` counts as *shadowing* only when it holds a real package; `.vite`, `.vite-temp` and `.bin` are normal and must not trigger a reinstall.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

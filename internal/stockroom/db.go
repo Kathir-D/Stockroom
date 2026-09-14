@@ -10,7 +10,7 @@ import (
 
 // DefaultSessionIdle is the idle timeout a session gets when Options leaves
 // it unset. It matches the SESSION_IDLE_MINUTES default (CLAUDE.md §7).
-const DefaultSessionIdle = 5 * time.Minute
+const DefaultSessionIdle = 10 * time.Minute
 
 // Options is everything a DB needs besides the connection string. main fills
 // it from Config; tests fill in only what the case under test needs.

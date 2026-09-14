@@ -26,8 +26,9 @@ func adminToken(t *testing.T, h http.Handler, d deps) string {
 	return login(t, h, sn, "admin-route-password")
 }
 
-// newAssetTag is a tag no other row is using.
-func newAssetTag() string {
+// newAssetSerial is a serial no other row is using. (Asset tags are generated
+// by the database now and never sent over the wire.)
+func newAssetSerial() string {
 	return fmt.Sprintf("HTTP-ADM-%09d", rand.IntN(1_000_000_000))
 }
 
@@ -42,10 +43,10 @@ func dropAsset(t *testing.T, d deps, id string) {
 func TestAssetAdminRoutes(t *testing.T) {
 	h, d := testDeps(t)
 	token := adminToken(t, h, d)
-	tag := newAssetTag()
+	serial := newAssetSerial()
 
 	code, body := call(t, h, http.MethodPost, "/assets", token, map[string]any{
-		"asset_tag": tag, "name": "Route camera", "serial_number": tag + "-S",
+		"name": "Route camera", "serial_number": serial,
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("POST /assets = %d %v, want 201", code, body)
@@ -65,7 +66,7 @@ func TestAssetAdminRoutes(t *testing.T) {
 	}
 
 	code, body = call(t, h, http.MethodPut, "/assets/"+id, token, map[string]any{
-		"asset_tag": tag, "name": "Renamed over HTTP",
+		"name": "Renamed over HTTP", "serial_number": serial,
 	})
 	if code != http.StatusOK || body["name"] != "Renamed over HTTP" {
 		t.Fatalf("PUT /assets/{id} = %d %v", code, body)
@@ -101,8 +102,8 @@ func TestAdminRoutesRefuseAStudent(t *testing.T) {
 		path   string
 		body   any
 	}{
-		{http.MethodPost, "/assets", map[string]any{"asset_tag": newAssetTag(), "name": "No"}},
-		{http.MethodPut, "/assets/" + id, map[string]any{"asset_tag": newAssetTag(), "name": "No"}},
+		{http.MethodPost, "/assets", map[string]any{"serial_number": newAssetSerial(), "name": "No"}},
+		{http.MethodPut, "/assets/" + id, map[string]any{"serial_number": newAssetSerial(), "name": "No"}},
 		{http.MethodDelete, "/assets/" + id, nil},
 		{http.MethodPost, "/assets/" + id + "/status", map[string]any{"status": "unavailable"}},
 		{http.MethodPost, "/categories", map[string]any{"name": fmt.Sprintf("ZZ HTTP Denied %09d", rand.IntN(1_000_000_000))}},

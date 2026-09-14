@@ -44,7 +44,7 @@ func LoadConfig() (Config, error) {
 
 	// The idle timeout is the one value that must parse; a bad number is a
 	// config error rather than a silent fallback.
-	idle := getenv("SESSION_IDLE_MINUTES", "5")
+	idle := getenv("SESSION_IDLE_MINUTES", "10")
 	n, err := strconv.Atoi(idle)
 	if err != nil || n <= 0 {
 		return Config{}, fmt.Errorf("SESSION_IDLE_MINUTES must be a positive integer, got %q", idle)

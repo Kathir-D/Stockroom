@@ -69,8 +69,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if want := "./uploads"; cfg.UploadsDir != want {
 		t.Errorf("UploadsDir = %q, want %q", cfg.UploadsDir, want)
 	}
-	if cfg.SessionIdleMinutes != 5 {
-		t.Errorf("SessionIdleMinutes = %d, want 5", cfg.SessionIdleMinutes)
+	if cfg.SessionIdleMinutes != 10 {
+		t.Errorf("SessionIdleMinutes = %d, want 10", cfg.SessionIdleMinutes)
 	}
 	// These have no default on purpose: an unconfigured failsafe admin or
 	// backup target must be visibly empty, not silently guessed.

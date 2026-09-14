@@ -25,10 +25,15 @@
 -- of their own. Primes is seeded with no Models under it because Catagories.md
 -- says there are none in inventory yet, so not every branch reaches depth 3.
 --
--- Accounts: one admin and one student. Both sign in by scanning their student
--- number. The admin also has the typed-login password "stockroom"; the
--- student has no password yet and is prompted to set one on first scan login,
--- which is the roster-import case.
+-- Accounts: one admin (123456) and one student (234567). Both sign in by
+-- scanning their student number, and both also have the typed-login password
+-- "password".
+--
+-- Note what this no longer demonstrates: a roster-imported account starts with
+-- password_hash = null and is prompted to set one at its first scan login
+-- (CLAUDE.md §7). Neither seeded account is in that state any more, so to
+-- exercise that flow, create a user in the admin panel -- new accounts are
+-- created password-less -- and scan their number.
 
 -- Types --------------------------------------------------------------------
 -- sort_order is a row's position among its siblings (categories.sort_order):
@@ -121,40 +126,83 @@ insert into categories (name, parent_id, sort_order) values
 
 -- Accounts -----------------------------------------------------------------
 -- Fixed ids so tests and custody rows below can reference them.
+-- Both have the typed-login password `password` (bcrypt, cost 10). Development
+-- credentials for a localhost-only stack; the real closet PC gets its accounts
+-- from the roster import and the .env failsafe admin (CLAUDE.md §7), never from
+-- this file.
+--
+-- Either can also sign in by *scanning* their number, which needs no password
+-- at all -- that is the primary path (CLAUDE.md §1.1).
 insert into profiles (id, student_number, first_name, last_name, full_name, email, is_admin, password_hash) values
-  -- typed-login password: stockroom
-  ('00000000-0000-0000-0000-000000000020', '100001', 'Sam', 'Admin', 'Sam Admin', 'admin@school.edu', true,
-   '$2a$10$RIHOh/Py/Duk4G21NWUEmeaQ3rYgkdFCG8QhtzxHcxFWVi22jxXdW'),
-  -- no password yet: first scan login asks for one
-  ('00000000-0000-0000-0000-000000000021', '200001', 'Jordan', 'Student', 'Jordan Student', null, false, null);
+  ('00000000-0000-0000-0000-000000000020', '123456', 'Admin', 'Admin', 'Admin Admin', 'admin@school.edu', true,
+   '$2a$10$LTQSrWvFzne8LNk6A.E/eOtbT.ea93VFjkBtb5mPSs4Uw53eTeQCS'),
+  ('00000000-0000-0000-0000-000000000021', '234567', 'Student', 'Student', 'Student Student', null, false,
+   '$2a$10$4C1nAO/rblZN1Xp0Bor90.LarUxj11uo1NgxSN9JPcPDuH/R7gSj6');
 
 -- Assets -------------------------------------------------------------------
--- Serial numbers are what the barcode stickers encode. Linear items (batteries,
--- bags) use model-prefixed serials.
-insert into assets (id, asset_tag, name, description, category_id, status, serial_number, created_by) values
-  ('00000000-0000-0000-0000-000000000101', 'CAM-001', 'Canon T7i #1', 'DSLR body, kit lens not included',
-   (select id from categories where name = 'T7i'), 'available', 'T7i-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000102', 'CAM-002', 'Canon T7i #2', 'DSLR body, kit lens not included',
-   (select id from categories where name = 'T7i'), 'checked_out', 'T7i-002', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000103', 'CAM-003', 'Canon 5D Mark IV', 'Full-frame DSLR body',
-   (select id from categories where name = '5D Mark IV'), 'available', '5D4-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000104', 'CAM-004', 'GoPro', 'Action camera with mount',
-   (select id from categories where name = 'GoPro'), 'unavailable', 'GOPRO-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000105', 'LEN-001', 'Canon 70-200mm f/2.8', 'Telephoto zoom',
-   (select id from categories where name = 'Canon 70-200mm f/2.8'), 'available', 'CN70200-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000106', 'LEN-002', 'Tamron 18-400mm', 'All-in-one zoom',
-   (select id from categories where name = 'Tamron 18-400mm'), 'available', 'TM18400-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000107', 'AUD-001', 'DJI Wireless Lavalier', 'Two transmitters, one receiver',
-   (select id from categories where name = 'DJI Wireless Lavalier'), 'available', 'DJIMIC-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000108', 'LIT-001', 'Ring Light w/stand', 'Neewer ring light with stand',
-   (select id from categories where name = 'Ring Light w/stand - Neewer'), 'available', 'RING-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000109', 'TRI-001', 'Large tripod #1', 'Video tripod with fluid head',
-   (select id from categories where name = 'Large tripods'), 'available', 'TRI-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000110', 'BAT-001', 'Canon battery (T7i) #1', 'LP-E17',
-   (select id from categories where name = 'Canon Camera Batteries'), 'available', 'T7iBat-001', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000111', 'BAT-002', 'Canon battery (T7i) #2', 'LP-E17',
-   (select id from categories where name = 'Canon Camera Batteries'), 'checked_out', 'T7iBat-002', '00000000-0000-0000-0000-000000000020'),
-  ('00000000-0000-0000-0000-000000000112', 'BAG-001', 'Backpack #1', 'Padded camera backpack',
+-- One row per physical unit. **The name is the model, with no #1/#2 suffix**:
+-- the browse list groups units by name, so `Canon T7i #1` and `Canon T7i #2`
+-- would be two groups of one rather than one group of two, and the `2 of 3
+-- available` count that makes the list worth reading would never appear.
+--
+-- What tells two units of the same model apart is the **serial number**, which
+-- is what the barcode sticker encodes and the only thing `ScanItem` looks up
+-- (CLAUDE.md §1.5, §6.2). Every unit has one, including batteries and bags,
+-- which have no manufacturer serial and so take a model-prefixed one.
+--
+-- These serials are fabricated stand-ins in a plausible shape, to be replaced
+-- with the real inventory. Some are deliberately long, so the middle-truncation
+-- in <Serial> (`3QZB…8842`, full value on hover) has something to show.
+-- No asset_tag column: it is generated by the database (migration
+-- 20260914120000), and the seed goes through the same default every other
+-- writer does rather than inventing its own scheme.
+insert into assets (id, name, description, category_id, status, serial_number, created_by) values
+  -- Cameras/Bodies. Three T7i bodies, one of them out: the browse row reads
+  -- "2 of 3 available" and expands to three units with different serials.
+  ('00000000-0000-0000-0000-000000000101', 'Canon T7i', 'DSLR body, kit lens not included',
+   (select id from categories where name = 'T7i'), 'available', '042021001234', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000102', 'Canon T7i', 'DSLR body, kit lens not included',
+   (select id from categories where name = 'T7i'), 'checked_out', '042021007781', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000113', 'Canon T7i', 'DSLR body, kit lens not included',
+   (select id from categories where name = 'T7i'), 'available', '042021009902', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000103', 'Canon 5D Mark IV', 'Full-frame DSLR body',
+   (select id from categories where name = '5D Mark IV'), 'available', '182055400917', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000104', 'GoPro', 'Action camera with mount',
+   (select id from categories where name = 'GoPro'), 'unavailable', 'C3341326049871', '00000000-0000-0000-0000-000000000020'),
+
+  -- Lenses
+  ('00000000-0000-0000-0000-000000000105', 'Canon 70-200mm f/2.8', 'Telephoto zoom',
+   (select id from categories where name = 'Canon 70-200mm f/2.8'), 'available', '7820001466', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000106', 'Tamron 18-400mm', 'All-in-one zoom',
+   (select id from categories where name = 'Tamron 18-400mm'), 'available', '018400B028711', '00000000-0000-0000-0000-000000000020'),
+
+  -- Audio. A long serial, to exercise the middle-truncation.
+  ('00000000-0000-0000-0000-000000000107', 'DJI Wireless Lavalier', 'Two transmitters, one receiver',
+   (select id from categories where name = 'DJI Wireless Lavalier'), 'available', '3QZBK2A0021C8842', '00000000-0000-0000-0000-000000000020'),
+
+  -- Lights
+  ('00000000-0000-0000-0000-000000000108', 'Ring Light w/stand', 'Neewer ring light with stand',
+   (select id from categories where name = 'Ring Light w/stand - Neewer'), 'available', 'NW18RL0041', '00000000-0000-0000-0000-000000000020'),
+
+  -- Tripods. Two of the same model, both free.
+  ('00000000-0000-0000-0000-000000000109', 'Large tripod', 'Video tripod with fluid head',
+   (select id from categories where name = 'Large tripods'), 'available', 'TRIPOD-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000114', 'Large tripod', 'Video tripod with fluid head',
+   (select id from categories where name = 'Large tripods'), 'available', 'TRIPOD-002', '00000000-0000-0000-0000-000000000020'),
+
+  -- Batteries. No manufacturer serial, so the sticker carries a model-prefixed
+  -- one; four units, one out, so the row reads "3 of 4 available".
+  ('00000000-0000-0000-0000-000000000110', 'Canon battery (T7i)', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'available', 'T7IBAT-001', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000111', 'Canon battery (T7i)', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'checked_out', 'T7IBAT-002', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000115', 'Canon battery (T7i)', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'available', 'T7IBAT-003', '00000000-0000-0000-0000-000000000020'),
+  ('00000000-0000-0000-0000-000000000116', 'Canon battery (T7i)', 'LP-E17',
+   (select id from categories where name = 'Canon Camera Batteries'), 'available', 'T7IBAT-004', '00000000-0000-0000-0000-000000000020'),
+
+  -- Bags
+  ('00000000-0000-0000-0000-000000000112', 'Backpack', 'Padded camera backpack',
    (select id from categories where name = 'Backpacks'), 'available', 'BAG-001', '00000000-0000-0000-0000-000000000020');
 
 -- Custody ------------------------------------------------------------------

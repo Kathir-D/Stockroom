@@ -58,6 +58,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /scan", d.withSession(d.handleScan, fullOnly))
 	mux.Handle("POST /checkout", d.withSession(d.handleCheckout, fullOnly))
 	mux.Handle("POST /assets/{id}/checkin", d.withSession(d.handleCheckIn, fullOnly))
+	mux.Handle("POST /custody/{id}/note", d.withSession(d.handleAnnotateCustody, fullOnly))
 
 	// Custody reads. The two lists and the asset trail are admin-only,
 	// enforced inside internal/stockroom; a user's own history is not.
@@ -91,7 +92,48 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /users/{id}", d.withSession(d.handleDeleteUser, fullOnly))
 	mux.Handle("POST /users/{id}/password", d.withSession(d.handleSetUserPassword, fullOnly))
 
-	return logRequests(mux)
+	return logRequests(withCORS(mux))
+}
+
+// localOrigins are the browser origins allowed to call this server.
+//
+// The Wails webview and the two Vite dev servers are each a *different origin*
+// from 127.0.0.1:8080, so without this a browser refuses every fetch before it
+// leaves the page — including the preflight on any request carrying an
+// Authorization header. This is not a step toward LAN access: every entry is a
+// loopback address, and CLAUDE.md §2 keeps the app localhost-only.
+var localOrigins = map[string]bool{
+	"http://localhost:5173":  true, // web-app, vite dev
+	"http://127.0.0.1:5173":  true,
+	"http://localhost:34115": true, // wails dev
+	"http://127.0.0.1:34115": true,
+	"wails://wails":          true, // wails production webview
+	"http://wails.localhost": true,
+}
+
+// withCORS answers preflights and echoes an allowed origin back.
+//
+// Credentials are allowed because the server also sets an HttpOnly session
+// cookie, and the spec forbids pairing that with a wildcard origin — so the
+// origin is echoed from the allow-list rather than starred, and anything not on
+// the list simply gets no CORS headers and is refused by the browser.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if localOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			// Without Vary, a cache could hand one origin's response to another.
+			w.Header().Add("Vary", "Origin")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // logRequests prints one line per request. Localhost-only, low traffic, so a

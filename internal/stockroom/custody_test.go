@@ -21,8 +21,8 @@ func insertScannableAsset(t *testing.T, db *DB, creator Profile, status AssetSta
 	t.Helper()
 	serial = fmt.Sprintf("TEST-%09d", rand.IntN(1_000_000_000))
 	err := db.Pool.QueryRow(context.Background(), `
-		insert into assets (asset_tag, name, serial_number, status, created_by)
-		values ('TEST-' || substr(md5(random()::text), 1, 12), 'Test scannable', $1, $2, $3)
+		insert into assets (name, serial_number, status, created_by)
+		values ('Test scannable', $1, $2, $3)
 		returning id`, serial, string(status), creator.ID).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert scannable asset: %v", err)
@@ -155,5 +155,41 @@ func TestCustodyListsAreAdminOnly(t *testing.T) {
 	}
 	if _, err := db.ListOverdueCustody(ctx, actor); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("overdue: want ErrForbidden, got %v", err)
+	}
+}
+
+// The scan flow checks an item in before the surface offering "Add a note" is
+// on screen, so the note has to be able to land on a *closed* event. The gate
+// in the same test: an event still open refuses, because a note on an item in
+// someone's bag is a mis-click rather than a damage report.
+func TestAnnotateCustodyEvent(t *testing.T) {
+	db := requireTestDB(t)
+	holder := insertTestProfile(t, db, false, "pw-note-holder")
+	asset, serial := insertScannableAsset(t, db, holder, StatusAvailable)
+	openCustody(t, db, asset, holder, holder, time.Now().Add(24*time.Hour))
+
+	ctx := context.Background()
+	actor := actorFor(holder)
+
+	// Open: refused.
+	open, err := db.GetAsset(ctx, actor, asset)
+	if err != nil {
+		t.Fatalf("get asset: %v", err)
+	}
+	if _, err := db.AnnotateCustodyEvent(ctx, actor, open.Custody.CustodyEventID, "dent"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("annotate an open event: got %v, want ErrConflict", err)
+	}
+
+	// Closed by the scan, then annotated.
+	res, err := db.ScanItem(ctx, actor, serial)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	record, err := db.AnnotateCustodyEvent(ctx, actor, res.ReturnedFrom.CustodyEventID, "  lens cap missing  ")
+	if err != nil {
+		t.Fatalf("annotate: %v", err)
+	}
+	if record.ConditionIn == nil || *record.ConditionIn != "lens cap missing" {
+		t.Fatalf("condition_in: %v, want the trimmed note", record.ConditionIn)
 	}
 }

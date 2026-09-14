@@ -51,11 +51,21 @@ The desktop app also opens as its own native window automatically. The `localhos
 ### Manual steps
 
 1. `cp .env.example .env` (first time only) and fill in the values. See `CLAUDE.md` §9
-2. `supabase start` (from the repo root). Starts Postgres and Studio (`http://127.0.0.1:54323`)
-3. `go run ./server` (from the repo root). The API; check `curl http://127.0.0.1:8080/health`
-4. `cd desktop-app && wails dev`. Primary UI, opens a native window
-5. `cd web-app && npm run dev`. Secondary UI, served on `http://localhost:5173`
-6. `supabase stop`. Stop the local stack when done (data is preserved)
+2. `./scripts/ensure-deps.sh` — installs the npm workspace and the Go modules (first time, and after any dependency change). Plain `npm install` from the repo root does the npm half
+3. `supabase start` (from the repo root). Starts Postgres and Studio (`http://127.0.0.1:54323`)
+4. `go run ./server` (from the repo root). The API; check `curl http://127.0.0.1:8080/health`
+5. `cd desktop-app && wails dev`. Primary UI, opens a native window
+6. `npm run dev:web`. Secondary UI, served on `http://localhost:5173`
+7. `supabase stop`. Stop the local stack when done (data is preserved)
+
+> **Run every npm command from the repo root.** This is an npm workspace — `packages/ui` (all the
+> frontend code), `web-app` and `desktop-app/frontend` share one `package-lock.json` and one installed
+> tree. `npm install` inside one of the apps gives that app its own copy of Svelte and Vite, and the
+> failure is nasty because it is silent: components render, but their state stops updating.
+>
+> `./scripts/ensure-deps.sh` checks for that and repairs it, and the start scripts and `test-all.sh`
+> all call it, so you rarely have to think about it. (A `node_modules/.vite` under an app is *not* the
+> problem — that is just Vite's dependency cache.)
 
 The Go module lives at the repo root (`go.mod`), so `go build ./...` from the root builds the server, the desktop app's Go side, and `internal/stockroom` together.
 
@@ -69,15 +79,17 @@ Run every suite (Go, pgTAP against the local Postgres, and the frontend's Vitest
 
 The database suites need `supabase start` to have been run first. The suite is deliberately small (one happy path and one permission gate per module); [TESTING.md](TESTING.md) lists what runs and what was cut, and [CI.md](CI.md) covers the GitHub Actions job and branch protection.
 
-## Adding/editing/removing assets and tags
+## Adding/editing/removing assets
 
 Two ways to mutate the database:
 
-1. **Stockroom admin panel** (`http://localhost:34115/` or the desktop app's native window). A plain screen for day-to-day use: add/edit/delete assets, add/rename/delete tags globally, and attach/detach tags on individual assets. It's intentionally bare-bones for now (functional first, styled later).
-2. **Supabase Studio** (`http://127.0.0.1:54323/project/default` → Table Editor). The full Postgres table editor, useful for bulk edits or anything the admin panel doesn't cover yet (categories, locations, bookings, etc.).
+1. **Stockroom admin panel**, in either frontend (the desktop app's native window, `http://localhost:34115/`, or the web app on `http://localhost:5173`). Sign in as an admin: asset CRUD, the category tree, users and the roster import, the overdue list, and Backup Now.
+2. **Supabase Studio** (`http://127.0.0.1:54323/project/default` → Table Editor). The full Postgres table editor, useful for bulk edits or anything the admin panel doesn't cover.
 
-The admin panel's logic lives in two files:
-- `desktop-app/frontend/src/lib/db.ts`. The actual mutation functions (`createAsset`, `updateAsset`, `deleteAsset`, `createTag`, `renameTag`, `deleteTag`, `addTagToAsset`, `removeTagFromAsset`, `listAllAssetTags`, etc.), each a thin wrapper around the Supabase client in `lib/supabase.ts`. Import from here if you're adding new UI or scripting mutations directly.
-- `desktop-app/frontend/src/App.svelte`. The screen that calls those functions from forms/buttons.
+Where the code lives. **Neither frontend holds any logic** — `desktop-app/frontend/src/App.svelte` and `web-app/src/App.svelte` each render `<StockroomApp>` and nothing else:
+
+- `internal/stockroom/`. Every query, transaction and permission check, and the only code that touches Postgres. Asset mutations are in `assets_admin.go`.
+- `server/`. The JSON HTTP API over that package; `CLAUDE.md` §8.1 is the endpoint table.
+- `packages/ui/` (`@stockroom/ui`). Every component, screen and store, plus `src/lib/api/`, the one HTTP client both hosts use. There is no Supabase client in TypeScript and no database credentials in the frontend.
 
 See `CLAUDE.md` for full architecture, database schema, and project roadmap.

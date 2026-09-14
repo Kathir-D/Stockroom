@@ -11,13 +11,20 @@ Run everything with:
 Or one layer at a time:
 
 ```bash
-supabase start          # the Go and pgTAP suites need Postgres up
+supabase start            # the Go and pgTAP suites need Postgres up
+./scripts/ensure-deps.sh  # npm workspace + Go modules; ./scripts/test-all.sh runs this for you
 go vet ./...
 STOCKROOM_REQUIRE_DB=1 go test ./... -count=1  # fail, rather than skip, when Postgres is down
 supabase test db
-npm --prefix desktop-app/frontend test
-npm --prefix web-app test
+npm run check             # svelte-check over packages/ui and both hosts
+npm test                  # both hosts' Vitest suites
+npm run build             # both hosts; catches what type-checking alone doesn't
 ```
+
+Run every npm command from the **repo root**. It is a workspace: `npm install` or
+`npm test --prefix desktop-app/frontend` creates a second copy of Svelte and Vite under that
+directory, and the failure mode is silent — components render but their state never updates
+(`docs/design/design-system.md` §2.2).
 
 Go's database-backed tests skip themselves when Postgres is unreachable, so `go test ./...` still runs on a machine without Docker. `scripts/test-all.sh` and CI set `STOCKROOM_REQUIRE_DB=1` so a skip can never pass for a success.
 
@@ -38,7 +45,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `backup_test.go` | 2 | backup refuses a student; the export writes every table with a header and a second run replaces the day's folder |
 | `failsafe_test.go` | 1 | the failsafe admin is created, then updated in place |
 | `sessions_test.go` | 1 | create and get |
-| `config_test.go` | 1 | defaults, including the 5-minute idle timeout |
+| `config_test.go` | 1 | defaults, including the 10-minute idle timeout |
 | `db_test.go` | 1 | open, ping, close |
 | `password_test.go` | 1 | hash and check |
 | `hashcost_test.go` | 1 | the shipped bcrypt cost stays at bcrypt.DefaultCost (10); the suite runs at the minimum cost and this is what stops that leaking into a build |
@@ -66,7 +73,29 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 ### Frontends
 
-Untouched by the cut. Desktop: 92 Vitest cases over `db.ts`, the browse screen and the admin screen. Web app: 2, confirming the harness works. Both are slated to change wholesale in Phase 6 when `db.ts` goes away.
+Replaced wholesale in Phase 6, as planned: `db.ts` and the supabase-js admin screen it covered are
+deleted, and the 92 Vitest cases over them went with the code. What is left is two smoke tests per host
+(4 total), each proving that `@stockroom/ui` resolves and compiles under *that* app's Vite config and
+reaches the sign-in screen without touching the network.
+
+That is deliberately thin, and the reason is the same one that put every screen in one package: the two
+hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
+tests belong in `packages/ui`.
+
+### `packages/ui` (6 tests)
+
+`keep-alive.test.ts`, covering `attachKeepAlive`: it pings when someone has interacted and the connection
+has gone quiet, and stays silent when nobody has, when requests are already flowing, when nobody is signed
+in, while a ping is in flight, and after teardown.
+
+The second of those is the one that matters and the one that caught a real bug: the first implementation
+pinged on every tick when there had been *no* interaction at all, which would have kept an abandoned
+closet PC signed in forever — the exact failure the idle timeout exists to prevent.
+
+Still unwritten, and worth doing next: `groupByModel` (the browse list's shape), `resolveStatus` (the five
+states and the 24h due-soon threshold), `dueInstant` (the 7-day cap's clamp), `attachScanner` (scan vs
+typed at the threshold), and the cart store's set semantics. All are pure functions or plain stores with
+no component and no server needed.
 
 ## Planned
 
