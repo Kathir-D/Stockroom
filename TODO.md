@@ -86,17 +86,36 @@ Done before the frontend is wired, while every signature is still free to change
 - [x] `openCustodySQL` is the one definition of "out", used by `ScanItem`, the cart lock, `DeleteAsset`, `SetAssetStatus`
 - [x] `ImportRoster`, `SetAssetPhoto`, `BackupNow`, `ExportAllTablesToCSV` read their directories from `DB`
 - [x] `GetCategoryTree(ctx, actor)` requires a full session in the package, like every other read
-- [x] `SESSION_IDLE_MINUTES` defaults to 5 (was 30 in code, 5 in CLAUDE.md)
+- [x] `SESSION_IDLE_MINUTES` defaults to 5 (was 30 in code, 5 in CLAUDE.md). *Raised to 10 on 2026-09-14, and the window now tracks interaction rather than requests alone.*
 - [x] Test suite cut to one happy path + one gate per module; the removed cases are listed in `TESTING.md`. CI skips docs-only changes while keeping the `tests` check green
 
-## Phase 6: Frontend wiring (Week 8, alongside UI build)
-- [ ] `desktop-app/frontend/src/lib/api.ts` and `web-app/src/lib/api.ts`. Identical thin `fetch` wrappers, one function per endpoint, session token handling
-- [ ] `lib/scanner.ts` in both. Keystroke buffer + scan-vs-typed detection (CLAUDE.md §10) behind a named/exported constant defaulted to 50ms, so Week 7 hardware tuning is a one-line change; routes to login or `/scan` depending on active screen. If the sign-in screen receives a scan that doesn't parse as a student number (e.g. an item barcode scanned with nobody signed in), show an explicit "sign in first" message rather than a generic bad-login error (design doc §15 Q4, 2026-09-12)
-- [ ] Cart = frontend-only state (list of asset IDs), persisted (e.g. `sessionStorage`) so a page reload doesn't clear it; only sign-out or an idle-timeout 401 clears it (2026-09-12, design doc §15 Q5). Checkout calls `POST /checkout` once
-- [ ] Sign-out prompt after successful checkout; idle-timeout handling on 401
-- [ ] Overdue users: disable Add-to-cart/checkout in the UI immediately at sign-in, in addition to (not instead of) the server-side `ErrOverdueBlocked` refusal (2026-09-12, design doc §15 Q6)
-- [ ] Delete `desktop-app/frontend/src/lib/supabase.ts` and `db.ts`; remove `@supabase/supabase-js` from `desktop-app/frontend/package.json`; strip `Greet` from `app.go`
-- [ ] Wails `wails.json` / dev config: make sure the frontend can reach `http://127.0.0.1:8080` (CORS on the Go server for the Vite dev origins)
+## Phase 6: Frontend wiring + UI (Week 8)
+Built as **one shared workspace package**, `packages/ui` (`@stockroom/ui`), not twice. `docs/design/design-system.md` §2.2 is the layout and §14 is the order it was built in. Both hosts render `<StockroomApp>` and nothing else: if either app grows a screen, something has leaked out of the package and the two have started to drift (§1.4, §14 step 10).
+- [x] `packages/ui/src/lib/api/`. One `client.ts` (token, 401 hook, error mapping) and one function per endpoint in `index.ts`. No rule lives here: the 7-day cap, the overdue block and every permission check are enforced in `internal/stockroom` regardless of what this sends
+- [x] `lib/scanner.ts`, once, in the package. Keystroke buffer + scan-vs-typed detection behind `SCAN_KEY_THRESHOLD_MS` (50ms) so Week 7 tuning is a one-line change, plus the `Ctrl+Shift+D` timing diagnostic (design doc §9.4). The sign-in screen says "that looks like an item barcode" rather than failing as a bad login (§15 Q4)
+- [x] Cart = frontend-only ids in `sessionStorage`, so a reload doesn't clear it; only sign-out or an idle-timeout 401 does (§15 Q5). Checkout calls `POST /checkout` once
+- [x] Sign-out prompt after checkout (the `<ScanResult>` confirm surface); the 401 hook in `app.svelte` clears session, cart, catalog and scan log together
+- [x] Overdue users: `session.checkoutBlocked` disables Add and the dock the instant they sign in, *in addition to* `ErrOverdueBlocked` server-side (§15 Q6)
+- [x] Screens: sign-in, browse + detail, cart page + checkout, scan result, my history, and the five admin tabs (assets, categories, users + roster import, overdue, backup). Shell is `<TopBar>` + `<Sidebar>` + `<CartDock>` over a hash router
+- [x] Deleted `desktop-app/frontend/src/lib/{supabase,db}.ts`, `AssetBrowser.svelte` and their tests; `@supabase/supabase-js` was already gone; `Greet` stripped from `app.go` and its generated `wailsjs` binding removed
+- [x] CORS on the Go server (`withCORS` in `server/router.go`) for the Wails webview and the two Vite dev origins. Every entry is a loopback address; this is not a step toward LAN access
+- [x] **`POST /custody/{id}/note`** (`AnnotateCustodyEvent`). Not in the original plan: a scanned checked-out item is checked in *before* the surface offering "Add a note" renders (CLAUDE.md §1.5), so `CheckInAsset`'s note parameter is already gone by then and the field specced in design doc §8.6 had nowhere to write. Lands on the same `condition_in` column
+- [x] Toolchain: `desktop-app/frontend` had a stale nested `node_modules` pinning Vite 7 / plugin-svelte 6 / vitest 3 against the root's 8/7/5 — exactly the "two Svelte copies, state silently stops updating" hazard §2.2 warns about. Removed so the workspace hoists one copy, and `dedupe: ['svelte']` added to both Vite configs. Its `svelte.config.js` moved from `svelte-preprocess` to `vitePreprocess`: svelte-preprocess rewrites `.svelte` files inside `node_modules` too and breaks bits-ui's rune detection
+
+### Phase 6 packaging: one install, everywhere (2026-09-14)
+The workspace only helps if every entry point installs it the same way. These landed together:
+- [x] **`scripts/ensure-deps.sh`** is the one definition of "the dependencies are up to date": it clears any *shadowing* nested `node_modules`, runs `npm install` (or `npm ci` with `--ci`, and automatically after clearing a nested copy, because npm hoists and the remaining tree can have gaps), then `go mod download` so a missing Go module fails with a readable message instead of three lines into the server log. `start-mac.sh` and `test-all.sh` both call it; `start-windows.ps1` carries a PowerShell copy of the same steps
+- [x] "Shadowing" means an installed **package**, not any nested `node_modules` at all. Vite writes its dep-optimisation cache to `<app>/node_modules/.vite` and `.vite-temp`, and npm puts workspace script binaries in `.bin`; a first cut of the check treated those as a stale install and reinstalled the world on every single run. Only non-dot entries count
+- [x] **`scripts/test-all.sh` installs first.** It never did, so on a fresh clone every npm step failed with `vite: not found` while the Go suites passed — a half-green run that looked like a frontend bug
+- [x] Both start scripts `exit 1` on a failed install instead of launching into a broken tree. Neither had `set -e`, so the failure was being swallowed
+- [x] **CI installs once at the root.** It was running `npm ci --prefix desktop-app/frontend` and `--prefix web-app`, which is the nested-install bug in the one place nobody watches, and caching two per-app lockfiles that no longer exist
+- [x] **CI's paths filter gained `packages/**`** (plus the root `package.json` / `package-lock.json`). Without it a change to `packages/ui` — now the entire frontend — was classified docs-only and skipped the build
+- [x] **`.gitignore` covers npm, pnpm and yarn**, not just `node_modules/`: `.npm/`, `.pnpm-store/`, `.yarn/cache`, `.pnp.*`, every `*-debug.log`, and `web-app/dist/`. `pnpm-lock.yaml` and `yarn.lock` are ignored on purpose — one lockfile, and a second means two tools disagree about the tree. The `node_modules/` rule is unanchored so a nested one is caught too. `node_modules/` itself had been committed in `cc6a258` (15,404 files) and is untracked again
+
+### Still open in Phase 6
+- [ ] Wire the **command palette** (`/` focuses search today; `Cmd/Ctrl+K` jump-to-asset is unbuilt, design doc §5.1)
+- [ ] Below-900px behaviour is untested. §7.2 calls it a courtesy, not a target, but "make sure it isn't broken" is still unchecked
+- [ ] Run the desktop app under `wails dev` against real hardware. Only the web host has been exercised in a browser so far
 
 ## Phase 7: Backup (Week 8)
 - [x] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`

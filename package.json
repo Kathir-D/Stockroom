@@ -13,6 +13,6 @@
     "dev:web": "npm run dev --workspace=web-app",
     "build": "npm run build --workspace=frontend && npm run build --workspace=web-app",
     "check": "npm run check --workspace=@stockroom/ui && npm run check --workspace=frontend && npm run check --workspace=web-app",
-    "test": "npm run test --workspace=frontend && npm run test --workspace=web-app"
+    "test": "npm run test --workspace=@stockroom/ui && npm run test --workspace=frontend && npm run test --workspace=web-app"
   }
 }

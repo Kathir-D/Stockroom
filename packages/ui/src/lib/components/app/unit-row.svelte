@@ -14,6 +14,7 @@
    */
   import PlusIcon from "@lucide/svelte/icons/plus"
   import CheckIcon from "@lucide/svelte/icons/check"
+  import XIcon from "@lucide/svelte/icons/x"
   import type { Snippet } from "svelte"
   import { Button } from "@stockroom/ui/components/ui/button"
   import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
@@ -32,10 +33,15 @@
     canAdd = true,
     /** Set for the unit a scan just landed on; highlights for --dur-slow. */
     highlighted = false,
-    /** Admin table rows show the model name and a trailing action cluster. */
+    /**
+     * Kept for the admin table's call site. The name is now always shown —
+     * every row carries `[photo] name · serial · status · add` — so this no
+     * longer changes anything, and the next edit here should delete it.
+     */
     showName = false,
     onOpen,
     onAdd,
+    onRemove,
     actions,
     class: className,
   }: {
@@ -47,6 +53,8 @@
     showName?: boolean
     onOpen?: (unit: AssetListItem) => void
     onAdd?: (unit: AssetListItem) => void
+    /** Takes it back out. Same button as Add, which is the point (see below). */
+    onRemove?: (unit: AssetListItem) => void
     actions?: Snippet<[AssetListItem]>
     class?: string
   } = $props()
@@ -58,15 +66,13 @@
 
   /** Why **Add** is disabled, shown in a tooltip rather than left to guesswork. */
   const blockedReason = $derived(
-    inCart
-      ? "Already in your cart"
-      : isUnavailable
-        ? "Marked unavailable — ask an admin"
-        : isOut
-          ? "Someone has this one out"
-          : !canAdd
-            ? "Return your overdue item first"
-            : null
+    isUnavailable
+      ? "Marked unavailable — ask an admin"
+      : isOut
+        ? "Someone has this one out"
+        : !canAdd
+          ? "Return your overdue item first"
+          : null
   )
 </script>
 
@@ -98,28 +104,53 @@
       iconClass="size-3.5"
     />
 
+    <!--
+      Name, then the serial right beside it, both left-aligned: the two together
+      are what identifies the unit, and reading them takes one fixation instead
+      of a jump across the row. The name truncates under pressure, the serial
+      does not -- it is the scan key, and half of it is no use against the
+      sticker in someone's hand (it has its own middle-truncation past 14
+      characters; see <Serial>).
+    -->
     <span class="flex min-w-0 flex-1 items-center gap-3">
+      <span class="truncate text-fg">{unit.name}</span>
       <Serial value={unit.serial_number ?? unit.asset_tag} class="shrink-0" />
-      {#if showName}
-        <span class="truncate text-fg">{unit.name}</span>
-      {/if}
-      {#if unit.condition}
-        <span class="hidden truncate text-fg-faint xl:inline">{unit.condition}</span>
-      {/if}
     </span>
 
-    <StatusDot {status} class="shrink-0" />
+    {#if unit.condition}
+      <span class="hidden w-28 shrink-0 truncate text-fg-faint xl:inline">{unit.condition}</span>
+    {/if}
 
     <!--
-      Who holds it, visible to any signed-in viewer (§8.3, resolved 2026-09-12):
-      a student being able to find who has the lens they want outweighs
-      withholding it. The name and due date only — the student number is the
-      scan-login key and is already null in the payload for a non-admin.
-      Shed below 1280px, per the §7.2 breakpoint table.
+      Status, and who holds it *on hover only*.
+
+      The custodian is still visible to any signed-in viewer (§8.3, resolved
+      2026-09-12) — a student being able to find who has the lens they want
+      outweighs withholding it — but it is no longer a column. It was the widest
+      thing in the row and the least often needed, and burying it behind the
+      hover keeps the row scannable while leaving the answer one gesture away.
+      The name and due date only: the student number is the scan-login key and is
+      already null in the payload for a non-admin.
     -->
-    <span class="hidden w-40 shrink-0 truncate text-right text-fg-muted xl:inline">
+    <span class="w-44 shrink-0 text-left">
       {#if unit.custody}
-        {custodianLine(unit.custody, viewerId)}
+        <!-- Bound out here: the `{#if}` narrowing doesn't reach inside a
+             snippet's closure, so `unit.custody` reads as nullable in there. -->
+        {@const holder = custodianLine(unit.custody, viewerId)}
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <span {...props} title={holder}>
+                  <StatusDot {status} />
+                </span>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content>{holder}</Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      {:else}
+        <StatusDot {status} />
       {/if}
     </span>
   </button>
@@ -127,8 +158,45 @@
   {#if actions}
     <div class="flex shrink-0 items-center gap-1">{@render actions(unit)}</div>
   {:else if onAdd}
-    {#if addable && !inCart}
-      <Button size="sm" variant="secondary" onclick={() => onAdd?.(unit)}>
+    {#if inCart}
+      <!--
+        **The same button takes it back out.** A row that has been added shows
+        `In cart`, and pressing it removes the item — undo lives exactly where
+        the action was, which is the one place someone looks for it. It used to
+        be a disabled `In cart` label, which said what happened and gave no way
+        to change your mind without finding the cart page.
+
+        The icon swaps to an X on hover so the press is predictable before it
+        happens, rather than a check that silently means "remove".
+      -->
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                size="sm"
+                variant="secondary"
+                class="group"
+                aria-label={`Remove ${unit.name} from your cart`}
+                onclick={() => onRemove?.(unit)}
+              >
+                <CheckIcon class="group-hover:hidden" aria-hidden="true" />
+                <XIcon class="hidden group-hover:block" aria-hidden="true" />
+                In cart
+              </Button>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Content>Remove from cart</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    {:else if addable}
+      <Button
+        size="sm"
+        variant="secondary"
+        aria-label={`Add ${unit.name} to your cart`}
+        onclick={() => onAdd?.(unit)}
+      >
         <PlusIcon aria-hidden="true" />
         Add
       </Button>
@@ -139,13 +207,8 @@
             {#snippet child({ props })}
               <span {...props}>
                 <Button size="sm" variant="secondary" disabled aria-label={blockedReason ?? "Cannot add"}>
-                  {#if inCart}
-                    <CheckIcon aria-hidden="true" />
-                    In cart
-                  {:else}
-                    <PlusIcon aria-hidden="true" />
-                    Add
-                  {/if}
+                  <PlusIcon aria-hidden="true" />
+                  Add
                 </Button>
               </span>
             {/snippet}

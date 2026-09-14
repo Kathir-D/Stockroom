@@ -617,3 +617,61 @@ func listCustody(ctx context.Context, q querier, where, orderBy string, args ...
 	}
 	return records, nil
 }
+
+// AnnotateCustodyEvent attaches a damage note to a custody event that has
+// already been closed.
+//
+// It exists because of the one asymmetry in the scan flow: scanning a
+// checked-out item checks it in *immediately*, with no confirm press
+// (CLAUDE.md §1.5), so by the time the surface offering "Add a note" is on
+// screen the check-in has already committed and CheckInAsset's own note
+// parameter is gone. Without this, the note field specced in
+// docs/design/design-system.md §8.6 would have nowhere to write.
+//
+// The note lands on condition_in, the same column CheckInAsset writes, so
+// there is one place a return's condition lives however it was entered. Any
+// signed-in user may write it, matching who may check an item in at all: the
+// person noticing the dent is often not the person who signed the camera out.
+//
+// Only a closed event takes one. An open row is ErrConflict rather than a
+// silent no-op, because a note on an item still in someone's bag is either a
+// mis-click or a misunderstanding of what the field is for.
+func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEventID string, note string) (CustodyRecord, error) {
+	if err := RequireFullSession(actor); err != nil {
+		return CustodyRecord{}, err
+	}
+	trimmed := strings.TrimSpace(note)
+	if trimmed == "" {
+		return CustodyRecord{}, fmt.Errorf("%w: a note is required", ErrInvalid)
+	}
+
+	var closed bool
+	err := db.Pool.QueryRow(ctx,
+		`select checked_in_at is not null from custody_events where id = $1`,
+		custodyEventID).Scan(&closed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
+	}
+	if err != nil {
+		return CustodyRecord{}, mapPgError("annotate custody", err)
+	}
+	if !closed {
+		return CustodyRecord{}, fmt.Errorf(
+			"%w: that item is still checked out; the note goes on at check-in", ErrConflict)
+	}
+
+	if _, err := db.Pool.Exec(ctx,
+		`update custody_events set condition_in = $2 where id = $1`,
+		custodyEventID, trimmed); err != nil {
+		return CustodyRecord{}, mapPgError("annotate custody", err)
+	}
+
+	records, err := listCustody(ctx, db.Pool, `ce.id = $1`, `ce.checked_out_at desc`, custodyEventID)
+	if err != nil {
+		return CustodyRecord{}, err
+	}
+	if len(records) == 0 {
+		return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
+	}
+	return records[0], nil
+}

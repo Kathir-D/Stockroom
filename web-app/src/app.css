@@ -1,20 +1,12 @@
-@import "tailwindcss";
-
 /*
-  Tailwind v4: no tailwind.config.js needed. Design tokens live here as CSS
-  variables under @theme and become utilities (bg-brand, text-brand, etc.).
-  Extend this block as the UI takes shape.
-*/
-@theme {
-  --color-brand: #2563eb;
-  --color-brand-hover: #1d4ed8;
-}
+  Four lines, per docs/design/design-system.md §2.4. Every colour, radius,
+  shadow and duration lives in the package's tokens.css and nowhere else.
 
-@layer base {
-  html {
-    color-scheme: light dark;
-  }
-  body {
-    @apply min-h-screen bg-white text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100;
-  }
-}
+  The @source line is easy to forget and the failure is confusing: components
+  render with no styling at all, because Tailwind never saw their class names
+  during the content scan.
+*/
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@stockroom/ui/styles/tokens.css";
+@source "../../packages/ui/src";

@@ -13,6 +13,7 @@
    * will be refused.
    */
   import PlusIcon from "@lucide/svelte/icons/plus"
+  import XIcon from "@lucide/svelte/icons/x"
   import UndoIcon from "@lucide/svelte/icons/undo-2"
   import PencilIcon from "@lucide/svelte/icons/pencil"
   import CircleSlashIcon from "@lucide/svelte/icons/circle-slash"
@@ -37,6 +38,7 @@
     canAdd = true,
     inCart = false,
     onAdd,
+    onRemove,
     onCheckIn,
     onEdit,
     onMarkUnavailable,
@@ -48,6 +50,8 @@
     canAdd?: boolean
     inCart?: boolean
     onAdd?: (asset: AssetDetail) => void
+    /** Same button as Add, pressed again (§8.3). */
+    onRemove?: (asset: AssetDetail) => void
     onCheckIn?: (asset: AssetDetail, note: string) => Promise<void> | void
     onEdit?: (asset: AssetDetail) => void
     onMarkUnavailable?: (asset: AssetDetail) => void
@@ -121,8 +125,17 @@
           <dt class="text-xs text-fg-muted">Serial</dt>
           <dd><Serial value={asset.serial_number} /></dd>
 
-          <dt class="text-xs text-fg-muted">Asset tag</dt>
-          <dd><Serial value={asset.asset_tag} label="asset tag" /></dd>
+          <!--
+            Internal key, admin-only. The database generates it and nobody types
+            it; the serial above is what a student tracks and what the scanner
+            reads (CLAUDE.md §6.2). Not shortened to a unit number the way a
+            serial is, because it sits right beside one and two identifiers
+            rendering as the same bare digit would say nothing.
+          -->
+          {#if isAdmin}
+            <dt class="text-xs text-fg-muted">Asset tag</dt>
+            <dd><Serial value={asset.asset_tag} label="asset tag" shortenToUnitNumber={false} /></dd>
+          {/if}
 
           {#if asset.condition}
             <dt class="text-xs text-fg-muted">Condition</dt>
@@ -215,6 +228,13 @@
           <Button onclick={handleCheckIn} disabled={busy}>
             <UndoIcon aria-hidden="true" />
             {busy ? "Checking in…" : "Check in"}
+          </Button>
+        {:else if inCart && onRemove}
+          <!-- Already in the cart: the same button takes it back out, so undo
+               lives where the action was rather than only on the cart page. -->
+          <Button variant="secondary" onclick={() => onRemove?.(asset)}>
+            <XIcon aria-hidden="true" />
+            Remove from cart
           </Button>
         {:else if onAdd && asset.status === "available"}
           <Button onclick={() => onAdd?.(asset)} disabled={!canAdd || inCart}>

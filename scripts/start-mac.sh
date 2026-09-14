@@ -103,9 +103,11 @@ echo "== Starting local Supabase stack =="
 supabase start
 
 echo ""
-echo "== Installing frontend dependencies (if needed) =="
-(cd desktop-app/frontend && npm install)
-(cd web-app && npm install)
+# One definition of "install the dependencies", shared with test-all.sh.
+if ! ./scripts/ensure-deps.sh; then
+  echo "  Fix the error above and re-run; nothing below will work without these."
+  exit 1
+fi
 
 if [ ! -f .env ]; then
   echo ""
@@ -125,7 +127,7 @@ echo "Starting desktop app (Wails)..."
 PIDS+=($!)
 
 echo "Starting web app (localhost)..."
-(cd web-app && npm run dev) &
+(npm run dev:web) &
 PIDS+=($!)
 
 echo ""

@@ -95,8 +95,8 @@ func insertTestAsset(t *testing.T, db *DB, creator Profile) string {
 	t.Helper()
 	var id string
 	err := db.Pool.QueryRow(context.Background(), `
-		insert into assets (asset_tag, name, created_by)
-		values ('TEST-' || substr(md5(random()::text), 1, 12), 'Test asset', $1)
+		insert into assets (name, serial_number, created_by)
+		values ('Test asset', 'TEST-' || substr(md5(random()::text), 1, 12), $1)
 		returning id`, creator.ID).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert test asset: %v", err)

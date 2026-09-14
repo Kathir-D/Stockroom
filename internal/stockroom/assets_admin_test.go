@@ -15,9 +15,10 @@ import (
 // delete does to a custody trail, and that a status toggle can never reach
 // into someone's bag.
 
-// adminAndAssetTag is the fixture every case here starts from: an admin actor
-// and a tag no other row is using.
-func adminAndAssetTag(t *testing.T, db *DB) (Actor, string) {
+// adminAndSerial is the fixture every case here starts from: an admin actor and
+// a serial no other row is using. The asset tag is not here because no caller
+// sends one any more -- the database generates it (migration 20260914120000).
+func adminAndSerial(t *testing.T, db *DB) (Actor, string) {
 	t.Helper()
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 	return admin, fmt.Sprintf("ADM-%09d", rand.IntN(1_000_000_000))
@@ -26,8 +27,8 @@ func adminAndAssetTag(t *testing.T, db *DB) (Actor, string) {
 func TestAssetWritesAreAdminOnly(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
-	admin, tag := adminAndAssetTag(t, db)
-	asset, err := db.CreateAsset(ctx, admin, AssetInput{AssetTag: tag, Name: "Admin only"})
+	admin, serial := adminAndSerial(t, db)
+	asset, err := db.CreateAsset(ctx, admin, AssetInput{SerialNumber: serial, Name: "Admin only"})
 	if err != nil {
 		t.Fatalf("CreateAsset: %v", err)
 	}
@@ -44,8 +45,8 @@ func TestAssetWritesAreAdminOnly(t *testing.T) {
 	}{{"non-admin", student}, {"limited admin", limitedAdmin}} {
 		t.Run(actor.name, func(t *testing.T) {
 			calls := map[string]error{}
-			_, calls["CreateAsset"] = db.CreateAsset(ctx, actor.actor, AssetInput{AssetTag: tag + "-x", Name: "No"})
-			_, calls["UpdateAsset"] = db.UpdateAsset(ctx, actor.actor, asset.ID, AssetInput{AssetTag: tag, Name: "No"})
+			_, calls["CreateAsset"] = db.CreateAsset(ctx, actor.actor, AssetInput{SerialNumber: serial + "-x", Name: "No"})
+			_, calls["UpdateAsset"] = db.UpdateAsset(ctx, actor.actor, asset.ID, AssetInput{SerialNumber: serial, Name: "No"})
 			calls["DeleteAsset"] = db.DeleteAsset(ctx, actor.actor, asset.ID)
 			_, calls["SetAssetStatus"] = db.SetAssetStatus(ctx, actor.actor, asset.ID, StatusUnavailable)
 			_, calls["SetAssetPhoto"] = db.SetAssetPhoto(ctx, actor.actor, asset.ID, "x.png", strings.NewReader("png"))
@@ -61,20 +62,18 @@ func TestAssetWritesAreAdminOnly(t *testing.T) {
 func TestCreateAsset(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
-	admin, tag := adminAndAssetTag(t, db)
+	admin, serial := adminAndSerial(t, db)
 
 	// The category is read back as a path, so the row the admin panel gets
 	// back is the row the browse list would show.
-	category := insertTestCategory(t, db, "Create Asset Model "+tag, nil)
+	category := insertTestCategory(t, db, "Create Asset Model "+serial, nil)
 
 	blank, price := "   ", 1299.99
-	serial := "  " + tag + "-SER  "
 	asset, err := db.CreateAsset(ctx, admin, AssetInput{
-		AssetTag:      "  " + tag + "  ",
 		Name:          "  Canon EOS R5  ",
+		SerialNumber:  "  " + serial + "  ",
 		Description:   &blank,
 		CategoryID:    &category.ID,
-		SerialNumber:  &serial,
 		PurchaseDate:  strptr("2026-09-13"),
 		PurchasePrice: &price,
 	})
@@ -82,11 +81,16 @@ func TestCreateAsset(t *testing.T) {
 		t.Fatalf("CreateAsset: %v", err)
 	}
 
-	if asset.AssetTag != tag || asset.Name != "Canon EOS R5" {
-		t.Errorf("fields were not trimmed: tag %q name %q", asset.AssetTag, asset.Name)
+	if asset.Name != "Canon EOS R5" {
+		t.Errorf("name was not trimmed: %q", asset.Name)
 	}
-	if asset.SerialNumber == nil || *asset.SerialNumber != tag+"-SER" {
-		t.Errorf("serial = %v, want it trimmed", asset.SerialNumber)
+	if asset.SerialNumber == nil || *asset.SerialNumber != serial {
+		t.Errorf("serial = %v, want it trimmed to %q", asset.SerialNumber, serial)
+	}
+	// The tag is the database's to write, not the caller's: nothing sent one,
+	// and every row still has to come back with one.
+	if !strings.HasPrefix(asset.AssetTag, "AST-") {
+		t.Errorf("asset_tag = %q, want a generated AST- tag", asset.AssetTag)
 	}
 	// A blank optional has to land as null, not "": the serial is unique, and
 	// a description of "" is a lie the detail popup would render.
@@ -111,8 +115,8 @@ func TestCreateAsset(t *testing.T) {
 		t.Errorf("purchase_date = %v, want 2026-09-13", asset.PurchaseDate)
 	}
 	if _, err := db.CreateAsset(ctx, admin, AssetInput{
-		AssetTag:     tag + "-2",
 		Name:         "Round trip",
+		SerialNumber: serial + "-2",
 		PurchaseDate: strptr(asset.PurchaseDate.Format(time.RFC3339)),
 	}); err != nil {
 		t.Errorf("CreateAsset with the timestamp the API returned: %v", err)

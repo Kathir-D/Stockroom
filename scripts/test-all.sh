@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs every check CI runs: go vet, Go tests, pgTAP against the
-# local Postgres, and type-check + Vitest for both frontends.
+# Runs every check CI runs: installs dependencies, then go vet, Go tests, pgTAP
+# against the local Postgres, and type-check + Vitest + build across the npm
+# workspace (packages/ui, web-app, desktop-app/frontend).
 #
 #   ./scripts/test-all.sh
 #
@@ -12,6 +13,15 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 failed=()
+
+# CI runs `npm ci` before any of this; a fresh clone here would otherwise fail
+# every npm step with "vite: not found". Same script the start scripts use, so
+# there is one definition of an installed tree.
+if ! ./scripts/ensure-deps.sh; then
+  echo
+  echo "FAILED: dependencies could not be installed; nothing else was run."
+  exit 1
+fi
 
 db_up() {
   local host=127.0.0.1 port=54322
@@ -50,11 +60,12 @@ else
   failed+=("pgtap (skipped: database down)")
 fi
 
-run "desktop-app: svelte-check" npm --prefix desktop-app/frontend run check
-run "desktop-app: vitest" npm --prefix desktop-app/frontend test
-run "web-app: svelte-check" npm --prefix web-app run check
-run "web-app: vitest" npm --prefix web-app test
-run "web-app: build" npm --prefix web-app run build
+# From the repo root, through the workspace. A --prefix install/run gives that
+# app its own copy of Svelte and Vite, which breaks reactivity silently
+# (docs/design/design-system.md 2.2).
+run "svelte-check (packages/ui + both hosts)" npm run check
+run "vitest (packages/ui + both hosts)" npm test
+run "build (both hosts)" npm run build
 
 echo
 if [ ${#failed[@]} -eq 0 ]; then

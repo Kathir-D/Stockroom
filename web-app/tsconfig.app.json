@@ -1,6 +1,14 @@
 {
   "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
+    // No baseUrl: TS 5 resolves these relative to this file, and baseUrl is
+    // deprecated for 7.0.
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"],
+      "@stockroom/ui": ["../packages/ui/src/lib/index.ts"],
+      "@stockroom/ui/*": ["../packages/ui/src/lib/*"]
+    },
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "es2023",
     "module": "esnext",

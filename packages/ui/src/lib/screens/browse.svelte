@@ -19,15 +19,19 @@
   import ModelRow from "@stockroom/ui/components/app/model-row.svelte"
   import AssetDetailDialog from "@stockroom/ui/components/app/asset-detail-dialog.svelte"
   import type { AssetDetail, AssetListItem } from "../api/types"
+  import { addShouldOpenDetail } from "../add-flow"
   import { cart } from "../stores/cart.svelte"
   import { catalog } from "../stores/catalog.svelte"
   import { session } from "../stores/session.svelte"
 
   let {
     onAdd,
+    onRemove,
     onCheckIn,
   }: {
     onAdd: (unit: AssetListItem) => void
+    /** Same button as Add, pressed again. See <UnitRow>. */
+    onRemove: (unit: AssetListItem) => void
     onCheckIn: (asset: AssetDetail, note: string) => Promise<void>
   } = $props()
 
@@ -51,6 +55,24 @@
   function openDetail(unit: AssetListItem) {
     detail = unit
     detailOpen = true
+  }
+
+  /**
+   * **Add** on a unit row, which is not always an add.
+   *
+   * `CLAUDE.md` §1 step 3 routes the cart through the detail popup: the press
+   * opens the dialog, and the dialog's own **Add to cart** is what commits. The
+   * dialog is the only place the photo, the condition note and the custody
+   * history are visible, and on a shelf of three identical bodies it is where
+   * someone confirms they are taking the one they meant.
+   *
+   * Units with nothing extra to show — batteries and the like — skip it and go
+   * straight in, because a popup that repeats the row is a press for nothing.
+   * `lib/add-flow.ts` owns both the rule and the flag that turns it off.
+   */
+  function requestAdd(unit: AssetListItem) {
+    if (addShouldOpenDetail(unit)) openDetail(unit)
+    else onAdd(unit)
   }
 
   async function handleCheckIn(asset: AssetDetail, note: string) {
@@ -109,7 +131,8 @@
           forceOpen={searching || highlightedGroupKey === group.key}
           highlightedUnitId={catalog.highlightedUnitId}
           onOpenUnit={openDetail}
-          onAddUnit={onAdd}
+          onAddUnit={requestAdd}
+          onRemoveUnit={onRemove}
         />
       {/each}
     </div>
@@ -125,6 +148,10 @@
   inCart={detail ? cart.has(detail.id) : false}
   onAdd={(asset) => {
     onAdd(asset)
+    detailOpen = false
+  }}
+  onRemove={(asset) => {
+    onRemove(asset)
     detailOpen = false
   }}
   onCheckIn={handleCheckIn}

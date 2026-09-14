@@ -8,12 +8,16 @@
    * survives inside the expansion, so nothing the flat list could tell you is
    * lost — and the same `<UnitRow>` serves the admin table, which stays flat.
    *
-   * Two rules that make the levels behave predictably:
-   *  - **Add on the model row takes any free unit; Add on a unit row takes that
-   *    exact one.** Both put a specific `asset_id` in the cart.
-   *  - **The whole row is the accordion trigger, so Add stops propagation.** It is
-   *    a sibling of the trigger rather than a child, because a button inside a
-   *    button is invalid markup and Bits UI's trigger is a real button.
+   * **The model row has no Add.** It is a summary and a way in: it says how many
+   * of this model are free, and opens to let you pick one. Adding is a unit-row
+   * action, always, because what goes in the cart is a specific serial and a
+   * model-level press had to guess which one — reversing the 2026-09-10 rule
+   * that let it take "any free unit" (design-system.md §8.2, §16). The guess was
+   * invisible in both directions: you pressed Add on `Canon T7i`, one of three
+   * bodies landed in your cart, and the row never said which.
+   *
+   * With no button beside it, the whole row is the trigger and nothing has to
+   * stop propagation.
    *
    * The expansion does not slide open. Units appear at once; only the caret
    * rotates. A twenty-row expansion animating its height is exactly the layout
@@ -21,10 +25,7 @@
    * worth decorating.
    */
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right"
-  import PlusIcon from "@lucide/svelte/icons/plus"
-  import { Button } from "@stockroom/ui/components/ui/button"
   import * as Collapsible from "@stockroom/ui/components/ui/collapsible"
-  import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
   import { cn } from "@stockroom/ui/utils"
   import type { AssetListItem } from "../../api/types"
   import type { ModelGroup } from "../../stores/catalog.svelte"
@@ -54,6 +55,7 @@
     highlightedUnitId = null,
     onOpenUnit,
     onAddUnit,
+    onRemoveUnit,
   }: {
     group: ModelGroup
     viewerId?: string | null
@@ -63,6 +65,7 @@
     highlightedUnitId?: string | null
     onOpenUnit?: (unit: AssetListItem) => void
     onAddUnit?: (unit: AssetListItem) => void
+    onRemoveUnit?: (unit: AssetListItem) => void
   } = $props()
 
   let showAll = $state(false)
@@ -84,19 +87,6 @@
   )
   const hiddenCount = $derived(group.units.length - visibleUnits.length)
 
-  /** The free unit a model-level Add would take, or null when there isn't one. */
-  const freeUnit = $derived(
-    group.units.find((u) => u.status === "available" && !cartIds.includes(u.id)) ?? null
-  )
-  const modelAddable = $derived(canAdd && freeUnit !== null && onAddUnit !== undefined)
-  const blockedReason = $derived(
-    !canAdd
-      ? "Return your overdue item first"
-      : group.availableCount === 0
-        ? "Every unit is out or unavailable"
-        : "Every available unit is already in your cart"
-  )
-
   /** The path minus the model itself, which is already the row's headline. */
   const parentPath = $derived(group.categoryPath.slice(0, -1).map((c) => c.name).join(" › "))
 </script>
@@ -104,14 +94,14 @@
 <Collapsible.Root {open} onOpenChange={(next) => (userToggled = next)}>
   <div
     class={cn(
-      "flex items-center gap-2 border-b border-line bg-surface pr-(--gutter)",
+      "flex items-center border-b border-line bg-surface",
       open && "bg-raised"
     )}
   >
     <Collapsible.Trigger
       aria-label={`${group.name}, ${status.label}`}
       class={cn(
-        "flex min-h-(--row-h) flex-1 items-center gap-3 px-(--gutter) py-2 text-left outline-none",
+        "flex min-h-(--row-h) w-full items-center gap-3 px-(--gutter) py-2 text-left outline-none",
         "hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-(--ring)"
       )}
     >
@@ -144,39 +134,6 @@
         {/if}
       </span>
     </Collapsible.Trigger>
-
-    {#if onAddUnit}
-      {#if modelAddable}
-        <Button
-          size="sm"
-          onclick={(event) => {
-            // The whole row is the trigger; without this the press would also
-            // toggle the accordion.
-            event.stopPropagation()
-            if (freeUnit) onAddUnit?.(freeUnit)
-          }}
-        >
-          <PlusIcon aria-hidden="true" />
-          Add
-        </Button>
-      {:else}
-        <Tooltip.Provider>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              {#snippet child({ props })}
-                <span {...props}>
-                  <Button size="sm" disabled aria-label={blockedReason}>
-                    <PlusIcon aria-hidden="true" />
-                    Add
-                  </Button>
-                </span>
-              {/snippet}
-            </Tooltip.Trigger>
-            <Tooltip.Content>{blockedReason}</Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-      {/if}
-    {/if}
   </div>
 
   <Collapsible.Content>
@@ -190,6 +147,7 @@
           highlighted={highlightedUnitId === unit.id}
           onOpen={onOpenUnit}
           onAdd={onAddUnit}
+          onRemove={onRemoveUnit}
         />
       {/each}
       {#if hiddenCount > 0}

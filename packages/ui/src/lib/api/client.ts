@@ -74,6 +74,20 @@ export function apiBaseUrl() {
 }
 
 /**
+ * When a request last completed, in `performance.now()` terms.
+ *
+ * The server's idle timeout is measured from the last request it saw, so this
+ * is the client's view of the same clock. `lib/keep-alive.ts` compares it
+ * against the last user interaction to decide whether someone is being timed
+ * out while actively using the app.
+ */
+let lastRequestMs = typeof performance === "undefined" ? 0 : performance.now()
+
+export function lastRequestAt(): number {
+  return lastRequestMs
+}
+
+/**
  * The session token, held in memory and mirrored into sessionStorage.
  *
  * sessionStorage rather than localStorage: the closet PC is shared, so a
@@ -165,6 +179,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       cause: String(cause),
     })
   }
+
+  // Stamped on any answer, including an error: the server refreshed the
+  // session's deadline the moment it resolved the token, whatever it then
+  // decided about the request.
+  if (typeof performance !== "undefined") lastRequestMs = performance.now()
 
   const text = await response.text()
   let parsed: unknown = null

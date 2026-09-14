@@ -51,11 +51,21 @@ The desktop app also opens as its own native window automatically. The `localhos
 ### Manual steps
 
 1. `cp .env.example .env` (first time only) and fill in the values. See `CLAUDE.md` §9
-2. `supabase start` (from the repo root). Starts Postgres and Studio (`http://127.0.0.1:54323`)
-3. `go run ./server` (from the repo root). The API; check `curl http://127.0.0.1:8080/health`
-4. `cd desktop-app && wails dev`. Primary UI, opens a native window
-5. `cd web-app && npm run dev`. Secondary UI, served on `http://localhost:5173`
-6. `supabase stop`. Stop the local stack when done (data is preserved)
+2. `./scripts/ensure-deps.sh` — installs the npm workspace and the Go modules (first time, and after any dependency change). Plain `npm install` from the repo root does the npm half
+3. `supabase start` (from the repo root). Starts Postgres and Studio (`http://127.0.0.1:54323`)
+4. `go run ./server` (from the repo root). The API; check `curl http://127.0.0.1:8080/health`
+5. `cd desktop-app && wails dev`. Primary UI, opens a native window
+6. `npm run dev:web`. Secondary UI, served on `http://localhost:5173`
+7. `supabase stop`. Stop the local stack when done (data is preserved)
+
+> **Run every npm command from the repo root.** This is an npm workspace — `packages/ui` (all the
+> frontend code), `web-app` and `desktop-app/frontend` share one `package-lock.json` and one installed
+> tree. `npm install` inside one of the apps gives that app its own copy of Svelte and Vite, and the
+> failure is nasty because it is silent: components render, but their state stops updating.
+>
+> `./scripts/ensure-deps.sh` checks for that and repairs it, and the start scripts and `test-all.sh`
+> all call it, so you rarely have to think about it. (A `node_modules/.vite` under an app is *not* the
+> problem — that is just Vite's dependency cache.)
 
 The Go module lives at the repo root (`go.mod`), so `go build ./...` from the root builds the server, the desktop app's Go side, and `internal/stockroom` together.
 

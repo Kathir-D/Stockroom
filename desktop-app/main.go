@@ -18,12 +18,15 @@ func main() {
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:  "Stockroom",
-		Width:  1024,
-		Height: 768,
+		Width:  1280,
+		Height: 800,
+		// design-system.md §12: below this the shell stops being the shell.
+		MinWidth:  1024,
+		MinHeight: 700,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		BackgroundColour: &options.RGBA{R: 0x17, G: 0x19, B: 0x1A, A: 1}, // --ground
 		OnStartup:        app.startup,
 		Bind: []interface{}{
 			app,

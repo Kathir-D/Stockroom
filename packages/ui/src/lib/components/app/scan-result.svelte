@@ -18,6 +18,7 @@
    */
   import CheckIcon from "@lucide/svelte/icons/check"
   import PlusIcon from "@lucide/svelte/icons/plus"
+  import XIcon from "@lucide/svelte/icons/x"
   import LogOutIcon from "@lucide/svelte/icons/log-out"
   import ScanBarcodeIcon from "@lucide/svelte/icons/scan-barcode"
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down-to-line"
@@ -39,12 +40,15 @@
     canAdd = true,
     inCart = false,
     onAdd,
+    onRemove,
     onSaveNote,
     onSignOut,
   }: {
     canAdd?: boolean
     inCart?: boolean
     onAdd?: (asset: AssetDetail) => void
+    /** Same button as Add, pressed again. */
+    onRemove?: (asset: AssetDetail) => void
     /** Persists the damage note against the custody event the scan just closed. */
     onSaveNote?: (custodyEventId: string, note: string) => Promise<void>
     onSignOut?: () => void
@@ -190,18 +194,34 @@
         <div class="mt-(--gutter) flex justify-end gap-2">
           {#if surface.result.checkable && onAdd}
             <Button size="tap" variant="ghost" onclick={close}>Cancel</Button>
-            <!-- Autofocused: the next thing anyone does here is add it. -->
-            <Button
-              size="tap"
-              disabled={!canAdd || inCart}
-              onclick={() => {
-                onAdd?.(asset)
-                close()
-              }}
-            >
-              <PlusIcon aria-hidden="true" />
-              {inCart ? "Already in cart" : canAdd ? "Add to cart" : "Return your overdue item first"}
-            </Button>
+            {#if inCart && onRemove}
+              <!-- Scanning something already in the cart is how someone changes
+                   their mind about it, so the same button takes it back out. -->
+              <Button
+                size="tap"
+                variant="secondary"
+                onclick={() => {
+                  onRemove?.(asset)
+                  close()
+                }}
+              >
+                <XIcon aria-hidden="true" />
+                Remove from cart
+              </Button>
+            {:else}
+              <!-- Autofocused: the next thing anyone does here is add it. -->
+              <Button
+                size="tap"
+                disabled={!canAdd}
+                onclick={() => {
+                  onAdd?.(asset)
+                  close()
+                }}
+              >
+                <PlusIcon aria-hidden="true" />
+                {canAdd ? "Add to cart" : "Return your overdue item first"}
+              </Button>
+            {/if}
           {:else}
             <Button size="tap" onclick={close}>Close</Button>
           {/if}

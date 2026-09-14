@@ -8,12 +8,14 @@ select no_plan();
 insert into profiles (id, email, full_name) values
   ('44444444-0000-0000-0000-000000000001', 'custodian@test.local', 'Custodian'),
   ('44444444-0000-0000-0000-000000000002', 'desk@test.local', 'Front Desk');
-insert into assets (id, asset_tag, name, status) values
-  ('44444444-0000-0000-0000-000000000010', 'VW-OPEN',     'Open item',        'checked_out'),
-  ('44444444-0000-0000-0000-000000000011', 'VW-RETURNED', 'Returned item',    'available'),
-  ('44444444-0000-0000-0000-000000000012', 'VW-LATE',     'Late item',        'checked_out'),
-  ('44444444-0000-0000-0000-000000000013', 'VW-NODUE',    'No due date item', 'checked_out'),
-  ('44444444-0000-0000-0000-000000000014', 'VW-LATEBACK', 'Late but back',    'available');
+-- asset_tag is set by hand here, not left to the sequence, because the
+-- assertions below name these tags. Everywhere else it is generated.
+insert into assets (id, asset_tag, name, serial_number, status) values
+  ('44444444-0000-0000-0000-000000000010', 'VW-OPEN',     'Open item',        'VW-OPEN-S',     'checked_out'),
+  ('44444444-0000-0000-0000-000000000011', 'VW-RETURNED', 'Returned item',    'VW-RETURNED-S', 'available'),
+  ('44444444-0000-0000-0000-000000000012', 'VW-LATE',     'Late item',        'VW-LATE-S',     'checked_out'),
+  ('44444444-0000-0000-0000-000000000013', 'VW-NODUE',    'No due date item', 'VW-NODUE-S',    'checked_out'),
+  ('44444444-0000-0000-0000-000000000014', 'VW-LATEBACK', 'Late but back',    'VW-LATEBACK-S', 'available');
 
 insert into custody_events (id, asset_id, custodian_id, checked_out_by, due_at, checked_in_at, checked_in_by) values
   -- open, due in the future

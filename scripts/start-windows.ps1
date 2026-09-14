@@ -102,9 +102,63 @@ try {
     supabase start
 
     Write-Host ""
-    Write-Host "== Installing frontend dependencies (if needed) =="
-    Push-Location "desktop-app/frontend"; npm install; Pop-Location
-    Push-Location "web-app"; npm install; Pop-Location
+    Write-Host "== Dependencies =="
+    # A PowerShell copy of scripts/ensure-deps.sh. The two must stay in step;
+    # keep the reasoning in the shell script and the steps identical here.
+    #
+    # A nested node_modules under a workspace shadows the hoisted one, and the
+    # failure is silent: that app gets its own Svelte and Vite, components
+    # render, and their state stops updating (design-system.md 2.2). This is how
+    # desktop-app/frontend ended up on Vite 7 while the root was on Vite 8.
+    #
+    # "Shadowing" means an installed *package*, so only non-dot entries count.
+    # Vite writes its dep-optimisation cache to <app>/node_modules/.vite and
+    # .vite-temp, and npm puts workspace script binaries in .bin; all three are
+    # normal, and wiping them every run would throw away the cache and
+    # reinstall the world each time.
+    $nestedFound = $false
+    foreach ($nested in @(
+        "desktop-app/frontend/node_modules",
+        "web-app/node_modules",
+        "packages/ui/node_modules"
+    )) {
+        $nestedPath = Join-Path $RepoRoot $nested
+        if (Test-Path $nestedPath) {
+            $packages = Get-ChildItem -Force $nestedPath | Where-Object { $_.Name -notlike ".*" }
+            if ($packages) {
+                Write-Host "  Removing a nested install that would shadow the workspace: $nested"
+                Remove-Item -Recurse -Force $nestedPath
+                $nestedFound = $true
+            }
+        }
+    }
+
+    # npm hoists during install, so a tree built alongside a nested copy can be
+    # missing packages that copy was satisfying. Start clean when we find one.
+    if ($nestedFound -and (Test-Path (Join-Path $RepoRoot "package-lock.json"))) {
+        Write-Host "  npm ci (exact lockfile), because removing a nested copy can leave gaps..."
+        npm ci
+    } else {
+        # A no-op in a few hundred ms when the tree already matches, and an
+        # update when package.json moved, so it is safe to run on every start.
+        Write-Host "  npm install across packages/ui, web-app, desktop-app/frontend..."
+        npm install
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [ERROR] npm install failed. Nothing below will work; fix it and re-run."
+        exit 1
+    }
+
+    # Go modules are fetched on demand by `go run`, but doing it here means a
+    # missing module fails now, with a readable message, rather than three lines
+    # into the server's startup log.
+    Write-Host "  Go modules..."
+    go mod download
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [ERROR] go mod download failed. Check your network or GOPROXY."
+        exit 1
+    }
+    Write-Host "  [OK] Dependencies are up to date"
 
     if (-not (Test-Path ".env")) {
         Write-Host ""
@@ -124,7 +178,7 @@ try {
     $script:ChildProcesses += $desktopProc
 
     Write-Host "Starting web app (localhost)..."
-    $webProc = Start-Process -FilePath "npm" -ArgumentList "run","dev" -WorkingDirectory (Join-Path $RepoRoot "web-app") -PassThru -NoNewWindow
+    $webProc = Start-Process -FilePath "npm" -ArgumentList "run","dev:web" -WorkingDirectory $RepoRoot -PassThru -NoNewWindow
     $script:ChildProcesses += $webProc
 
     Write-Host ""

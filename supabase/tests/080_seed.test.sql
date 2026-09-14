@@ -60,16 +60,32 @@ select is(
   'every seeded asset points at a Model node');
 
 -- Assets --------------------------------------------------------------------
-select is((select count(*) from seeded_assets), 12::bigint,
-  'all twelve seeded assets are present');
+select is((select count(*) from seeded_assets), 16::bigint,
+  'all sixteen seeded assets are present');
 
 select ok(
   (select bool_and(serial_number is not null and category_id is not null) from seeded_assets),
   'every seeded asset has a serial number and a category');
 
 select ok(
-  (select count(*) > 0 from seeded_assets where serial_number = 'T7iBat-001'),
-  'a model-prefixed linear serial (T7iBat-001) is seeded');
+  (select count(*) > 0 from seeded_assets where serial_number = 'T7IBAT-001'),
+  'a model-prefixed linear serial (T7IBAT-001) is seeded');
+
+-- The browse list groups units by name, so a name carrying its own unit number
+-- would split one model into N groups of one and the "2 of 3 available" count
+-- would never appear. Guard the shape, not one example of it.
+select is(
+  (select count(*) from seeded_assets where name ~ '#[0-9]+$'), 0::bigint,
+  'no seeded asset name ends in a unit number: the serial tells units apart');
+
+select ok(
+  (select count(*) >= 3 from seeded_assets where name = 'Canon T7i'),
+  'at least three units share the Canon T7i name, so grouping has something to group');
+
+select is(
+  (select count(distinct serial_number) from seeded_assets),
+  (select count(*) from seeded_assets),
+  'every seeded serial number is distinct: it is the scan key');
 
 -- The seed covers each v1 status so the UI has something to render for all
 -- three, and nothing else.
@@ -79,19 +95,19 @@ select set_eq(
   'the seed uses exactly the three v1 statuses');
 
 -- Accounts ------------------------------------------------------------------
-select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000020'), '100001',
+select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000020'), '123456',
   'the seeded admin has a student number');
 select is((select is_admin from profiles where id = '00000000-0000-0000-0000-000000000020'), true,
   'the seeded admin is an admin');
 select ok((select password_hash like '$2a$%' from profiles where id = '00000000-0000-0000-0000-000000000020'),
   'the seeded admin has a bcrypt password hash (typed login works)');
 
-select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000021'), '200001',
+select is((select student_number from profiles where id = '00000000-0000-0000-0000-000000000021'), '234567',
   'the seeded student has a student number');
 select is((select is_admin from profiles where id = '00000000-0000-0000-0000-000000000021'), false,
   'the seeded student is not an admin');
-select ok((select password_hash is null and email is null from profiles where id = '00000000-0000-0000-0000-000000000021'),
-  'the seeded student has no password and no email (the roster-import shape)');
+select ok((select password_hash like '$2a$%' from profiles where id = '00000000-0000-0000-0000-000000000021'),
+  'the seeded student has a bcrypt password hash (typed login works)');
 
 -- Custody -------------------------------------------------------------------
 -- Every checked_out asset must have an open custody row, or the status and

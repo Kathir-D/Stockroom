@@ -112,17 +112,3 @@ class CartStore {
 }
 
 export const cart = new CartStore()
-
-/**
- * Pick the unit a model-level **Add** should take: the first available one in
- * the group that isn't already in the cart.
- *
- * "Add on the model row takes any free unit; add on a unit row takes that exact
- * one" — both put a specific `asset_id` in the cart, and the model-level press
- * just chooses (design-system.md §8.2). The choice is made from the group the
- * frontend already loaded rather than by the server, which races when two people
- * browse at once; on a single shared PC that cannot happen.
- */
-export function firstFreeUnit(units: AssetListItem[]): AssetListItem | null {
-  return units.find((u) => u.status === "available" && !cart.has(u.id)) ?? null
-}

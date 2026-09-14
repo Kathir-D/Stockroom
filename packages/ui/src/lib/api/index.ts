@@ -37,6 +37,7 @@ export {
   DEFAULT_BASE_URL,
   fileUrl,
   getToken,
+  lastRequestAt,
   setToken,
 } from "./client"
 
@@ -118,6 +119,8 @@ export interface AssetQuery {
   status?: AssetStatus
   /** Free text over name, description, serial number and asset tag. */
   q?: string
+  /** So the shape satisfies `request`'s query bag without a cast. */
+  [key: string]: string | undefined
 }
 
 export function listAssets(query: AssetQuery = {}, signal?: AbortSignal) {
@@ -151,6 +154,22 @@ export function checkIn(assetId: string, note?: string) {
   return request<CheckInResult>(`/assets/${encodeURIComponent(assetId)}/checkin`, {
     method: "POST",
     body: trimmed ? { note: trimmed } : {},
+  })
+}
+
+/**
+ * Attach a damage note to a custody event that is already closed.
+ *
+ * The scan flow checks an item in the instant the barcode is read, with no
+ * confirm press (CLAUDE.md §1.5), so the "Add a note" field on the confirmation
+ * surface has no check-in call left to ride along with. The note lands on the
+ * same `condition_in` column `checkIn` writes, so a return's condition has one
+ * home however it was entered (design-system.md §8.6).
+ */
+export function annotateCustody(custodyEventId: string, note: string) {
+  return request<CustodyRecord>(`/custody/${encodeURIComponent(custodyEventId)}/note`, {
+    method: "POST",
+    body: { note },
   })
 }
 

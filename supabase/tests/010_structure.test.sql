@@ -79,9 +79,15 @@ select col_type_is('public', 'profiles', 'student_number', 'text', 'profiles.stu
 
 -- Nullability ----------------------------------------------------------------
 select col_not_null('public', 'assets', c, format('assets.%I is NOT NULL', c))
-from unnest(array['asset_tag','name','status','custom_fields','created_at','updated_at']) as c;
+-- serial_number joined this list in 20260914120000: it is the scan key and the
+-- one identifier a person reads, so an asset without one cannot be checked in.
+from unnest(array['asset_tag','name','status','serial_number','custom_fields','created_at','updated_at']) as c;
 select col_is_null('public', 'assets', c, format('assets.%I is nullable', c))
-from unnest(array['description','category_id','location_id','serial_number','condition']) as c;
+from unnest(array['description','category_id','location_id','condition']) as c;
+
+-- asset_tag is generated, so an insert that names neither it nor a default has
+-- to still produce one. This is the whole of "backend-owned".
+select col_has_default('public', 'assets', 'asset_tag', 'assets.asset_tag has a generated default');
 
 select col_not_null('public', 'custody_events', c, format('custody_events.%I is NOT NULL', c))
 from unnest(array['asset_id','custodian_id','checked_out_by','checked_out_at']) as c;

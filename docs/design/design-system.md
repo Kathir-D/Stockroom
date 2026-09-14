@@ -408,8 +408,11 @@ These live in `packages/ui/src/lib/components/app/`.
 
 - **`<StatusDot status={...} />`.** The §6 status expression. One component, used everywhere, so status
   can never drift between two screens.
-- **`<Serial value="T7iBat-001" />`.** Mono, `select-all` on click, copy-on-click with a toast. Every
-  serial and student number in the app goes through this.
+- **`<Serial value="T7IBAT-001" />`.** Mono, `select-all` on click, copy-on-click with a toast. Every
+  serial and student number in the app goes through this. It shortens two ways, both display-only:
+  a generated `prefix-NNNN` serial shows just its number (`T7IBAT-001` → `1`), and anything past 14
+  characters truncates in the middle (`3QZB…8842`). Full value on hover and in the copy; §8.2 has both
+  rules and why the ellipsis is never trailing.
 - **`<ModelRow />`.** A model with its thumbnail, name, category path, `n of m available`, out-count and
   **Add**. Wraps a `collapsible` whose content is the unit list. The whole row is the trigger; **Add** stops
   propagation so pressing it does not also toggle the row. §8.2.
@@ -511,6 +514,12 @@ input, and the line **"Scan your student ID."** The input is always focused and 
 keyboard-wedge scanner types into whatever has focus (`CLAUDE.md` §10), so losing focus breaks scanning
 entirely.
 
+- **The field accepts digits only.** Letters are stripped as they arrive — typed, pasted or autofilled —
+  and the value is capped at `MaxStudentNumberLength` (32). `NormalizeStudentNumber` refuses non-digits
+  server-side regardless; filtering here just means the rule shows while someone types instead of being
+  reported after they press Enter. The scanner is untouched by this: it reads keystrokes directly, so an
+  *item* barcode scanned at sign-in still produces the explicit "that looks like an item barcode" message
+  rather than a silently stripped number failing as a bad login (§15 Q4).
 - **Fast burst + Enter** → `LoginByScan`. No password.
 - **Typed slowly + Enter** → reveal a password field in place, `LoginByPassword`.
 - **`needs_password: true`** → a set-password step before anything else. Two fields, a visible rule
@@ -529,16 +538,62 @@ roughly thirty models, and a flat unit list is thirty screens of near-identical 
 the expansion, so nothing the flat list could tell you is lost.
 
 **The model row** carries thumbnail, model name, category path in `--fg-muted`, `4 of 6 available` as a
-`<StatusDot>`, an out-count, and **Add**. Its availability dot reads `--status-available` when the count is
-above zero and `--status-unavailable` at `0 of n`, where **Add** is disabled.
+`<StatusDot>` and an out-count. Its availability dot reads `--status-available` when the count is above
+zero and `--status-unavailable` at `0 of n`.
 
-**Expanding it** reveals one `<UnitRow>` per physical asset: `<Serial>` in mono, its own `<StatusDot>`, its
-due date when checked out, and its own **Add**. Rules that make the two levels behave predictably:
+**It has no Add** (2026-09-14, reversing the 2026-09-10 rule below). The row is a summary and a way in;
+adding is a unit-row action. See §16.
 
-- **Add on the model row takes any free unit. Add on a unit row takes that exact one.** Both put a specific
-  `asset_id` in the cart; the model-level press just picks the first available unit in the group.
-- **The whole row is the accordion trigger, so `Add` must stop propagation.** A press that both adds an item
-  and expands a row is a press nobody meant.
+**Expanding it** reveals one `<UnitRow>` per physical asset. The row is, left to right:
+
+```
+[photo] name · serial · status · Add
+```
+
+The **name repeats on every unit row**, which looks redundant next to the model headline and is not:
+the same component is the admin table's row (§8.7), where there is no model row above it, and a row that
+reads differently in the two places is §1.4's bug. **The serial is its own column**, because it is the
+only thing that tells two units of one model apart — and it is the scan key, so it is what someone
+matches against the sticker in their hand.
+
+Two rules on those columns, both settled 2026-09-14 against real data:
+
+- **A name never carries its own unit number.** `Canon T7i`, three times, distinguished by serial — not
+  `Canon T7i #1`, `#2`, `#3`. The list groups by name, so a numbered name splits one model into N groups
+  of one and `2 of 3 available` never appears at all. `supabase/seed.sql` and a pgTAP assertion both
+  guard this.
+- **A model-prefixed serial displays as its unit number alone.** `T7IBAT-001` reads `1`. Batteries, bags
+  and tripods have no manufacturer serial, so their stickers carry one we generate — and its prefix is
+  identical for every unit of the model, with the model name already sitting beside it in the row.
+  `<Serial>` treats `prefix-NNNN` as generated and anything unbroken as a manufacturer serial, which is
+  what keeps the two apart without a column in the database declaring it.
+- **A serial longer than 14 characters truncates in the middle**, `3QZB…8842`. Never at the end:
+  manufacturer serials share a long prefix across a production run, so a trailing ellipsis would render
+  every unit of a model identical, which is the one thing the column exists to prevent.
+
+Both rules are **display only**. The stored serial is the scan key, so the tooltip, the `title` and what
+a click copies are always the whole thing.
+
+Rules that make the two levels behave predictably:
+
+- **Only a unit row adds.** What goes in the cart is a specific serial, and a model-level press had to
+  guess which — invisibly, in both directions: you pressed Add on `Canon T7i`, one of three bodies landed
+  in the cart, and nothing said which one. Expanding first costs one press and removes the guess.
+- **Add opens the detail dialog, which is where the cart press actually happens** (`CLAUDE.md` §1 step 3:
+  "click an item → detail popup → Add to Cart"). The popup is the only place the photo, the condition note
+  and the custody history are visible, and it is where someone confirms they are taking *this* body rather
+  than one that merely shares its model name. **Units with nothing extra to show skip it** and go straight
+  into the cart — a popup repeating a row the user is already looking at is a press for nothing (§1.1).
+  `lib/add-flow.ts` is the whole of this: one `ADD_OPENS_DETAIL` flag and one `hasAddDetail` predicate,
+  deliberately isolated because the behaviour is provisional. A linear item counts as having nothing extra
+  (no photo, no condition, a serial we generated rather than a manufacturer stamped).
+- **The whole model row is the accordion trigger**, and with no button beside it nothing has to stop
+  propagation.
+- **The Add button is a toggle.** Pressed on a row already in the cart it reads `In cart` and removes the
+  item; the icon swaps from a check to an X on hover so the press is predictable before it happens. Undo
+  belongs where the action was — the previous disabled `In cart` label said what had happened and gave no
+  way to change your mind without navigating to the cart page. The detail dialog (§8.3) and the scan
+  surface (§8.6) carry the same toggle, for the same reason.
 - **Rows are collapsed by default.** Two exceptions open one: a search result opens the group that matched,
   and a scanned serial opens its group and highlights the unit for `--dur-slow`.
 - **The expansion is not paginated but it is capped**, at fifty units with a `n more units` footer row.
@@ -546,10 +601,12 @@ due date when checked out, and its own **Add**. Rules that make the two levels b
 - **`unavailable` units** render their thumbnail and row fill at 55% opacity, while their serial and status
   label remain fully opaque. `Add` is disabled and the reason appears in a tooltip. They still count in the
   total (`4 of 6`), because someone looking at the shelf will count six bodies.
-- **Custodian identity is visible to any signed-in viewer** in the unit rows, per §8.3 (resolved 2026-09-12).
-  A unit the viewer holds themselves reads `You · Sep 12`; every other checked-out unit shows the due date
-  and the current custodian's name, sourced from `ListAssets` so the row itself carries it without opening
-  detail.
+- **Custodian identity is visible to any signed-in viewer, on hover over the status** (§8.3, resolved
+  2026-09-12; moved behind the hover 2026-09-14). A unit the viewer holds themselves reads `You · Sep 12`;
+  every other checked-out unit names the current custodian and the due date. It is still sourced from
+  `ListAssets`, so the row carries it without opening detail — but it is no longer a column of its own. It
+  was the widest thing in the row and the least often needed, and the status is exactly the thing a person
+  is already looking at when they want to know who has it.
 - **Sort order.** Categories (the model-row grouping's parent) follow `Catagories.md`'s document order
   (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc), not
   alphabetical. Within any list, available units sort before checked-out ones.
@@ -576,8 +633,8 @@ status as a filled chip, condition, and, when checked out, custodian name, check
 Under that, the custody history from `GetAssetHistory` as a compact list, newest first — history stays
 admin-only (below).
 
-Footer: **Add to cart** (primary) or **Check in** if checked out and the viewer may do it. Admins also get
-**Edit** and **Mark unavailable**.
+Footer: **Add to cart** (primary), **Remove from cart** when it is already in there (§8.2's toggle), or
+**Check in** if checked out and the viewer may do it. Admins also get **Edit** and **Mark unavailable**.
 
 **Current custodian is visible to any signed-in viewer; historical custodians are not.** Resolved
 2026-09-12 (§15 Q7), reversing the admin-only default from `b6fe111`: any signed-in user can see who
@@ -683,7 +740,9 @@ Reached from the sidebar `Admin` group, visible only when `is_admin`. Not a sepa
 theme. It is the same shell, `data-density="compact"`.
 
 - **Assets.** Flat unit table (§8.2, no model grouping) with create/edit/delete, photo upload, and the
-  `available ⇄ unavailable` toggle. Delete is an `alert-dialog` and is blocked server-side when custody is
+  `available ⇄ unavailable` toggle. The create/edit form asks for a **name and a serial number**, and no
+  asset tag: the tag is generated by the database and is an internal key (`CLAUDE.md` §6.2). The detail
+  dialog shows it to admins only, for the rare case of matching a row against a CSV export. Delete is an `alert-dialog` and is blocked server-side when custody is
   open; surface that as a specific message, not a generic failure.
 - **Categories.** The three-level tree with inline rename, add-child, and delete. Depth is capped at 3
   server-side; the UI hides **Add child** on depth-3 nodes rather than letting the server reject it. Delete
@@ -867,13 +926,29 @@ one unblocked. Nothing below is open anymore — kept as a record of what was as
 - ~~**Q7. Who may see who holds an item?**~~ Admins and the custodian only, or any signed-in student?
   *Blocked:* 8.3, 8.6.
 
-Also resolved alongside these, from `CLAUDE.md` §13: `SESSION_IDLE_MINUTES` is **5 minutes**. The
+Also resolved alongside these, from `CLAUDE.md` §13: `SESSION_IDLE_MINUTES` is **5 minutes** (raised to **10** on 2026-09-14, and measured from the last interaction). The
 scan-vs-typed keystroke threshold (§9) stays genuinely open — it needs real scanner hardware, arriving
 Week 7 — but ships as a named constant defaulted to 50ms so tuning it later is a one-line change.
 
 ---
 
 ## 16. Decisions log
+
+**2026-09-14, Add goes through the detail popup.** `CLAUDE.md` §1 has always described the flow as "click
+an item → detail popup → Add to Cart", and the browse list was adding directly instead. Pressing **Add**
+now opens the dialog and the dialog's own button commits — which matters most for exactly the case §8.2's
+grouping created, three `Canon T7i` bodies whose rows differ only by serial. Items with nothing extra to
+show skip the popup, because ceremony that tells you nothing is the thing §1.1 says to cut, and "nothing
+extra" is defined once in `lib/add-flow.ts` beside the flag that disables the whole behaviour.
+
+**2026-09-14, adding is a unit-row action, and Add toggles.** Two changes to §8.2 from using the list
+against real grouped data. The model row's **Add** is gone: it took "any free unit", which reads fine in a
+spec and badly on screen, because the press silently picked one of three identical-looking bodies and the
+row never reported which serial you now had. The cost of removing it is one press — expand, then add the
+unit you want — and what you get back is that every cart line was chosen, not assigned. And **the same
+button now removes**: an added row shows `In cart` and pressing it takes the item out, where before it was
+a disabled label and the only undo was the cart page. Both changes apply to the detail dialog and the scan
+surface too, so the three places that can add an item all behave alike.
 
 **2026-09-10, list shape: `B3 + B1`, one accordion instead of two views.** Closes the former list-shape question.
 The earlier note left `B1` and `B3` as coexisting modes behind a toggle. A toggle is a setting somebody
@@ -900,7 +975,7 @@ picker and the admin custodian picker, and the dock stops carrying a commit butt
   post-check-in green flash + "put it back" pattern §8.6 already described.
 - **Q4 → explicit "sign in first" message.** Scanning an item barcode with no session active shows a
   dedicated prompt rather than trying to interpret the code as a student number and failing generically.
-- **Q5 → the cart survives a reload.** It clears only on sign-out or the 5-minute idle timeout, not on a
+- **Q5 → the cart survives a reload.** It clears only on sign-out or the idle timeout (10 minutes since 2026-09-14), not on a
   page refresh — safer for someone who accidentally reloads mid-shopping than for the machine sitting
   unattended, and idle-timeout already covers the unattended case.
 - **Q6 → both layers enforce the overdue block.** The cart/checkout UI disables itself the instant an
@@ -914,7 +989,7 @@ picker and the admin custodian picker, and the dock stops carrying a commit butt
   API shape (`ListAssets`/`GetAsset`/`ScanItem` include the current custodian for every actor,
   `GetAssetHistory` doesn't unless the actor is an admin).
 
-Also settled in the same session: `SESSION_IDLE_MINUTES` = 5 minutes. Browse-list sort order (not
+Also settled in the same session: `SESSION_IDLE_MINUTES` = 5 minutes (now 10). Browse-list sort order (not
 previously specified anywhere): categories in `Catagories.md`'s document order, available units before
 checked-out ones within any list. Backup (`CLAUDE.md` §11) moves from "local CSV, Drive client syncs it"
 to "local CSV, then `rclone copy` pushes it directly" — a one-time human `rclone config` OAuth step replaces

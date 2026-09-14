@@ -43,6 +43,44 @@
   let busy = $state(false)
 
   /**
+   * Mirrors `MaxStudentNumberLength` in `internal/stockroom/password.go`. The
+   * server is still the authority; this only stops the field accepting a value
+   * it already knows will be refused.
+   */
+  const MAX_STUDENT_NUMBER_LENGTH = 32
+
+  /**
+   * Keep the student-number field digits-only.
+   *
+   * `NormalizeStudentNumber` refuses anything else server-side, so letters were
+   * never going to sign anyone in — but the field accepted them, and the person
+   * only found out after pressing Enter. Filtering here means the rule is
+   * visible while they type rather than reported afterwards.
+   *
+   * Applied on `input` rather than by swallowing keystrokes, so it catches every
+   * way text arrives: typing, pasting, autofill, a mobile keyboard's
+   * autocomplete. The caret is put back where it belongs, or a stripped
+   * character mid-number would throw the cursor to the end.
+   *
+   * The scanner is unaffected — it reads keystrokes directly (`attachScanner`),
+   * not this field — which matters, because an *item* barcode scanned here has
+   * to produce "that looks like an item barcode", not a silently stripped
+   * number that fails as a bad login (§15 Q4).
+   */
+  function keepDigitsOnly(event: Event & { currentTarget: HTMLInputElement }) {
+    const el = event.currentTarget
+    const digits = el.value.replace(/\D+/g, "").slice(0, MAX_STUDENT_NUMBER_LENGTH)
+    if (digits !== el.value) {
+      const caret = el.selectionStart ?? el.value.length
+      const removedBeforeCaret = el.value.slice(0, caret).replace(/\d/g, "").length
+      el.value = digits
+      const next = Math.max(0, caret - removedBeforeCaret)
+      el.setSelectionRange(next, next)
+    }
+    studentNumber = digits
+  }
+
+  /**
    * Keep focus on whichever field is live. A scanner can fire at any moment and
    * there is nobody at the machine to click first.
    */
@@ -69,7 +107,20 @@
     })
   })
 
+  /**
+   * When the scanner last reported a burst.
+   *
+   * The scanner ignores an Enter with an empty keystroke buffer, which is the
+   * right call for a barcode but leaves the form dead for anything that fills
+   * the field without keystrokes — a paste, autofill, or a mobile keyboard's
+   * autocomplete. CLAUDE.md §10 wants manual entry to work identically as a
+   * fallback, so the native submit below picks those up. This timestamp is how
+   * it tells "the scanner already handled this Enter" from "nothing did".
+   */
+  let burstHandledAt = 0
+
   async function handleBurst(code: string, fast: boolean) {
+    burstHandledAt = performance.now()
     const trimmed = code.trim()
     studentNumber = trimmed
     error = null
@@ -182,20 +233,29 @@
       <form
         class="mt-8 flex flex-col gap-2"
         onsubmit={(event) => {
-          // The scoped scanner listener owns Enter here; a native submit would
-          // handle the same keystroke a second time.
           event.preventDefault()
+          // The scanner owns Enter when it saw the keystrokes; handling it here
+          // too would run the same burst twice. It saw nothing when the field
+          // was filled without typing, and that is the case this catches —
+          // never as a scan, because a paste has no rhythm to measure.
+          if (performance.now() - burstHandledAt < 50) return
+          if (!busy && studentNumber.trim()) handleBurst(studentNumber, false)
         }}
       >
         <Label for="student-number" class="flex items-center gap-2 text-fg">
           <ScanLineIcon class="size-4 text-fg-muted" aria-hidden="true" />
           Scan your student ID.
         </Label>
+        <!-- `value` + `oninput` rather than `bind:value`: the handler rewrites
+             what was typed, and a two-way binding would race its own update. -->
         <Input
           id="student-number"
           bind:ref={numberInput}
-          bind:value={studentNumber}
+          value={studentNumber}
+          oninput={keepDigitsOnly}
           inputmode="numeric"
+          pattern="[0-9]*"
+          maxlength={MAX_STUDENT_NUMBER_LENGTH}
           autocomplete="off"
           spellcheck={false}
           disabled={busy}

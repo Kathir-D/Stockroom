@@ -72,6 +72,27 @@ func (d deps) handleCheckIn(w http.ResponseWriter, r *http.Request, actor stockr
 	writeJSON(w, http.StatusOK, result)
 }
 
+// POST /custody/{id}/note
+// Attach a damage note to a custody event that is already closed. The scan
+// flow checks an item in the moment the barcode is read (CLAUDE.md §1.5), so
+// the note field on the confirmation surface has no check-in call left to ride
+// along with; this is where it writes.
+func (d deps) handleAnnotateCustody(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	record, err := d.db.AnnotateCustodyEvent(r.Context(), actor, r.PathValue("id"), body.Note)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
 // GET /custody/active
 // Everything currently out, soonest due first. Admin only.
 func (d deps) handleActiveCustody(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {

@@ -45,8 +45,11 @@ jobs:
               - 'server/**'
               - 'cmd/**'
               - 'supabase/**'
+              - 'packages/**'
               - 'desktop-app/**'
               - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
               - 'scripts/**'
               - '.github/workflows/**'
 
@@ -63,9 +66,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            desktop-app/frontend/package-lock.json
-            web-app/package-lock.json
+          # One lockfile: this is an npm workspace, so the root package-lock.json
+          # is the whole dependency tree for packages/ui, web-app and
+          # desktop-app/frontend. The per-app locks it used to list no longer
+          # exist.
+          cache-dependency-path: package-lock.json
 
       - name: Set up Supabase CLI
         if: steps.changes.outputs.code == 'true'
@@ -95,33 +100,29 @@ jobs:
         if: steps.changes.outputs.code == 'true'
         run: supabase test db
 
-      - name: Install frontend dependencies
+      # One install, at the repo root. `npm ci --prefix <app>` would give that
+      # app its own copy of Svelte and Vite, and the failure is silent:
+      # components render but their state never updates
+      # (docs/design/design-system.md 2.2). The root install populates
+      # packages/ui, web-app and desktop-app/frontend together.
+      - name: Install dependencies
         if: steps.changes.outputs.code == 'true'
-        run: npm --prefix desktop-app/frontend ci
+        run: npm ci
 
-      - name: Frontend type check
+      # svelte-check over packages/ui and both hosts. The package is checked
+      # first: a type error there breaks both apps, and saying so once is
+      # clearer than the same error reported twice.
+      - name: Type check (packages/ui + both hosts)
         if: steps.changes.outputs.code == 'true'
-        run: npm --prefix desktop-app/frontend run check
+        run: npm run check
 
-      - name: Frontend tests (Vitest)
+      - name: Frontend tests (Vitest: packages/ui + both hosts)
         if: steps.changes.outputs.code == 'true'
-        run: npm --prefix desktop-app/frontend test
+        run: npm test
 
-      - name: Install web-app dependencies
+      - name: Frontend build (both hosts)
         if: steps.changes.outputs.code == 'true'
-        run: npm --prefix web-app ci
-
-      - name: web-app type check
-        if: steps.changes.outputs.code == 'true'
-        run: npm --prefix web-app run check
-
-      - name: web-app tests (Vitest)
-        if: steps.changes.outputs.code == 'true'
-        run: npm --prefix web-app test
-
-      - name: web-app build
-        if: steps.changes.outputs.code == 'true'
-        run: npm --prefix web-app run build
+        run: npm run build
 
       - name: Docs-only change
         if: steps.changes.outputs.code != 'true'
