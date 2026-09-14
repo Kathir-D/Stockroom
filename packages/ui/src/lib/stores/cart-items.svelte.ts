@@ -12,6 +12,7 @@
  */
 
 import * as api from "../api/index"
+import { ApiError } from "../api/client"
 import type { AssetListItem } from "../api/types"
 import { cart } from "./cart.svelte"
 
@@ -40,18 +41,27 @@ class CartItemsStore {
           try {
             // Always refetch: a seeded row is only a fallback for a 404.
             return await api.getAsset(id)
-          } catch {
-            return known.get(id) ?? null
+          } catch (error) {
+            // **Only a 404 means the asset is gone.** A timeout, a 500 or the
+            // server being down says nothing about whether the item still
+            // exists, and treating those the same way emptied the cart of
+            // everything it could not reach. Anything else rethrows into the
+            // outer catch, which surfaces the error and leaves the cart alone.
+            if (error instanceof ApiError && error.status === 404) return null
+            throw error
           }
         })
       )
       const found = resolved.filter((a): a is AssetListItem => a !== null)
-      // An id that resolves to nothing has been deleted out from under the cart.
-      // Dropping it here keeps the count in the dock honest.
+      // An id that 404s has been deleted out from under the cart. Dropping it
+      // here keeps the count in the dock honest.
       const missing = ids.filter((id) => !found.some((a) => a.id === id))
       if (missing.length > 0) cart.removeMany(missing)
       this.items = found
     } catch (error) {
+      // The cart's ids are untouched, so a retry once the server is back
+      // resolves them all. Seeded rows keep the page rendering something.
+      this.items = ids.map((id) => known.get(id)).filter((a): a is AssetListItem => a !== undefined)
       this.error = error instanceof Error ? error.message : String(error)
     } finally {
       this.loading = false

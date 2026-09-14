@@ -60,6 +60,9 @@
   let noteOpen = $state(false)
   let noteSaved = $state(false)
   let noteBusy = $state(false)
+  let noteError = $state<string | null>(null)
+  /** The Add button of an available-item scan, focused as the surface opens. */
+  let addButton = $state<HTMLElement | null>(null)
 
   // A fresh surface resets the note field, because a new scan replaces the
   // contents outright rather than layering on the previous one.
@@ -68,6 +71,15 @@
     note = ""
     noteOpen = false
     noteSaved = false
+    noteError = null
+  })
+
+  // Focus follows the surface: a scan arrives with focus wherever the last
+  // press left it, and the Add button is the only thing on screen worth
+  // pressing. Re-runs per surface, so a fresh scan re-focuses its own button.
+  $effect(() => {
+    void surface
+    addButton?.focus()
   })
 
   function close() {
@@ -85,9 +97,14 @@
   async function saveNote(custodyEventId: string) {
     if (!onSaveNote || !note.trim()) return
     noteBusy = true
+    noteError = null
     try {
       await onSaveNote(custodyEventId, note)
       noteSaved = true
+    } catch (error) {
+      // The check-in itself already committed, so a failed note is not a failed
+      // return: say so, keep what was typed, and leave Save pressable again.
+      noteError = error instanceof Error ? error.message : String(error)
     } finally {
       noteBusy = false
     }
@@ -186,6 +203,11 @@
                     {noteSaved ? "Saved" : noteBusy ? "Saving…" : "Save"}
                   </Button>
                 </div>
+                {#if noteError}
+                  <p class="text-sm text-status-overdue" role="alert">
+                    Could not save the note — {noteError}. The item is still checked in; press Save to try again.
+                  </p>
+                {/if}
               </div>
             </Collapsible.Content>
           </Collapsible.Root>
@@ -209,8 +231,10 @@
                 Remove from cart
               </Button>
             {:else}
-              <!-- Autofocused: the next thing anyone does here is add it. -->
+              <!-- Focused on open: the next thing anyone does here is add it,
+                   and the surface has no focus trap of its own (see above). -->
               <Button
+                bind:ref={addButton}
                 size="tap"
                 disabled={!canAdd}
                 onclick={() => {

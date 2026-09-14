@@ -79,15 +79,17 @@ Run every suite (Go, pgTAP against the local Postgres, and the frontend's Vitest
 
 The database suites need `supabase start` to have been run first. The suite is deliberately small (one happy path and one permission gate per module); [TESTING.md](TESTING.md) lists what runs and what was cut, and [CI.md](CI.md) covers the GitHub Actions job and branch protection.
 
-## Adding/editing/removing assets and tags
+## Adding/editing/removing assets
 
 Two ways to mutate the database:
 
-1. **Stockroom admin panel** (`http://localhost:34115/` or the desktop app's native window). A plain screen for day-to-day use: add/edit/delete assets, add/rename/delete tags globally, and attach/detach tags on individual assets. It's intentionally bare-bones for now (functional first, styled later).
-2. **Supabase Studio** (`http://127.0.0.1:54323/project/default` → Table Editor). The full Postgres table editor, useful for bulk edits or anything the admin panel doesn't cover yet (categories, locations, bookings, etc.).
+1. **Stockroom admin panel**, in either frontend (the desktop app's native window, `http://localhost:34115/`, or the web app on `http://localhost:5173`). Sign in as an admin: asset CRUD, the category tree, users and the roster import, the overdue list, and Backup Now.
+2. **Supabase Studio** (`http://127.0.0.1:54323/project/default` → Table Editor). The full Postgres table editor, useful for bulk edits or anything the admin panel doesn't cover.
 
-The admin panel's logic lives in two files:
-- `desktop-app/frontend/src/lib/db.ts`. The actual mutation functions (`createAsset`, `updateAsset`, `deleteAsset`, `createTag`, `renameTag`, `deleteTag`, `addTagToAsset`, `removeTagFromAsset`, `listAllAssetTags`, etc.), each a thin wrapper around the Supabase client in `lib/supabase.ts`. Import from here if you're adding new UI or scripting mutations directly.
-- `desktop-app/frontend/src/App.svelte`. The screen that calls those functions from forms/buttons.
+Where the code lives. **Neither frontend holds any logic** — `desktop-app/frontend/src/App.svelte` and `web-app/src/App.svelte` each render `<StockroomApp>` and nothing else:
+
+- `internal/stockroom/`. Every query, transaction and permission check, and the only code that touches Postgres. Asset mutations are in `assets_admin.go`.
+- `server/`. The JSON HTTP API over that package; `CLAUDE.md` §8.1 is the endpoint table.
+- `packages/ui/` (`@stockroom/ui`). Every component, screen and store, plus `src/lib/api/`, the one HTTP client both hosts use. There is no Supabase client in TypeScript and no database credentials in the frontend.
 
 See `CLAUDE.md` for full architecture, database schema, and project roadmap.

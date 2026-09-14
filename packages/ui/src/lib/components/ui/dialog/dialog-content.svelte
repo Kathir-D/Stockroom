@@ -28,8 +28,8 @@
 		bind:ref
 		data-slot="dialog-content"
 		class={cn(
-			"fixed top-1/2 left-1/2 z-50 grid w-full max-w-[min(560px,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-overlay p-(--gutter) text-[length:var(--text-body)] text-fg shadow-elev-3 outline-none",
-			"data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 duration-(--dur-normal)",
+			"fixed top-1/2 left-1/2 z-50 grid w-full max-w-[min(560px,calc(100%_-_2rem))] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-overlay p-(--gutter) text-[length:var(--text-body)] text-fg shadow-elev-3 outline-none",
+			"data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-(--dur-normal)",
 			className
 		)}
 		{...restProps}

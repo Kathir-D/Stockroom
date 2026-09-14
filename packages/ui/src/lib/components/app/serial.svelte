@@ -9,20 +9,24 @@
    * selection in the Wails build (§12) and a serial is exactly the thing
    * somebody wants to select.
    *
-   * Two display rules, both of which keep the *stored* value untouched — the
-   * serial is the scan key, so what the tooltip shows and what a click copies is
-   * always the whole thing:
+   * One display rule, which keeps the *stored* value untouched — the serial is
+   * the scan key, so what the tooltip shows and what a click copies is always
+   * the whole thing:
    *
-   * 1. **A model-prefixed serial shows only its number.** `T7IBAT-001` renders
-   *    `1`. Batteries, bags and tripods have no manufacturer serial, so their
-   *    stickers carry a serial we generate — the prefix is the same for every
-   *    unit of the model and the model name is already in the row beside it, so
-   *    printing it again is noise. The number is the only part that identifies
-   *    the unit.
-   * 2. **Anything longer than `max` truncates in the middle**, `3QZB…8842`,
-   *    never at the end. Manufacturer serials tend to share a long prefix across
-   *    a production run, so a trailing ellipsis would render every unit of a
-   *    model identical — the one thing this component exists to prevent.
+   * **Anything longer than `max` truncates in the middle**, `3QZB…8842`, never
+   * at the end. Manufacturer serials tend to share a long prefix across a
+   * production run, so a trailing ellipsis would render every unit of a model
+   * identical — the one thing this component exists to prevent.
+   *
+   * There used to be a second rule: a serial matching `PREFIX-<digits>` showed
+   * only its number, on the reasoning that we generate those ourselves for
+   * linear items (`T7IBAT-001` → `1`) and the model name is already beside it.
+   * **Syntax cannot tell a serial we generated from one a manufacturer
+   * stamped.** `AB-001` off the back of a real camera shortened to `1`, and so
+   * did the `AST-000123` asset tags that every `serial_number ?? asset_tag`
+   * fallback in this app passes here — two different units could render the
+   * same character. Restoring the rule needs the database to say which serials
+   * are ours, not a regex guessing from the shape.
    */
   import { toast } from "svelte-sonner"
   import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
@@ -32,7 +36,6 @@
     value,
     class: className,
     label = "serial number",
-    shortenToUnitNumber = true,
     /**
      * Longest serial shown whole. Past this it becomes `head…tail`, which is
      * `HEAD + TAIL + 1` characters wide — so the cap has to exceed that or
@@ -45,34 +48,17 @@
     /** What the toast and the aria-label call it: serial, student number, ... */
     label?: string
     max?: number
-    /**
-     * Whether rule 1 applies. False where the whole identifier *is* the point
-     * rather than which unit it picks out — the asset tag in the detail dialog,
-     * which sits right beside the serial and would otherwise render as the same
-     * bare number.
-     */
-    shortenToUnitNumber?: boolean
   } = $props()
 
   const HEAD = 4
   const TAIL = 4
 
-  /**
-   * A serial we generated rather than one a manufacturer stamped: a prefix, a
-   * hyphen, and a unit number. Real serials in this inventory are unbroken runs
-   * of letters and digits, so requiring the hyphen is what keeps the two apart
-   * without a column in the database saying which is which.
-   */
-  const MODEL_PREFIXED = /^[A-Za-z][\w.]*-0*(\d+)$/
-
   const shown = $derived.by(() => {
     if (!value) return ""
-    const unitNumber = shortenToUnitNumber ? MODEL_PREFIXED.exec(value) : null
-    if (unitNumber) return unitNumber[1]
     if (value.length > max) return `${value.slice(0, HEAD)}…${value.slice(-TAIL)}`
     return value
   })
-  /** True whenever what's on screen isn't the whole serial, either way. */
+  /** True whenever what's on screen isn't the whole serial. */
   const truncated = $derived(value !== null && value !== undefined && shown !== value)
 
   async function copy() {

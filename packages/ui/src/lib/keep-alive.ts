@@ -98,14 +98,21 @@ export function attachKeepAlive(options: KeepAliveOptions): () => void {
     // machine never advances lastInteractionAt, so it never pings, and its
     // session expires exactly as intended.
     if (lastInteractionAt <= handledInteractionAt) return
+    // Read once: an interaction landing mid-flight must not be marked handled
+    // by a ping that started before it.
+    const attemptedFor = lastInteractionAt
     pinging = true
-    handledInteractionAt = lastInteractionAt
     try {
       await ping()
+      // Only a ping the server actually answered counts as handled. Advancing
+      // this before the await meant a failed ping was never retried unless the
+      // user happened to touch the machine again — the opposite of what the
+      // "another go on the next tick" below promised.
+      handledInteractionAt = attemptedFor
     } catch {
-      // A failed ping needs no handling here. If it was a 401 the API client's
-      // own hook has already signed the user out; anything else gets another
-      // go on the next tick.
+      // If it was a 401 the API client's own hook has already signed the user
+      // out. Anything else gets another go on the next tick, because
+      // handledInteractionAt is still where it was.
     } finally {
       pinging = false
     }

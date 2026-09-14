@@ -16,7 +16,7 @@ A push to a PR cancels the run already going for it.
 
 ## Docs-only changes
 
-Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `desktop-app/`, `web-app/`, `scripts/` or the workflow itself. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change (`Catagories.md` only reaches the database when someone rewrites `seed.sql` from it by hand, and that edit is under `supabase/`): the job runs a single echo step and finishes green in a few seconds.
+Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/` or the workflow itself. The three npm entries matter: `packages/ui` is where all the frontend code now lives, and a lockfile change moves every dependency under it. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change (`Catagories.md` only reaches the database when someone rewrites `seed.sql` from it by hand, and that edit is under `supabase/`): the job runs a single echo step and finishes green in a few seconds.
 
 The workflow grants itself `contents: read` and `pull-requests: read`. The second is for `dorny/paths-filter`, which lists a PR's changed files through the API; without it the step fails with "Resource not accessible by integration" before any test runs.
 

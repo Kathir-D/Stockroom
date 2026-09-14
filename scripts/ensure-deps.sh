@@ -12,7 +12,10 @@
 # a half-installed tree fails later with a much worse error message.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+# `set -e` is deliberately off (the checks below inspect exit codes), so this
+# guards itself: a failed cd would run the node_modules cleanup below against
+# whatever directory the caller happened to be in.
+cd "$(dirname "$0")/.." || { echo "cannot cd to the repository root" >&2; exit 1; }
 
 mode="install"
 if [ "${1:-}" = "--ci" ]; then

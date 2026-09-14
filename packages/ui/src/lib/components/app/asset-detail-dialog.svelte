@@ -134,7 +134,7 @@
           -->
           {#if isAdmin}
             <dt class="text-xs text-fg-muted">Asset tag</dt>
-            <dd><Serial value={asset.asset_tag} label="asset tag" shortenToUnitNumber={false} /></dd>
+            <dd><Serial value={asset.asset_tag} label="asset tag" /></dd>
           {/if}
 
           {#if asset.condition}

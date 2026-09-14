@@ -27,6 +27,17 @@
 
   let failed = $state(false)
   const resolved = $derived(fileUrl(src))
+
+  // A new URL is a new attempt. Without this the fallback icon stuck: an admin
+  // uploading a replacement photo for a unit whose old file 404'd saw the
+  // placeholder keep rendering until the page reloaded.
+  let lastResolved: string | null | undefined
+  $effect(() => {
+    if (resolved !== lastResolved) {
+      lastResolved = resolved
+      failed = false
+    }
+  })
 </script>
 
 <div

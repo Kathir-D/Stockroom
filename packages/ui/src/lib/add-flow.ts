@@ -22,9 +22,15 @@ import type { AssetListItem } from "./api/types"
 export const ADD_OPENS_DETAIL = true
 
 /**
- * A serial we generated rather than one a manufacturer stamped — the same shape
- * `<Serial>` shortens to a bare unit number. Kept in step with that component by
- * hand, which is fine for two call sites and wrong the moment there is a third.
+ * A serial we generated rather than one a manufacturer stamped, guessed from its
+ * shape: a prefix, a hyphen, a unit number.
+ *
+ * A guess, and knowingly so. `<Serial>` used to share it and no longer does,
+ * because there it decided what characters a person reads off the screen and
+ * `AB-001` off a real camera is indistinguishable from `SD-014`. Here it only
+ * decides whether a press opens a dialog first, so being wrong costs one extra
+ * press or one skipped preview, never a misread identifier. The right fix for
+ * both is the database recording which serials are ours.
  */
 const MODEL_PREFIXED = /^[A-Za-z][\w.]*-0*\d+$/
 
@@ -41,7 +47,10 @@ const MODEL_PREFIXED = /^[A-Za-z][\w.]*-0*\d+$/
 export function hasAddDetail(unit: AssetListItem): boolean {
   if (unit.photo_url) return true
   if (unit.condition?.trim()) return true
-  if (unit.description?.trim() && !unit.serial_number) return true
+  // A description is extra whatever the serial looks like. This used to also
+  // require `!unit.serial_number`, which made it dead code: the return below
+  // already opens every unit with no serial.
+  if (unit.description?.trim()) return true
   return !unit.serial_number || !MODEL_PREFIXED.test(unit.serial_number)
 }
 

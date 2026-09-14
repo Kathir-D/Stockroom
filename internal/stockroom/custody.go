@@ -645,25 +645,39 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 		return CustodyRecord{}, fmt.Errorf("%w: a note is required", ErrInvalid)
 	}
 
-	var closed bool
-	err := db.Pool.QueryRow(ctx,
-		`select checked_in_at is not null from custody_events where id = $1`,
-		custodyEventID).Scan(&closed)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
-	}
+	// The closed-ness test lives in the UPDATE's own WHERE clause rather than in
+	// a SELECT before it, so there is no window between deciding the row may be
+	// written and writing it. A separate read would have been a check against
+	// one snapshot and a write against another; here Postgres evaluates both
+	// against the same row version.
+	tag, err := db.Pool.Exec(ctx,
+		`update custody_events set condition_in = $2
+		   where id = $1 and checked_in_at is not null`,
+		custodyEventID, trimmed)
 	if err != nil {
 		return CustodyRecord{}, mapPgError("annotate custody", err)
 	}
-	if !closed {
+	if tag.RowsAffected() == 0 {
+		// Nothing was written, and the two reasons need different answers. Read
+		// again to say which: no such row, or a row still open.
+		var closed bool
+		err := db.Pool.QueryRow(ctx,
+			`select checked_in_at is not null from custody_events where id = $1`,
+			custodyEventID).Scan(&closed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
+		}
+		if err != nil {
+			return CustodyRecord{}, mapPgError("annotate custody", err)
+		}
+		if !closed {
+			return CustodyRecord{}, fmt.Errorf(
+				"%w: that item is still checked out; the note goes on at check-in", ErrConflict)
+		}
+		// Closed now but not when the UPDATE ran, or it was deleted and
+		// reinserted: either way the write lost a race it cannot silently win.
 		return CustodyRecord{}, fmt.Errorf(
-			"%w: that item is still checked out; the note goes on at check-in", ErrConflict)
-	}
-
-	if _, err := db.Pool.Exec(ctx,
-		`update custody_events set condition_in = $2 where id = $1`,
-		custodyEventID, trimmed); err != nil {
-		return CustodyRecord{}, mapPgError("annotate custody", err)
+			"%w: that custody event changed while the note was being saved", ErrConflict)
 	}
 
 	records, err := listCustody(ctx, db.Pool, `ce.id = $1`, `ce.checked_out_at desc`, custodyEventID)

@@ -62,7 +62,16 @@
   const status = $derived(resolveStatus(unit))
   const isUnavailable = $derived(unit.status === "unavailable")
   const isOut = $derived(unit.custody !== null)
-  const addable = $derived(canAdd && !isUnavailable && !isOut && onAdd !== undefined)
+  /**
+   * Addable only when `resolveStatus` calls the unit available.
+   *
+   * Spelling the same test out here (`!isUnavailable && !isOut`) let the two
+   * disagree: `checked_out` with no open custody row is status drift, which
+   * `resolveStatus` reports as unavailable and the dot renders as such, while
+   * the hand-rolled test saw an item on the shelf and offered **Add**. One
+   * source for what state a unit is in (status.ts), as the file says.
+   */
+  const addable = $derived(status.state === "available" && canAdd && onAdd !== undefined)
 
   /** Why **Add** is disabled, shown in a tooltip rather than left to guesswork. */
   const blockedReason = $derived(
@@ -72,7 +81,9 @@
         ? "Someone has this one out"
         : !canAdd
           ? "Return your overdue item first"
-          : null
+          : status.state !== "available"
+            ? `Not available — ${status.label.toLowerCase()}`
+            : null
   )
 </script>
 

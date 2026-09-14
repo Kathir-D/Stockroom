@@ -63,13 +63,9 @@
 	{@render YearSelect()}
 {:else if captionLayout === "dropdown-months"}
 	{@render MonthSelect()}
-	{#if placeholder}
-		{formatYear(placeholder)}
-	{/if}
+	{formatYear(month)}
 {:else if captionLayout === "dropdown-years"}
-	{#if placeholder}
-		{formatMonth(placeholder)}
-	{/if}
+	{formatMonth(month)}
 	{@render YearSelect()}
 {:else}
 	{formatMonth(month)} {formatYear(month)}

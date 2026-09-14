@@ -926,7 +926,7 @@ one unblocked. Nothing below is open anymore — kept as a record of what was as
 - ~~**Q7. Who may see who holds an item?**~~ Admins and the custodian only, or any signed-in student?
   *Blocked:* 8.3, 8.6.
 
-Also resolved alongside these, from `CLAUDE.md` §13: `SESSION_IDLE_MINUTES` is **5 minutes** (raised to **10** on 2026-09-14, and measured from the last interaction). The
+Also resolved alongside these, from `CLAUDE.md` §13: `SESSION_IDLE_MINUTES` is **10 minutes**, measured from the last interaction rather than from sign-in (it was 5 when first decided; raised on 2026-09-14). The
 scan-vs-typed keystroke threshold (§9) stays genuinely open — it needs real scanner hardware, arriving
 Week 7 — but ships as a named constant defaulted to 50ms so tuning it later is a one-line change.
 
@@ -989,7 +989,7 @@ picker and the admin custodian picker, and the dock stops carrying a commit butt
   API shape (`ListAssets`/`GetAsset`/`ScanItem` include the current custodian for every actor,
   `GetAssetHistory` doesn't unless the actor is an admin).
 
-Also settled in the same session: `SESSION_IDLE_MINUTES` = 5 minutes (now 10). Browse-list sort order (not
+Also settled in the same session: `SESSION_IDLE_MINUTES`, decided as 5 minutes and raised to **10** on 2026-09-14, measured from the last interaction. Browse-list sort order (not
 previously specified anywhere): categories in `Catagories.md`'s document order, available units before
 checked-out ones within any list. Backup (`CLAUDE.md` §11) moves from "local CSV, Drive client syncs it"
 to "local CSV, then `rclone copy` pushes it directly" — a one-time human `rclone config` OAuth step replaces

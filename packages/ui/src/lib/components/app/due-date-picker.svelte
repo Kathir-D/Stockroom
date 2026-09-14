@@ -43,14 +43,18 @@
     return new CalendarDate(date.getFullYear(), date.getMonth() + 1, date.getDate())
   }
 
-  let selected = $state<DateValue | undefined>(toCalendarDate(value))
+  // Derived, not $state seeded once: the cart store owns `value` and can change
+  // it while this is mounted (a cleared cart resets the due date), and a local
+  // copy left the calendar highlighting a day the button no longer named.
+  const selected = $derived(toCalendarDate(value))
   let open = $state(false)
 
   const minDate = $derived(today(zone))
   const maxDate = $derived(today(zone).add({ days: MAX_CHECKOUT_DAYS }))
 
   function onSelect(next: DateValue | undefined) {
-    selected = next
+    // The selection travels out through `onValueChange` and comes back in as
+    // `value`; there is nothing to assign here.
     onValueChange(next ? dueInstantFor(next.toDate(zone)) : null)
     if (next) open = false
   }

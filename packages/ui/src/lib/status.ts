@@ -67,6 +67,19 @@ function daysUntil(iso: string): number {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
 }
 
+/**
+ * Calendar days from today to `date`: 0 today, 1 tomorrow, -1 yesterday.
+ *
+ * "Due today" is a statement about the date on the wall calendar, not about a
+ * 24-hour window. An item due at 11pm tonight is due *today* even though it is
+ * two hours away, and one due at 9am tomorrow is due *tomorrow* even though it
+ * is fourteen. Rounding a duration answers neither.
+ */
+function calendarDaysUntil(date: Date): number {
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  return Math.round((startOfDay(date) - startOfDay(new Date())) / (24 * 60 * 60 * 1000))
+}
+
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`
 }
@@ -96,10 +109,10 @@ export function resolveStatus(
     if (custody.due_at) {
       const remaining = new Date(custody.due_at).getTime() - Date.now()
       if (remaining <= DUE_SOON_WINDOW_MS) {
-        const days = daysUntil(custody.due_at)
+        const days = calendarDaysUntil(new Date(custody.due_at))
         return {
           state: "due-soon",
-          label: days <= 0 ? "Due today" : "Due tomorrow",
+          label: days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : "Due soon",
           ...PRESENTATION["due-soon"],
         }
       }

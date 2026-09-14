@@ -75,21 +75,39 @@
     () => categoryOptions.find((o) => o.id === form.category_id)?.label.trim() ?? "No category"
   )
 
+  /**
+   * Reload the table, aborting whatever was still in flight.
+   *
+   * The same shape as `catalog.reload()`, and for the same reason: the effect
+   * below re-runs on every keystroke, and without the abort a slower earlier
+   * response could land after a faster later one and leave the table showing
+   * results for a search nobody is looking at.
+   */
+  let inflight: AbortController | null = null
+
   async function load() {
+    inflight?.abort()
+    const controller = new AbortController()
+    inflight = controller
     loading = true
     error = null
     try {
-      units = await api.listAssets({ q: search.trim() || undefined })
+      units = await api.listAssets({ q: search.trim() || undefined }, controller.signal)
     } catch (err) {
+      if (controller.signal.aborted) return
       error = err instanceof Error ? err.message : String(err)
     } finally {
-      loading = false
+      if (inflight === controller) {
+        inflight = null
+        loading = false
+      }
     }
   }
 
   $effect(() => {
     void search
     load()
+    return () => inflight?.abort()
   })
 
   function openCreate() {

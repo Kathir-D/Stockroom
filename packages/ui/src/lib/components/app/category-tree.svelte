@@ -52,7 +52,6 @@
           <button
             type="button"
             onclick={() => toggle(node.id)}
-            aria-expanded={isOpen}
             aria-label={`${isOpen ? "Collapse" : "Expand"} ${node.name}`}
             class="flex w-5 shrink-0 items-center justify-center rounded-sm text-fg-faint hover:text-fg"
           >
@@ -72,6 +71,7 @@
           type="button"
           role="treeitem"
           aria-selected={selected === node.id}
+          aria-expanded={hasChildren ? isOpen : undefined}
           onclick={() => onSelect(node.id)}
           class={cn(
             "flex min-h-(--tap) flex-1 items-center rounded-sm px-2 text-left",

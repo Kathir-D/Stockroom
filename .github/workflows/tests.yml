@@ -116,7 +116,7 @@ jobs:
         if: steps.changes.outputs.code == 'true'
         run: npm run check
 
-      - name: Frontend tests (Vitest: packages/ui + both hosts)
+      - name: "Frontend tests (Vitest: packages/ui + both hosts)"
         if: steps.changes.outputs.code == 'true'
         run: npm test
 
