@@ -38,3 +38,51 @@ graphify-out/
 
 # GitNexus index: machine-local, rebuilt per machine
 .gitnexus/
+
+# ---------------------------------------------------------------- JS deps ---
+# Installed artefacts, never committed. `node_modules/` was committed by
+# accident in cc6a258 and untracked again during the Phase 6 frontend work:
+# one root `npm install` rebuilds every workspace, and tracking the result
+# turns each install into thousands of lines of diff and a merge conflict
+# inside somebody else's package.
+#
+# Unanchored (no leading slash) on purpose: this is an npm workspace, so a
+# nested `node_modules/` under web-app/ or desktop-app/frontend/ is a mistake
+# worth ignoring rather than committing -- see the note in scripts/start-mac.sh.
+node_modules/
+.npm/
+jspm_packages/
+
+# pnpm and yarn, in case either is ever used here instead of npm. Cheap to
+# carry, and the cost of missing one is another 15,000-file commit.
+.pnpm-store/
+.pnpm/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Package-manager logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npmrc.local
+
+# Vite's on-disk caches, when they land outside node_modules
+.vite/
+*.tsbuildinfo
+
+# Only ONE lockfile belongs in this repo. npm is what the scripts and CI run;
+# a stray pnpm/yarn lock beside it means two tools disagree about the tree.
+pnpm-lock.yaml
+yarn.lock
+
+# ------------------------------------------------------------- JS builds ---
+# Vite output. desktop-app/frontend/dist keeps a tracked .gitkeep because
+# desktop-app/main.go does `//go:embed all:frontend/dist`, and the directory
+# has to exist on a fresh clone for `go build ./...` to work at all.
+desktop-app/frontend/dist/*
+!desktop-app/frontend/dist/.gitkeep
+web-app/dist/
