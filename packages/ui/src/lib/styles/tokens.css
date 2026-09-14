@@ -1,0 +1,306 @@
+/*
+  The only file in the codebase allowed to define a colour, radius, shadow or
+  duration (docs/design/design-system.md §3). Nothing else writes a raw hex
+  value. Imported by each app's app.css after `@import "tailwindcss"`, so the
+  @theme blocks below are collected by Tailwind's own pass.
+
+  Hex, not oklch(), on purpose: the palette was picked by eye against real
+  screenshots rather than derived from a lightness scale (§3.1).
+*/
+
+/* Self-hosted, latin subset, variable weight. The machine has no internet
+   (CLAUDE.md §2), so a CDN font link would silently fall back to system sans
+   and the two apps would stop matching. Licences sit beside the files. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./fonts/inter-v19-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./fonts/jetbrains-mono-latin.woff2") format("woff2");
+}
+
+/*
+  The app is dark-only for v1 (§3.5), and the palette in :root below *is* the
+  dark theme. Tailwind's stock `dark:` variant keys off prefers-color-scheme,
+  which would make shadcn's generated `dark:` utilities switch on the OS
+  setting of whatever machine the app happens to run on -- the same class of
+  bug as §1.4's "renders differently in Wails than in the browser". Redefining
+  the variant as always-on makes the one theme deterministic on both hosts.
+
+  Adding light mode later (§3.5) means putting this back to `(&:where(.dark, .dark *))`
+  and moving the neutrals into a .dark block.
+*/
+@custom-variant dark (&);
+
+:root {
+  /* ---------- neutrals: Studio Ops (A2) ---------- */
+  --ground: #17191a; /* the window background */
+  --surface: #1e2122; /* cards, sidebar, table container, top bar */
+  --raised: #262a2b; /* hover, selected row, input fill, thumbnails */
+  --overlay: #2b2f30; /* dialogs and popovers, floats above surface */
+
+  --fg: #e9e9e7; /* primary text */
+  --fg-muted: #9a9f9e; /* secondary text, column headers, metadata */
+  --fg-faint: #7c8281; /* placeholder, disabled label, timestamps */
+
+  --line: #2f3435; /* decorative dividers, table rules. NEVER a control edge */
+  --line-control: #646b6a; /* borders that define an interactive control (§10) */
+  --line-strong: #414748; /* card and panel edges */
+
+  /* ---------- action ---------- */
+  --primary: #e9e9e7;
+  --primary-fg: #17191a;
+  --primary-hover: #ffffff;
+  --destructive: #ff7a70;
+  --destructive-fg: #17191a;
+
+  /* ---------- status: the ONLY saturated colour in the app (§1.2) ---------- */
+  --status-available: #4ade80;
+  --status-available-bg: #0e2b1c;
+  --status-out: #7db3ff;
+  --status-out-bg: #12233d;
+  --status-due-soon: #fbbf24;
+  --status-due-soon-bg: #33260a;
+  --status-overdue: #ff7a70;
+  --status-overdue-bg: #3a1614;
+  --status-unavailable: #9a9f9e;
+  --status-unavailable-bg: #232727;
+
+  /* ---------- shape ----------
+     Nothing in this app is more rounded than 10px; large radii read as
+     consumer/toy (§3.3). The @theme block below caps Tailwind's whole ramp at
+     that, which is also how shadcn's generated components stay in range: they
+     reach for `rounded-lg` on buttons and `rounded-xl` on dialogs, so the
+     design doc's "--radius-lg: 10px" lands on Tailwind's `xl` step here. */
+  --radius: 6px; /* buttons, inputs, rows, the default */
+
+  /* ---------- elevation: hairline first, shadow second ----------
+     No glow, no coloured shadow. On a dark ground a hairline reads as
+     elevation better than a blur does. */
+  --elev-1: 0 0 0 1px var(--line-strong);
+  --elev-2:
+    0 0 0 1px var(--line-strong), 0 4px 12px rgb(0 0 0 / 0.45);
+  --elev-3:
+    0 0 0 1px var(--line-control), 0 16px 40px rgb(0 0 0 / 0.6);
+
+  /* ---------- motion ---------- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms; /* hover, focus, checkbox */
+  --dur-normal: 200ms; /* dialog, popover, sheet */
+  --dur-slow: 320ms; /* scan confirmation */
+
+  /* ---------- density: the comfortable defaults (§4) ---------- */
+  --row-h: 36px;
+  --control-h: 32px;
+  --text-body: 14px;
+  --gutter: 16px;
+  --tap: 32px;
+}
+
+/*
+  Three densities, set with data-density on any container; everything inside
+  inherits. This is how one component set serves both a 36px admin table row
+  and an across-the-room kiosk target (§4). A component that hardcodes `h-9`
+  instead of `h-(--control-h)` is a bug: it will not scale into kiosk mode.
+*/
+[data-density="compact"] {
+  --row-h: 32px;
+  --control-h: 28px;
+  --text-body: 13px;
+  --gutter: 12px;
+  --tap: 28px;
+}
+[data-density="comfortable"] {
+  --row-h: 36px;
+  --control-h: 32px;
+  --text-body: 14px;
+  --gutter: 16px;
+  --tap: 32px;
+}
+[data-density="kiosk"] {
+  --row-h: 60px;
+  --control-h: 52px;
+  --text-body: 17px;
+  --gutter: 24px;
+  --tap: 48px;
+}
+
+/*
+  shadcn-svelte's components are written against --background, --foreground,
+  --border, --ring and friends. Aliasing them once here beats renaming them
+  inside two dozen generated files (§3.4).
+
+  --accent is deliberately a neutral, not a hue: in shadcn's vocabulary
+  "accent" means hover-fill, and giving it a colour is exactly how this app
+  would start looking like any other SaaS template (§1.2, §13).
+*/
+:root {
+  --background: var(--ground);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--overlay);
+  --popover-foreground: var(--fg);
+  --primary-foreground: var(--primary-fg);
+  --secondary: var(--raised);
+  --secondary-foreground: var(--fg);
+  --muted: var(--raised);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--raised);
+  --accent-foreground: var(--fg);
+  --destructive-foreground: var(--destructive-fg);
+  --border: var(--line);
+  --input: var(--line-control);
+  --ring: var(--fg);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-accent: var(--raised);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-ring: var(--fg);
+
+  /* Charts are out of scope for v1; these exist only so a generated component
+     that references them doesn't resolve to nothing. All neutral, per §1.2. */
+  --chart-1: var(--fg);
+  --chart-2: var(--fg-muted);
+  --chart-3: var(--fg-faint);
+  --chart-4: var(--line-control);
+  --chart-5: var(--line-strong);
+}
+
+/* Cap Tailwind's radius ramp so nothing in the app can exceed 10px, and pin
+   the fonts and the status hues as real utilities. */
+@theme {
+  --radius-sm: 4px; /* chips, thumbnails, checkboxes */
+  --radius-md: 6px;
+  --radius-lg: 6px; /* buttons, inputs, rows: shadcn reaches for rounded-lg */
+  --radius-xl: 10px; /* cards, dialogs, the cart commit panel */
+  --radius-2xl: 10px;
+  --radius-3xl: 10px;
+  --radius-4xl: 10px;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Tailwind ships no default easing named `ease`; register ours so
+     `transition-*` picks it up everywhere without a per-call arbitrary value. */
+  --ease-brand: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* `@theme inline` is what turns the variables above into utilities:
+   bg-surface, text-fg-muted, text-status-overdue, border-line. Inline so the
+   utility resolves to the variable rather than copying its value, which keeps
+   the density and alias indirection intact. */
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+
+  --color-line: var(--line);
+  --color-line-control: var(--line-control);
+  --color-line-strong: var(--line-strong);
+
+  --color-status-available: var(--status-available);
+  --color-status-available-bg: var(--status-available-bg);
+  --color-status-out: var(--status-out);
+  --color-status-out-bg: var(--status-out-bg);
+  --color-status-due-soon: var(--status-due-soon);
+  --color-status-due-soon-bg: var(--status-due-soon-bg);
+  --color-status-overdue: var(--status-overdue);
+  --color-status-overdue-bg: var(--status-overdue-bg);
+  --color-status-unavailable: var(--status-unavailable);
+  --color-status-unavailable-bg: var(--status-unavailable-bg);
+
+  /* shadcn's own names, so generated components get utilities too. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--ground);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus is visible on every interactive element, always (§10). Never
+     `outline: none` without a replacement. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--fg) 24%, transparent);
+  }
+
+  /* Identifiers are mono everywhere, and every numeric column lines up (§5.1). */
+  :where(table) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Motion exists to explain a state change, never to decorate (§1.6). When
+     the user has asked for less of it, every transition becomes instant. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

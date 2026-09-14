@@ -1,0 +1,16 @@
+{
+  "$schema": "https://shadcn-svelte.com/schema.json",
+  "tailwind": {
+    "css": "src/lib/styles/tokens.css",
+    "baseColor": "zinc"
+  },
+  "aliases": {
+    "components": "@stockroom/ui/components",
+    "ui": "@stockroom/ui/components/ui",
+    "utils": "@stockroom/ui/utils",
+    "hooks": "@stockroom/ui/hooks",
+    "lib": "@stockroom/ui"
+  },
+  "typescript": true,
+  "registry": "https://shadcn-svelte.com/registry"
+}
