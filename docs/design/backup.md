@@ -137,11 +137,11 @@ create table app_settings (
 insert into app_settings (id) values (true);
 ```
 
-**Zero is valid for `schedule_hour` and `photo_min_free_gb`, and for neither of
-the other two.** The split is not arbitrary: a zero *threshold* means "never warn
-me", which is a coherent thing to ask for, while a zero *interval* or *count* means
-"do this every time", which is the always-on failure both of those columns exist to
-avoid. The settings endpoint rejects the same values the constraints do, so a bad
+**Zero is valid for `schedule_hour` and `photo_min_free_gb`, and invalid for the
+other three — `keep_days`, `stale_hours` and `photo_max_generations`.** The split
+is not arbitrary: a zero *threshold* means "never warn me", which is a coherent
+thing to ask for, while a zero *interval* or *count* means "do this every time",
+which is the always-on failure those three are bounded to avoid. The settings endpoint rejects the same values the constraints do, so a bad
 number is a 400 naming the field rather than a 500 from a constraint violation:
 
 | Column | Accepts | Why the bound is there |
@@ -332,9 +332,11 @@ Two honest caveats, both of which belong in the operator's head and in `F.2`:
 Additions go inside the existing snapshot transaction so every artifact describes
 one instant. The staging-and-rename logic is untouched.
 
-- **`sequences.csv`** — `last_value` **and `is_called`**, read from each sequence
-  relation directly (`select last_value, is_called from <seq>`), not from
-  `pg_sequences`. Closes gap 3.
+- **`sequences.csv`** — `last_value` and `is_called` from each sequence relation
+  directly (`select last_value, is_called from <seq>`), joined with `increment_by`,
+  `min_value`, `max_value` and `cycle` from `pg_sequences`. Neither source alone is
+  enough: `pg_sequences` has the shape but not `is_called`, and the relation has
+  `is_called` but not the shape. Closes gap 3.
 
   Both halves are load-bearing, and `pg_sequences` cannot supply them. Verified on
   the live stack: for a sequence that has never been read, `pg_sequences.last_value`
@@ -481,16 +483,12 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
    `activity_log` restores clean instead of gaining junk rows.
 5. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`, keeping the
    row count `CopyFrom` returns for each.
-6. Restore every sequence as `setval(name, last_value, is_called)`, replaying the
-   captured flag rather than defaulting it. A sequence absent from `sequences.csv`
-   — one added by a migration after the backup was taken — is left at its declared
-   start rather than guessed at.
-7. **Verify, still inside the transaction and before `Commit`.** On any failure
-   return an error, which leaves the deferred `tx.Rollback()` to put the live
-   database back exactly as it was. Verifying after a commit would be a report,
-   not a guard — there would be nothing left to roll back to, and the
-   half-restored database would already be the live one. Three checks, all of
-   which must pass before the commit:
+6. **Verify, still inside the transaction and before `Commit` — and before any
+   sequence is written.** On any failure return an error, which leaves the
+   deferred `tx.Rollback()` to put every *table* back as it was. Verifying after a
+   commit would be a report, not a guard — there would be nothing left to roll
+   back to, and the half-restored database would already be the live one. Three
+   checks, all of which must pass:
 
    a. **Row counts** per table against `manifest.json`.
 
@@ -504,23 +502,84 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
       contype = 'f'` rather than hand-listed, so a future migration's FK is
       covered without anyone remembering to add it here.
 
-   c. **Sequences past their tables.** The invariant is on the *effective next
-      value* — `last_value + 1` when `is_called`, `last_value` when not — which
-      must be **strictly greater** than the maximum live value of the column that
-      owns the sequence, or the next insert collides on a unique index. Comparing
-      the raw `last_value` instead would be wrong in the `is_called = false` case,
-      which is precisely the case the flag exists to distinguish. An empty table
-      has no maximum and so constrains nothing; that is a pass, not a skip to be
-      confused with a missing check. This is gap 3 caught a second time, at the
-      point where it would actually bite.
+   c. **Sequences past their tables**, checked against the values *in the archive*
+      rather than against anything already written, because nothing has been
+      written yet (step 7). The invariant is on the **effective next value**:
+
+      ```
+      next = is_called ? last_value + increment_by : last_value
+      ```
+
+      which for an ascending sequence must be **strictly greater** than the
+      maximum value now in the column that owns it, or the next insert collides on
+      a unique index. Two details that a naive `last_value + 1` gets wrong:
+
+      - **`is_called` decides whether to add anything at all.** Comparing the raw
+        `last_value` is wrong in the `is_called = false` case, which is exactly the
+        case the flag exists to distinguish.
+      - **The step is `increment_by`, not 1.** `pg_sequences` carries
+        `increment_by`, `min_value`, `max_value` and `cycle`, so the real number is
+        available for the cost of reading it. A **descending** sequence
+        (`increment_by < 0`) inverts the comparison — its next value must be
+        strictly *less* than the column's minimum — and a `cycle` sequence has no
+        such invariant at all, since it is permitted to wrap onto values already
+        in the table.
+
+      Nothing in this schema is descending or cycling: the one sequence is
+      `assets_asset_tag_seq`, ascending by 1. So rather than write and never
+      exercise two more branches, the restore **captures the metadata and refuses
+      what it cannot reason about** — a descending or cycling sequence in the
+      archive is an explicit `ErrInvalid` naming it, not a silently skipped check.
+      A refusal is recoverable; a check that quietly passes on a sequence it was
+      never designed for is the bug this whole step exists to prevent.
+
+      An empty table has no maximum and so constrains nothing; that is a pass, not
+      a skip to be confused with a missing check. This is gap 3 caught a second
+      time, at the point where it would actually bite.
 
    Trigger-derived state needs no separate check: the triggers suspended in step 4
    are `trg_assets_updated_at` and `trg_asset_status_log`, and both are silenced
    deliberately because `activity_log` and `updated_at` are *restored from the
    backup* rather than regenerated. Check (a) already covers `activity_log`.
 
+7. **Only now, every check having passed, write the sequences** —
+   `setval(name, last_value, is_called)`, replaying the captured flag rather than
+   defaulting it. A sequence absent from `sequences.csv` (one added by a migration
+   after the backup was taken) is left at its declared start rather than guessed
+   at.
+
+   **Sequences are written last because `setval` is not transactional, and this is
+   the one place the "just roll back" story does not hold.** Verified against the
+   live stack:
+
+   ```sql
+   begin; select setval('rb_probe', 500, true); rollback;
+   select last_value from rb_probe;   -- 500. The rollback did not undo it.
+   ```
+
+   So the ordering is load-bearing rather than tidiness: had the sequences been
+   written before the checks, a validation failure would roll the *tables* back to
+   their original contents while leaving every sequence advanced to the archive's
+   values — a database that looks untouched and silently hands out colliding keys.
+   Doing it after the checks shrinks the exposure to the gap between step 7 and the
+   commit.
+
+   That gap is not zero, so it is compensated rather than ignored: the original
+   `last_value`/`is_called` of every sequence is read **before** step 7 and, if the
+   commit fails, replayed to put them back. The compensation is best-effort by
+   nature — it is itself non-transactional — so a failure to compensate is logged
+   loudly and named in the error, because a restore that reports success while
+   leaving sequences in a third state is worse than one that reports what happened.
+
 8. Commit, then `db.Sessions.Clear()` — every existing token now points at a
    profile that may no longer exist.
+
+**What "rolled back" precisely means here.** For the 12 tables it is exact: the
+transaction aborts and their contents are what they were. For sequences it is not
+the transaction doing the work but the compensation above, which is why the
+sequence writes are ordered after every check that can trigger a rollback. Saying
+the database is left "exactly as it was" without that step would be a claim
+Postgres does not support.
 
 Restoring is destructive, so the request carries `confirm=RESTORE`.
 
@@ -536,16 +595,21 @@ Instead the package exports one constructor:
 ```go
 // LocalCLIActor is the actor for a process that already has shell access to the
 // machine and the database URL — strictly more access than any account grants,
-// so there is nothing left for an authorization check to protect. It is the only
-// Actor with trustedCLI set, and trustedCLI is unexported, so no HTTP handler,
-// JSON body or session lookup can produce one: server/ is a different package
-// and literally cannot construct this value.
+// so there is nothing left for an authorization check to protect.
+//
+// This function is exported and any package may call it; what no other package
+// can do is produce a trustedCLI Actor *any other way*. The field is unexported,
+// so an Actor literal naming it does not compile outside internal/stockroom, and
+// no HTTP handler, JSON body or session lookup can set it. Calling this is a
+// deliberate act by code already running on the machine; forging it is not
+// possible.
 func LocalCLIActor() Actor { return Actor{ID: "cli", IsAdmin: true, trustedCLI: true} }
 ```
 
-The unexported field is the whole mechanism. `Actor` is built from a session by
-`Resolve`, which never sets it, so a forged request cannot reach this state no
-matter what it sends. `RequireAdmin` needs no change: the actor is an admin.
+The unexported field is the whole mechanism, and the guarantee is worth stating
+precisely: *this constructor is callable from anywhere; `trustedCLI` is settable
+from nowhere else.* `Actor` is built from a session by `Resolve`, which never sets
+it, so a forged request cannot reach this state no matter what it sends. `RequireAdmin` needs no change: the actor is an admin.
 `trustedCLI` exists to keep the two apart **in the log** — a restore records
 whether it came from `cli` or from a named admin's ID, because "who restored the
 database" is the first question anyone asks afterwards.
@@ -784,17 +848,33 @@ If Stockroom will not start, see `RESTORE.md` inside any backup zip.
    the restore and roll back — that one matters most, because it is the failure
    replica mode is specifically unable to catch on its own. Truncate a file
    mid-quoted-field and confirm the checksum catches what the row count cannot.
-10. **Bootstrap, the zero-account recovery test.** Blank `ADMIN_STUDENT_NUMBER` in
-    `.env`, `supabase db reset`, then `truncate profiles` so the database holds
-    **no accounts at all**. Confirm the backup screen's "no failsafe admin"
-    warning fires, that every HTTP restore route is refused (there is no session
-    to be had), and that `cmd/restore` nonetheless restores the zip end to end via
-    `LocalCLIActor` and `RestoreFromZip`, after which the backed-up accounts sign
-    in again. This is the one test that covers the path `cmd/restore` exists for;
-    without it the CLI is a code path first exercised during an actual disaster.
-    Assert too that `LocalCLIActor` is unconstructible from outside the package —
-    a compile-time fact, so a `// +build`-excluded snippet or a comment in the
-    test is enough to record the intent.
+10. **Bootstrap, the zero-account recovery test.** Order matters here, because
+    two of the assertions need an account and the rest need there to be none:
+
+    a. Blank `ADMIN_STUDENT_NUMBER` in `.env`, then `supabase db reset` — which
+       reseeds, so the seeded admin still exists.
+    b. **Sign in as the seeded admin and confirm the backup screen's "no failsafe
+       admin" warning fires.** This has to happen now: the warning lives on an
+       admin-only screen, so once the accounts are gone there is no way to
+       observe it at all.
+    c. `truncate profiles`, leaving **no accounts**.
+    d. Confirm every HTTP restore route is refused — there is no session to be
+       had.
+    e. Confirm `cmd/restore` nonetheless restores the zip end to end through
+       `LocalCLIActor` and `RestoreFromZip`, after which the backed-up accounts
+       sign in again.
+
+    Step (e) is the one test that covers the path `cmd/restore` exists for;
+    without it the CLI is code first exercised during an actual disaster.
+
+    Test the **exported API**, not an imagined inaccessibility of it:
+    `LocalCLIActor()` is exported and any package may call it, so assert that
+    calling it yields an actor `RequireAdmin` accepts, and that `Resolve` returns
+    an actor with `trustedCLI` **unset** for every session including an admin's —
+    that second assertion is the one carrying the security claim. That an external
+    `Actor` literal cannot name `trustedCLI` is a compile-time fact and cannot be
+    asserted at runtime; record it with a commented snippet, not a test that
+    pretends to check it.
 11. **Retention**: backdate the GitHub history past `keep_days` and confirm the
     purge leaves a single root commit holding the current backup, that the picker
     still works afterwards, and that the pruned commits are gone from the list.
