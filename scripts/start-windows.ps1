@@ -105,7 +105,16 @@ try {
     Write-Host "== Dependencies =="
     # A PowerShell copy of scripts/ensure-deps.sh. The two must stay in step;
     # keep the reasoning in the shell script and the steps identical here.
-    #
+
+    # Point git at the tracked hooks directory, so .githooks/pre-commit runs the
+    # suite before a commit lands (CI.md, "Pre-commit").
+    if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path ".githooks")) {
+        if ((git config --get core.hooksPath) -ne ".githooks") {
+            git config core.hooksPath .githooks
+            Write-Host "  [OK] git hooks -> .githooks"
+        }
+    }
+
     # A nested node_modules under a workspace shadows the hoisted one, and the
     # failure is silent: that app gets its own Svelte and Vite, components
     # render, and their state stops updating (design-system.md 2.2). This is how

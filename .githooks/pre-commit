@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Run the full suite before a commit lands, so a red build is caught here rather
+# than in GitHub Actions ten minutes later.
+#
+# Installed by scripts/ensure-deps.sh, which points core.hooksPath at this
+# directory. That is why the hook is tracked in the repository instead of living
+# in .git/hooks: a hook nobody can see is a hook nobody maintains, and a fresh
+# clone would silently have no protection at all.
+#
+# Skipping it, when you mean to:
+#
+#   git commit --no-verify        one commit
+#   STOCKROOM_SKIP_TESTS=1 git commit ...   same, but says why in the log
+#
+# Both are honest escape hatches. CI still runs the same suite on the pull
+# request (CI.md), so a skipped hook delays the failure rather than hiding it.
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+if [ "${STOCKROOM_SKIP_TESTS:-}" = "1" ]; then
+  echo "pre-commit: STOCKROOM_SKIP_TESTS=1, skipping the suite."
+  exit 0
+fi
+
+# Nothing staged (an empty or amend-only commit) is nothing to test.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+# The same code-vs-docs rule CI uses (CI.md, "Docs-only changes"), for the same
+# reason: a Markdown edit cannot break a build, and making people wait on a full
+# suite for one is how a hook earns a permanent --no-verify in someone's muscle
+# memory. Keep this list in step with .github/workflows/tests.yml.
+code_paths='^(go\.(mod|sum)|internal/|server/|cmd/|supabase/|packages/|desktop-app/|web-app/|package\.json|package-lock\.json|scripts/|\.githooks/|\.github/)'
+
+if ! printf '%s\n' "$staged" | grep -qE "$code_paths"; then
+  echo "pre-commit: docs-only change, skipping the suite."
+  exit 0
+fi
+
+echo "pre-commit: running ./scripts/test-all.sh (skip with --no-verify)"
+echo
+
+if ./scripts/test-all.sh; then
+  echo
+  echo "pre-commit: all suites passed."
+  exit 0
+fi
+
+cat <<'MSG'
+
+pre-commit: the suite failed, so the commit was not created.
+
+  - Fix the failures above and commit again, or
+  - `supabase start` first if the database suites were the ones that failed
+    (they are reported as FAILED rather than skipped on purpose, so a silent
+    skip can never pass for a success), or
+  - `git commit --no-verify` if you know this commit is not the cause and you
+    want CI to be the one to say so.
+MSG
+exit 1

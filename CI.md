@@ -14,6 +14,16 @@ One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/t
 
 A push to a PR cancels the run already going for it.
 
+## Pre-commit
+
+`.githooks/pre-commit` runs [`scripts/test-all.sh`](scripts/test-all.sh) before a commit is created, so a red build is caught on the machine that broke it rather than ten minutes later in Actions. `scripts/ensure-deps.sh` installs it by setting `core.hooksPath` to `.githooks`, which is why the hook is tracked in the repository instead of sitting in `.git/hooks`: a hook nobody can see is a hook nobody maintains, and a fresh clone would otherwise have no protection at all.
+
+It skips itself on docs-only commits, using the same path list as the workflow below — a Markdown edit cannot break a build, and making people wait on a full suite for one is how a hook earns a permanent `--no-verify` in someone's muscle memory. Keep the two lists in step.
+
+Escapes, both honest: `git commit --no-verify` for one commit, or `STOCKROOM_SKIP_TESTS=1` when you want the reason to show up in a shell history. CI still runs the same suite on the pull request, so a skipped hook delays a failure rather than hiding it.
+
+The hook fails rather than warns when Postgres is down, because `test-all.sh` already reports a skipped pgTAP run as `FAILED` on purpose: a silent skip must never pass for a success. `supabase start` first, or `--no-verify` if the commit genuinely is not the cause.
+
 ## Docs-only changes
 
 Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/` or the workflow itself. The three npm entries matter: `packages/ui` is where all the frontend code now lives, and a lockfile change moves every dependency under it. Anything else, which in practice means Markdown, `LICENSE`, `docs/` and `Catagories.md`, is a docs-only change (`Catagories.md` only reaches the database when someone rewrites `seed.sql` from it by hand, and that edit is under `supabase/`): the job runs a single echo step and finishes green in a few seconds.

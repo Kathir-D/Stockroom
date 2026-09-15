@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite.
 
 ---
 
@@ -212,8 +212,9 @@ stockroom/
 ├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 ├── web-app/                   # Vite + Svelte 5 secondary UI
 ├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
+├── .githooks/                 # pre-commit: runs scripts/test-all.sh; installed by ensure-deps.sh via core.hooksPath
 ├── scripts/                   # ensure-deps.sh (the one install), start-mac.sh, start-windows.ps1 (untested on Windows), test-all.sh, graphify_fix_extraction.py
-├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system)
+├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system, backup spec)
 ├── Catagories.md              # source of truth for the initial category tree
 ├── CONTEXT.md                 # domain glossary
 ├── CLAUDE.md, TODO.md, README.md, TESTING.md, CI.md
@@ -269,6 +270,8 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
    | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that `cmd/backup` copies `BACKUP_DIR` to | (none) |
    | `SESSION_IDLE_MINUTES` | idle timeout, from the last interaction | `10` |
 
+   `BACKUP_DIR` and the `rclone` remote are the last backup settings that live here. Per `docs/design/backup.md` §C.2 they move into an `app_settings` row when Phase 7 lands, with `.env` kept only as a first-boot seed, because an admin must never have to edit a file to change where backups go.
+
 3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates two development accounts, both with the typed-login password `password` and both able to sign in by scanning their number instead:
 
    | Student number | Name | Role |
@@ -319,9 +322,21 @@ Scanner hardware is not yet purchased/tested (Week 7). Confirm it's a plain HID 
 
 ## 11. Backup strategy
 
-Nightly, a Go CLI (`cmd/backup`) exports every table to CSV into `BACKUP_DIR/<yyyy-mm-dd>/<table>.csv`, then shells out to `rclone copy BACKUP_DIR <remote>:` to push that same folder to Google Drive (decided 2026-09-12, replacing the earlier local-only/Drive-client-syncs-it plan). `rclone` is configured once, interactively (`rclone config`), on whichever machine runs the backup; the stored remote name goes in `.env` alongside `BACKUP_DIR`. The local CSVs are kept regardless of upload success, both as a fallback and because the restore test below reads from them directly. Scheduling: Windows Task Scheduler on the closet PC; launchd or cron on macOS for dev. The same export function is exposed as "Backup Now" in the admin panel.
+**`docs/design/backup.md` is the spec** (2026-09-14). What follows is the summary; that file has the walkthroughs, the endpoint table and the reasoning.
 
-Before go-live, test a full restore: wipe a scratch database, reapply migrations, reload from CSV, confirm row counts match.
+**Built today.** `ExportAllTablesToCSV` (`internal/stockroom/backup.go`) writes every table to `BACKUP_DIR/<yyyy-mm-dd>/<table>.csv` through `COPY … TO STDOUT`, in one repeatable-read snapshot, staged and renamed into place. Exposed as "Backup Now" in the admin panel. It is local-only and manual: nothing schedules it, nothing leaves the machine, and the CSVs as they stand **cannot be restored** — the `assets_asset_tag_seq` value is not captured, the files load in foreign-key-violating alphabetical order, and loading `assets.csv` would fire `trg_asset_status_log`.
+
+**Specified, not built.** Two selectable targets, **Google Drive** (via `rclone`) and **GitHub** (via the REST API, no `git` binary), pushing to both when both are configured. Drive gets dated folders; GitHub overwrites a fixed `backup/` path so its git history *is* the dated backup list and the repo grows by a few KB of text a night instead of a zip. Each night also writes a readable `inventory.csv` and `accounts.csv` beside the restorable zip.
+
+**Restore is a feature, not a script.** An admin uploads a zip, or picks a date from either target, in the admin panel; all three sources converge on one `RestoreFromZip`. `set local session_replication_role = replica` is what makes a CSV reload work at all. It is viable to require a sign-in for this because `EnsureFailsafeAdmin` runs on every server start, so a wiped database still has one account. `cmd/restore` covers the case where the server itself will not start.
+
+**Photos are mirrored locally only**, to one live folder updated in place, rolling to a new frozen generation every `keep_days` (default 90). Never deleted. This is a deliberate trade: a failed drive loses `uploads/` and its mirror together.
+
+**Configuration lives in the database, not `.env`** (an `app_settings` row), because no admin should have to edit a file. `.env` seeds it on first boot. The export **redacts secret columns** — `app_settings` sits in `public`, so an unredacted export would push `github_token` to the very repo it unlocks and GitHub's secret scanning would revoke it.
+
+**Scheduling is a goroutine in the Go server**, not Task Scheduler or launchd: it fires at the configured hour and runs immediately on boot when the last success is stale, which is how "back up first thing when the machine is available" is met. **Staleness is surfaced** at admin sign-in, at every user's sign-in (naming the admins to tell), and on the backup screen.
+
+Before go-live, the restore round-trip has to pass: wipe a scratch database, reapply migrations, restore, confirm row counts match the manifest and `assets_asset_tag_seq` resumes where it left off.
 
 ---
 
@@ -415,10 +430,25 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **`asset_tag` is internal and generated; `serial_number` is the identifier.** The base schema's `asset_tag` predated the barcode flow and had become a second unique code per unit that nobody reads — the admin form demanded it, and real inventory entry would have meant typing two. The generator is a **column default backed by a sequence**, not Go, so every writer gets a tag without knowing it must; `AssetInput` no longer accepts one and `UpdateAsset` never rewrites it. `serial_number` is `not null` in exchange, because an asset with no serial cannot be scanned and scanning is the only way an item comes back (§1.5). Migration `20260914120000`.
 - [x] **One install, called from everywhere.** `scripts/ensure-deps.sh` is the single definition of an up-to-date tree — clear a shadowing nested `node_modules`, `npm install` (or `npm ci`) at the root, `go mod download` — and `start-mac.sh` and `test-all.sh` both call it rather than each spelling it out. `start-windows.ps1` keeps a PowerShell copy. CI installs once at the root for the same reason: a per-app `npm ci --prefix` is the nested-install bug in the place nobody watches. A nested `node_modules` counts as *shadowing* only when it holds a real package; `.vite`, `.vite-temp` and `.bin` are normal and must not trigger a reinstall.
 
+**Closed (2026-09-14, Phase 7 design; `docs/design/backup.md`)**
+- [x] **Two targets, not one, and both at once when both are configured.** Google Drive via `rclone` and GitHub via its REST API. Drive won the "which is easier for a non-technical teacher to set up" question outright: handover is a Google sign-in screen they already recognise, where GitHub needs an account, a repository and a personal access token explained first. GitHub is kept because it needs no installed software at all and is the harder of the two for a school firewall to block.
+- [x] **GitHub stores a fixed `backup/` path, overwritten nightly, one commit per run.** Dated folders with a zip apiece would add a full incompressible blob every night with no way to prune without rewriting history. CSVs are text, so git deltas them to a few KB, and the commit log *becomes* the dated backup list the in-app picker reads.
+- [x] **Restore is an admin-panel feature, not a shell script.** The ceiling on user effort is uploading one file, or picking a date. This is only viable because `EnsureFailsafeAdmin` runs on every server start, so a wiped database still has one account to sign in with. `psql` is not installed on the dev machine and Postgres runs inside Docker, so a `\copy`-based script had no client to run in anyway.
+- [x] **One restore code path for three sources.** The GitHub fetch repackages its tarball into the same zip the local export writes, so upload, Drive-by-date and GitHub-by-date all funnel into `RestoreFromZip`.
+- [x] **`set local session_replication_role = replica` is what makes a CSV reload work.** It suspends foreign-key checks, so alphabetical file order stops mattering (`assets.csv` sorts before the `categories.csv` it references), and it silences `trg_asset_status_log`, so `activity_log` restores clean instead of gaining a junk row per asset.
+- [x] **Backup configuration moves into the database.** No admin or user edits a file after the one-time software install; `.env` seeds `app_settings` on first boot and stops being the source of truth.
+- [x] **Secret columns are redacted from the export.** `app_settings` is in `public`, so `publicTables` would sweep `github_token` into `app_settings.csv` and push it to the repository it grants write access to; GitHub's secret scanning would then revoke it, killing backups silently hours after the first successful push.
+- [x] **The scheduler is a goroutine in the Go server**, replacing Task Scheduler and launchd. On boot it runs immediately when the last success is stale, which is the whole of "back up first thing when the machine becomes available", and it sidesteps `findDotEnv` walking up from a working directory that would have been `System32` under a Windows task.
+- [x] **Photos are mirrored locally only, one live folder, generational rollover.** Not a copy per day; the live folder is updated in place and freezes into a kept generation every `keep_days`. Never deletes, so an accidental delete stays recoverable. The accepted cost is that a dead drive loses `uploads/` and its mirror together.
+- [x] **`accounts.csv` carries `password_hash`, and that is the most it can carry.** Plaintext passwords are not recoverable anywhere in the system: bcrypt is one-way and the server never stores what was typed. Restoring the hash is equivalent for the user.
+- [x] **Student numbers leaving the machine was raised and accepted.** A student number is a working credential (§7), so the pushed folder is a roster of usable logins. It is why the GitHub repository must be private.
+- [x] **The suite runs before a commit, not only in CI.** `.githooks/pre-commit` calls `scripts/test-all.sh`; `ensure-deps.sh` points `core.hooksPath` at the tracked directory so a fresh clone is protected without anyone running a `git config` line. Docs-only commits skip it on the same path list the workflow uses.
+
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
 - [ ] Scan-vs-typed keystroke threshold. Ships as a named/configurable constant defaulted to 50ms; tune with real hardware in Week 7
-- [ ] Exact `BACKUP_DIR` path and `rclone` remote name on the closet PC (blocked on the PC being provisioned)
+- [ ] Exact `BACKUP_DIR` path, photo-mirror disk and target credentials on the closet PC (blocked on the PC being provisioned). All of it is admin-panel configuration under the Phase 7 design, so none of it blocks writing the code
+- [ ] Whether the photo mirror gets a second physical disk. Photos are local-only by decision, so this is their only redundancy (`docs/design/backup.md` §H)
 
 ---
 
