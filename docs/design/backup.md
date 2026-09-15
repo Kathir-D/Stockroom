@@ -137,9 +137,12 @@ create table app_settings (
 insert into app_settings (id) values (true);
 ```
 
-**Zero is valid for `schedule_hour` and for nothing else**, and the settings
-endpoint rejects the same values the constraints do, so a bad number is a 400 that
-names the field rather than a 500 from a constraint violation:
+**Zero is valid for `schedule_hour` and `photo_min_free_gb`, and for neither of
+the other two.** The split is not arbitrary: a zero *threshold* means "never warn
+me", which is a coherent thing to ask for, while a zero *interval* or *count* means
+"do this every time", which is the always-on failure both of those columns exist to
+avoid. The settings endpoint rejects the same values the constraints do, so a bad
+number is a 400 naming the field rather than a 500 from a constraint violation:
 
 | Column | Accepts | Why the bound is there |
 |---|---|---|
@@ -149,8 +152,9 @@ names the field rather than a 500 from a constraint violation:
 | `photo_max_generations` | `>= 1` | A count of frozen photo generations before the alert fires. At 0 the alert is on from the first rollover and never off, which is the same always-on-warning failure as `stale_hours = 0`. |
 | `schedule_hour` | `0`–`23` | An hour of the local clock, so 0 is midnight and is ordinary. Anything outside the range names a time that does not exist; without the constraint it would just never match and backups would silently never fire. |
 
-Negative values are refused for all three by the same constraints — there is no
-reading of a negative retention or a negative staleness threshold.
+Negative values are refused throughout by the same constraints: there is no
+reading of a negative retention, staleness threshold, generation count or disk
+headroom.
 
 `.env` becomes a **bootstrap fallback only**: on first start, a null column whose
 matching environment variable is set is seeded from it. That preserves today's
@@ -328,8 +332,25 @@ Two honest caveats, both of which belong in the operator's head and in `F.2`:
 Additions go inside the existing snapshot transaction so every artifact describes
 one instant. The staging-and-rename logic is untouched.
 
-- **`sequences.csv`** — `select sequencename, last_value from pg_sequences where
-  schemaname = 'public'`. Closes gap 3.
+- **`sequences.csv`** — `last_value` **and `is_called`**, read from each sequence
+  relation directly (`select last_value, is_called from <seq>`), not from
+  `pg_sequences`. Closes gap 3.
+
+  Both halves are load-bearing, and `pg_sequences` cannot supply them. Verified on
+  the live stack: for a sequence that has never been read, `pg_sequences.last_value`
+  is **null** while the relation itself holds `last_value = <start>, is_called =
+  false`, meaning the next `nextval` returns `start` — so an export reading
+  `pg_sequences` records nothing at all for an unused sequence and a restore has
+  nothing to write. `is_called` then decides what the recorded number *means*:
+  `setval(seq, n)` defaults to `is_called = true`, so `nextval` returns `n + 1`.
+  Replaying a captured `is_called = false` sequence with the default therefore
+  burns its first value — measured, not theorised: `setval('s', 5, true)` on a
+  fresh `start 5` sequence yields `nextval` = 6, skipping 5.
+
+  Skipping is survivable for an ascending sequence behind a unique column, since
+  it only ever moves forward, but it is a silent off-by-one in exactly the piece
+  of state gap 3 is about. Recording the flag and replaying it as
+  `setval(name, last_value, is_called)` costs one boolean and removes the question.
 - **`schema_version`** in the manifest, read from
   `supabase_migrations.schema_migrations`. Closes gap 6. Restore refuses on a
   mismatch unless the admin explicitly overrides.
@@ -445,7 +466,8 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
 
 `RestoreFromZip(ctx, actor, r io.ReaderAt, size int64, opts)`:
 
-1. `RequireAdmin`.
+1. `RequireAdmin`, which the CLI satisfies with a **trusted local actor** rather
+   than by being exempt from the check — see below.
 2. Read `manifest.json`; compare `schema_version` to live. A mismatch is
    `ErrConflict` unless `opts.Force`.
 3. **Verify every file's SHA-256 against the manifest before opening the
@@ -459,7 +481,10 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
    `activity_log` restores clean instead of gaining junk rows.
 5. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`, keeping the
    row count `CopyFrom` returns for each.
-6. `setval` every sequence from `sequences.csv`.
+6. Restore every sequence as `setval(name, last_value, is_called)`, replaying the
+   captured flag rather than defaulting it. A sequence absent from `sequences.csv`
+   — one added by a migration after the backup was taken — is left at its declared
+   start rather than guessed at.
 7. **Verify, still inside the transaction and before `Commit`.** On any failure
    return an error, which leaves the deferred `tx.Rollback()` to put the live
    database back exactly as it was. Verifying after a commit would be a report,
@@ -479,10 +504,15 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
       contype = 'f'` rather than hand-listed, so a future migration's FK is
       covered without anyone remembering to add it here.
 
-   c. **Sequences past their tables.** Every sequence's restored `last_value` must
-      be at or above the maximum live value of the column that owns it, or the
-      next insert collides on a unique index. This is gap 3 caught a second time,
-      at the point where it would actually bite.
+   c. **Sequences past their tables.** The invariant is on the *effective next
+      value* — `last_value + 1` when `is_called`, `last_value` when not — which
+      must be **strictly greater** than the maximum live value of the column that
+      owns the sequence, or the next insert collides on a unique index. Comparing
+      the raw `last_value` instead would be wrong in the `is_called = false` case,
+      which is precisely the case the flag exists to distinguish. An empty table
+      has no maximum and so constrains nothing; that is a pass, not a skip to be
+      confused with a missing check. This is gap 3 caught a second time, at the
+      point where it would actually bite.
 
    Trigger-derived state needs no separate check: the triggers suspended in step 4
    are `trg_assets_updated_at` and `trg_asset_status_log`, and both are silenced
@@ -493,6 +523,35 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
    profile that may no longer exist.
 
 Restoring is destructive, so the request carries `confirm=RESTORE`.
+
+**The CLI actor.** `RestoreFromZip` gates on `RequireAdmin`, and `cmd/restore`
+exists precisely for the case where there are no accounts to be an admin of (§C.1).
+Left as written those two are contradictory, and the tempting resolutions are both
+wrong: dropping the gate would open the HTTP path, and giving the CLI a second
+restore implementation that skips it recreates the untested-emergency-code problem
+§C.1 rejects.
+
+Instead the package exports one constructor:
+
+```go
+// LocalCLIActor is the actor for a process that already has shell access to the
+// machine and the database URL — strictly more access than any account grants,
+// so there is nothing left for an authorization check to protect. It is the only
+// Actor with trustedCLI set, and trustedCLI is unexported, so no HTTP handler,
+// JSON body or session lookup can produce one: server/ is a different package
+// and literally cannot construct this value.
+func LocalCLIActor() Actor { return Actor{ID: "cli", IsAdmin: true, trustedCLI: true} }
+```
+
+The unexported field is the whole mechanism. `Actor` is built from a session by
+`Resolve`, which never sets it, so a forged request cannot reach this state no
+matter what it sends. `RequireAdmin` needs no change: the actor is an admin.
+`trustedCLI` exists to keep the two apart **in the log** — a restore records
+whether it came from `cli` or from a named admin's ID, because "who restored the
+database" is the first question anyone asks afterwards.
+
+Verification owns this too: Part G step 10 restores with zero rows in `profiles`, which is
+the only test that exercises the path the CLI exists for.
 
 ### E.6 `scheduler.go` — in-server, replacing OS scheduling
 
@@ -694,10 +753,19 @@ If Stockroom will not start, see `RESTORE.md` inside any backup zip.
 3. Run it twice; the second run re-copies no photos.
 4. **The round-trip, which is the only real proof.** `supabase db reset`, sign in
    as the failsafe admin, restore. Confirm every row count matches the manifest,
-   `assets_asset_tag_seq` resumes at **89 and not 1**, `activity_log` gains no
-   spurious rows, and both seeded accounts still sign in with `password`. This
-   closes `CLAUDE.md` §11's outstanding restore test, as a repeatable command
-   rather than a checklist item.
+   `assets_asset_tag_seq` resumes at **the value the backup captured and not at
+   1** (read it before backing up rather than hard-coding a number — it was 89
+   when this was written and 130 a day later), `activity_log` gains no spurious
+   rows, and both seeded accounts still sign in with `password`. This closes
+   `CLAUDE.md` §11's outstanding restore test, as a repeatable command rather than
+   a checklist item.
+   Cover **both sequence states and both table states**, since `is_called` is
+   exactly what distinguishes them: a used sequence over a populated table, and a
+   freshly-created sequence that has never been read (`is_called = false`,
+   `pg_sequences.last_value` null) over an empty one. After restoring the second,
+   `nextval` must return the sequence's start value, not start + 1 — that
+   off-by-one is what replaying the flag prevents, and it is invisible to a row
+   count.
 5. Schema-mismatch guard: edit `manifest.json`'s `schema_version` and expect a 409
    with the database untouched.
 6. Both targets enabled: confirm one commit on GitHub *and* files on Drive from a
@@ -716,10 +784,17 @@ If Stockroom will not start, see `RESTORE.md` inside any backup zip.
    the restore and roll back — that one matters most, because it is the failure
    replica mode is specifically unable to catch on its own. Truncate a file
    mid-quoted-field and confirm the checksum catches what the row count cannot.
-10. **Bootstrap**: blank `ADMIN_STUDENT_NUMBER` in `.env`, `supabase db reset`,
-    start the server. Confirm the backup screen's "no failsafe admin" warning
-    would have fired, and that `cmd/restore` restores the zip with zero accounts
-    in the database and no session.
+10. **Bootstrap, the zero-account recovery test.** Blank `ADMIN_STUDENT_NUMBER` in
+    `.env`, `supabase db reset`, then `truncate profiles` so the database holds
+    **no accounts at all**. Confirm the backup screen's "no failsafe admin"
+    warning fires, that every HTTP restore route is refused (there is no session
+    to be had), and that `cmd/restore` nonetheless restores the zip end to end via
+    `LocalCLIActor` and `RestoreFromZip`, after which the backed-up accounts sign
+    in again. This is the one test that covers the path `cmd/restore` exists for;
+    without it the CLI is a code path first exercised during an actual disaster.
+    Assert too that `LocalCLIActor` is unconstructible from outside the package —
+    a compile-time fact, so a `// +build`-excluded snippet or a comment in the
+    test is enough to record the intent.
 11. **Retention**: backdate the GitHub history past `keep_days` and confirm the
     purge leaves a single root commit holding the current backup, that the picker
     still works afterwards, and that the pruned commits are gone from the list.
