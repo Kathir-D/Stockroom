@@ -129,6 +129,7 @@ Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_valu
 
 ### Settings out of `.env`, into the database (§C.2)
 - [ ] Migration: single-row `app_settings` (`check (id)`) holding dirs, `keep_days`, `stale_hours`, `schedule_hour` and per-target config
+- [ ] Bound the three numbers in the DDL **and** in the settings endpoint, so a bad value is a 400 naming the field, not a 500 from a constraint: `keep_days >= 1`, `stale_hours >= 1`, `schedule_hour between 0 and 23`. Zero is valid for the hour (midnight) and for neither of the others — a 0-day retention re-copies every photo nightly and prunes the backup it just wrote, and a 0-hour staleness threshold fires the sign-in warning permanently
 - [ ] `internal/stockroom/settings.go`: load/save, `.env` as a first-boot seed only, `github_token` masked on read
 - [ ] **Redact secret columns from the export.** `app_settings` is in `public`, so `publicTables` sweeps `github_token` into `app_settings.csv` and pushes it to the repo it unlocks; GitHub secret scanning would auto-revoke it and kill backups silently. Restore must not overwrite the live value with the redacted null
 
@@ -136,7 +137,7 @@ Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_valu
 - [ ] `sequences.csv` from `pg_sequences`; `schema_version` in `manifest.json` from `supabase_migrations.schema_migrations`
 - [ ] `inventory.csv` (one readable row per item) and `accounts.csv` (one per account, `password_hash` included — plaintext is not recoverable, bcrypt is one-way). Reuse `loadCategoryTree`/`tree.pathOf` and `openCustodySQL` rather than a recursive CTE
 - [ ] Zip the raw tables + sequences + manifest + an embedded `RESTORE.md`
-- [ ] Cross-process `.lock`, stale-broken after 30 min
+- [ ] Cross-process lock via `pg_try_advisory_lock` on a dedicated connection, held for the whole run and released when that connection closes. **Not a lock file with a timeout**: too short and it is torn off a slow-but-live backup, letting a second process write the same dated folder; too long and a killed process wedges backups until someone deletes a file by hand. `false` is a skip, not an error
 
 ### Photos (§E.2)
 - [ ] `photos_backup.go`: **one live folder, updated in place**, rolling to a new frozen generation every `keep_days`. Never deletes. A missing `uploads/` is a no-op, not an error
@@ -149,7 +150,7 @@ Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_valu
 - [ ] Layout: Drive gets dated folders; GitHub overwrites a fixed `backup/` path so git history *is* the backup list and the repo grows by KB of text, not a zip a night
 
 ### Restore — one code path, three sources (§E.5)
-- [ ] `RestoreFromZip`: schema-version check, `set local session_replication_role = replica` (kills the FK-order and trigger-pollution gaps in one line), truncate + `CopyFrom`, `setval`, verify against the manifest, roll back on mismatch, clear all sessions
+- [ ] `RestoreFromZip`: schema-version check, `set local session_replication_role = replica` (kills the FK-order and trigger-pollution gaps in one line), truncate + `CopyFrom`, `setval`, then **verify row counts against the manifest inside the transaction and before `Commit`** — returning an error there lets the deferred rollback leave the live database untouched, where verifying after the commit would only be a report on a half-restored database that is already live. Commit, then clear all sessions
 - [ ] Upload, Drive date-pick and GitHub date-pick all funnel into it — the GitHub fetch repackages its tarball into the same zip
 - [ ] `cmd/restore/main.go` for when the server itself will not start
 

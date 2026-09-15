@@ -108,9 +108,14 @@ try {
 
     # Point git at the tracked hooks directory, so .githooks/pre-commit runs the
     # suite before a commit lands (CI.md, "Pre-commit").
+    # Fatal on failure, matching ensure-deps.sh: this step decides whether the
+    # suite guards a commit at all, so a warning nobody reads is worse than a stop.
     if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path ".githooks")) {
         if ((git config --get core.hooksPath) -ne ".githooks") {
             git config core.hooksPath .githooks
+            if ($LASTEXITCODE -ne 0) {
+                throw "could not set core.hooksPath; the pre-commit hook will not run"
+            }
             Write-Host "  [OK] git hooks -> .githooks"
         }
     }

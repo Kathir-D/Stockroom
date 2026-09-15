@@ -32,7 +32,7 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 - Overdue tracking surfaced in-app (admin list + warning at the user's next sign-in; overdue users are blocked from new checkouts until returned, admin can override)
 - Zero dependency on internet for core daily operation
 - Runs on both the Windows closet PC and a macOS dev machine
-- Automated nightly off-site backup (CSV pushed to Google Drive via `rclone`)
+- Automated nightly off-site backup (CSV pushed to Google Drive via `rclone`, to GitHub via its REST API, or both; §11)
 
 **Non-goals** (explicitly out of scope; tables may exist in the schema but nothing is built on them)
 - Reservations / future bookings / double-booking prevention (maybe much later)
@@ -57,7 +57,7 @@ One dedicated Windows PC lives in the camera closet, always on. Development happ
    - **Wails desktop app** (`desktop-app/`). Primary interface, native window, Svelte 5 + TypeScript. Wails' Go side is just a window host; it does not touch the DB.
    - **Web app** (`web-app/`). Vite + Svelte 5 + TypeScript, served on `localhost`, mirrors the desktop app. Localhost only, not exposed on the LAN.
 
-The USB barcode scanner plugs into this machine. Nightly, a Go CLI exports every table to CSV into a local folder, then shells out to `rclone copy` to push that folder to Google Drive. `rclone` owns the OAuth token and refresh handling (set up once, interactively, via `rclone config`); the Go code never talks to the Drive API directly.
+The USB barcode scanner plugs into this machine. Nightly, a goroutine inside the Go server exports every table to CSV into a local folder and pushes it to whichever off-site targets are configured: `rclone copy` to Google Drive, the REST API to GitHub, or both. `rclone` owns the Drive OAuth token and refresh handling (set up once from the admin panel, which drives `rclone authorize`); the Go code never talks to the Drive API directly. Specified, not yet built — see §11.
 
 ---
 
@@ -89,7 +89,7 @@ Why this shape:
 | Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Renders `<StockroomApp>`; calls the Go server over HTTP |
 | Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Renders the same `<StockroomApp>`; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
-| Backup | Go CLI (`cmd/backup`) → CSV per table → local folder → `rclone copy` to Google Drive; scheduled by Task Scheduler (Windows) / launchd or cron (macOS) |
+| Backup | Built: manual CSV export to a local folder. Specified (§11, `docs/design/backup.md`): a scheduler goroutine in the Go server → CSV per table + zip → local folder → `rclone copy` to Google Drive and/or the GitHub REST API. No OS scheduler, no `cmd/backup` |
 | Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options` |
 
 ---
@@ -193,7 +193,8 @@ stockroom/
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
 │   └── auth.go, users.go, assets.go, custody.go, admin.go
-├── cmd/backup/                # (Phase 7, not yet written) CLI: export + rclone push
+├── cmd/restore/               # (Phase 7, not yet written) disaster CLI: restore a zip when the server won't start
+│                              # NB: no cmd/backup. Phase 7 schedules the backup inside the server (§11)
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
 ├── package.json               # npm workspaces: packages/*, web-app, desktop-app/frontend
 ├── packages/ui/               # @stockroom/ui: ALL frontend code. Both hosts are five lines each
@@ -267,7 +268,7 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
    | `ADMIN_PASSWORD` | failsafe admin password; at least 8 characters | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
    | `BACKUP_DIR` | local CSV export target, also `rclone`'s source folder | (none) |
-   | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that `cmd/backup` copies `BACKUP_DIR` to | (none) |
+   | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that the nightly run copies `BACKUP_DIR` to | (none) |
    | `SESSION_IDLE_MINUTES` | idle timeout, from the last interaction | `10` |
 
    `BACKUP_DIR` and the `rclone` remote are the last backup settings that live here. Per `docs/design/backup.md` §C.2 they move into an `app_settings` row when Phase 7 lands, with `.env` kept only as a first-boot seed, because an admin must never have to edit a file to change where backups go.
@@ -381,7 +382,7 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Check-in: requires sign-in; anyone can return any item; optional damage note.
 - [x] Photos: profile + asset photos in local `uploads/`, served by Go.
 - [x] Out of scope: bookings, locations, tags, saved filters, custom fields, LAN access, email. Kits = lowest priority.
-- [x] Backup: nightly CSV via Go CLI into a **Google Drive** folder.
+- [x] Backup: nightly CSV via Go CLI into a **Google Drive** folder. *Superseded 2026-09-14 (Phase 7 design): Drive is one of two targets, the second being GitHub, and the nightly run is a goroutine inside the server rather than a CLI. See §11 and `docs/design/backup.md`.*
 - [x] Styling (2026-09-05): **Tailwind CSS v4** in both frontends via `@tailwindcss/vite`; design tokens live in each app's `src/app.css` `@theme` block (desktop: the dark "Nocturne" system from the UI import). No component CSS files, no `tailwind.config.js`.
 
 - [x] Failsafe admin is best-effort (2026-09-08): `EnsureFailsafeAdmin` returns `ErrFailsafeNotConfigured` when the `.env` values are blank, and the server only ever logs a warning. Nothing about the failsafe can stop the API from starting.
@@ -396,7 +397,7 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Overdue block is enforced at **both** layers: the checkout UI disables itself the moment an overdue user signs in, and `CheckOutAssets` also refuses server-side regardless of what the client sends.
 - [x] **Custodian visibility, reversing the 2026-09-09 review tightening**: who currently holds a checked-out item is visible to any signed-in user, not admin-only. Applies only to the current holder. `GetAssetHistory`'s full past-custodian trail stays admin-only, and a non-admin's own history is available only via `GetUserHistory`. See §7.
 - [x] Browse list sort order (previously unspecified): categories in `Catagories.md`'s document order, not alphabetical; within any list, available units sort before checked-out ones.
-- [x] Backup: nightly CSV → local folder → **`rclone copy` pushes it to Google Drive** directly, replacing the "Drive desktop client syncs a local folder, no cloud API code" plan. One-time interactive `rclone config` OAuth setup instead of hand-written Google API/OAuth code. See §11.
+- [x] Backup: nightly CSV → local folder → **`rclone copy` pushes it to Google Drive** directly, replacing the "Drive desktop client syncs a local folder, no cloud API code" plan. One-time interactive `rclone config` OAuth setup instead of hand-written Google API/OAuth code. See §11. *Still current as far as Drive goes — `rclone copy` is exactly how the Drive target works. Phase 7 (2026-09-14) only widens it: Drive became one of two targets alongside GitHub, and the OAuth setup moved from a terminal into the admin panel via `rclone authorize`.*
 
 **Closed (2026-09-12, building Phase 4)**
 - [x] **The two custody *lists* are admin-only.** The 2026-09-12 decision opens the current holder of a *named* item to everyone (`ListAssets`, `GetAsset`, `ScanItem` name it for every actor). `ListActiveCustody` / `ListOverdueCustody` are the other thing: the roster of who has what, which §8.7 of the design doc specs as admin-panel screens. A student who wants to know who has the lens they want still finds it in the browse list.

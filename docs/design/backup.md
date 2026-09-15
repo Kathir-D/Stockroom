@@ -96,9 +96,9 @@ create table app_settings (
   id               boolean primary key default true check (id),
   backup_dir       text,
   photo_backup_dir text,
-  keep_days        integer not null default 90,
-  stale_hours      integer not null default 48,
-  schedule_hour    integer not null default 2,     -- 0-23, local time
+  keep_days        integer not null default 90  check (keep_days    >= 1),
+  stale_hours      integer not null default 48  check (stale_hours  >= 1),
+  schedule_hour    integer not null default 2   check (schedule_hour between 0 and 23),
   drive_enabled    boolean not null default false,
   drive_remote     text,
   drive_path       text default 'stockroom',
@@ -109,6 +109,19 @@ create table app_settings (
 );
 insert into app_settings (id) values (true);
 ```
+
+**Zero is valid for `schedule_hour` and for nothing else**, and the settings
+endpoint rejects the same values the constraints do, so a bad number is a 400 that
+names the field rather than a 500 from a constraint violation:
+
+| Column | Accepts | Why the bound is there |
+|---|---|---|
+| `keep_days` | `>= 1` | It is a rollover *interval*. At 0 the photo mirror starts a fresh generation on every run — a full copy of every photo, nightly, which is the one behaviour the generational design exists to avoid — and local dated-folder pruning would delete the backup that had just been written. |
+| `stale_hours` | `>= 1` | At 0 the last run is stale the instant it finishes, so the sign-in warning fires at every sign-in forever and the scheduler's catch-up runs on every boot. A warning that is always on is a warning nobody reads. |
+| `schedule_hour` | `0`–`23` | An hour of the local clock, so 0 is midnight and is ordinary. Anything outside the range names a time that does not exist; without the constraint it would just never match and backups would silently never fire. |
+
+Negative values are refused for all three by the same constraints — there is no
+reading of a negative retention or a negative staleness threshold.
 
 `.env` becomes a **bootstrap fallback only**: on first start, a null column whose
 matching environment variable is set is seeded from it. That preserves today's
@@ -232,8 +245,29 @@ one instant. The staging-and-rename logic is untouched.
 - **`accounts.csv`** — `student_number, first_name, last_name, full_name, email,
   is_admin, password_hash, has_password, created_at, photo_path`.
 - **Zip assembly** via `archive/zip`; `RESTORE.md` embedded with `go:embed`.
-- **A cross-process lock**, `backup_dir/.lock` via `O_CREATE|O_EXCL`, broken if
-  stale after 30 minutes. Closes gap 8.
+- **A cross-process lock**, held for the lifetime of the run: `select
+  pg_try_advisory_lock(<constant key>)` on its own dedicated connection, released
+  by `pg_advisory_unlock` (and, whatever happens, by that connection closing).
+  `false` means another process is mid-backup, which is a skip, not an error.
+  Closes gap 8.
+
+  Not a lock file with a timeout. `backup_dir/.lock` broken after 30 minutes was
+  the obvious design and it is wrong in both directions: a backup slower than the
+  timeout — a first photo mirror, a slow uplink, a stalled `rclone` — has its lock
+  torn out from under it while it is still running, so a second process starts
+  writing the same dated directory and pushing to the same target, which is the
+  exact race the lock exists to stop. Go the other way and raise the timeout, and
+  a process killed mid-run leaves a lock nothing collects, so backups stop until
+  somebody deletes a file they have never heard of. A Postgres advisory lock has
+  no timeout to get wrong: it lives with the connection, so it survives a run of
+  any length and a crashed or `kill -9`'d process drops it the moment the socket
+  closes.
+
+  Scope worth naming: the lock is held in the database, so it excludes anything
+  else talking to that database — the server's scheduler, a second server, a
+  `POST /admin/backup` arriving mid-run, `cmd/restore`. It does not exclude two
+  servers on two different databases pointed at one `backup_dir`, which is not a
+  configuration this system has.
 
 ### E.2 `photos_backup.go` — the generational mirror
 
@@ -263,7 +297,7 @@ photo_backup_dir/
 
 ### E.3 `target_drive.go`
 
-`rclone copy <backup_dir> <remote>:<path> --exclude .lock --exclude *.log`, with
+`rclone copy <backup_dir> <remote>:<path> --exclude *.log`, with
 retry and backoff (1/2/5/15/30 min). `Versions` is `rclone lsjson`, `Fetch` is
 `rclone cat` of the chosen dated zip, `Test` is `rclone lsd`. A missing binary is
 `ErrNotConfigured` naming the install command, not a crash.
@@ -300,12 +334,17 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
    **That single line closes gaps 4 and 5**: foreign keys are not checked, so load
    order stops mattering, and `trg_asset_status_log` stays quiet, so
    `activity_log` restores clean instead of gaining junk rows.
-4. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`.
+4. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`, keeping the
+   row count `CopyFrom` returns for each.
 5. `setval` every sequence from `sequences.csv`.
-6. Commit, then verify live row counts against the manifest. **A mismatch rolls
-   back.**
-7. `db.Sessions.Clear()` — every existing token now points at a profile that may
-   no longer exist.
+6. **Verify, still inside the transaction and before `Commit`.** Count each table
+   and compare against `manifest.json`; on any mismatch return an error, which
+   leaves the deferred `tx.Rollback()` to put the live database back exactly as it
+   was. Verifying after a commit would be a report, not a guard — there would be
+   nothing left to roll back to, and the half-restored database would already be
+   the live one. Commit only once every count matches.
+7. `db.Sessions.Clear()`, after the commit — every existing token now points at a
+   profile that may no longer exist.
 
 Restoring is destructive, so the request carries `confirm=RESTORE`.
 
