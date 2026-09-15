@@ -111,18 +111,80 @@ The workspace only helps if every entry point installs it the same way. These la
 - [x] **CI installs once at the root.** It was running `npm ci --prefix desktop-app/frontend` and `--prefix web-app`, which is the nested-install bug in the one place nobody watches, and caching two per-app lockfiles that no longer exist
 - [x] **CI's paths filter gained `packages/**`** (plus the root `package.json` / `package-lock.json`). Without it a change to `packages/ui` — now the entire frontend — was classified docs-only and skipped the build
 - [x] **`.gitignore` covers npm, pnpm and yarn**, not just `node_modules/`: `.npm/`, `.pnpm-store/`, `.yarn/cache`, `.pnp.*`, every `*-debug.log`, and `web-app/dist/`. `pnpm-lock.yaml` and `yarn.lock` are ignored on purpose — one lockfile, and a second means two tools disagree about the tree. The `node_modules/` rule is unanchored so a nested one is caught too. `node_modules/` itself had been committed in `cc6a258` (15,404 files) and is untracked again
+- [x] **`.githooks/pre-commit` runs the full suite before a commit is created** (2026-09-14), installed by `ensure-deps.sh` pointing `core.hooksPath` at the tracked directory rather than asking every contributor to remember a `git config` line. It reuses `scripts/test-all.sh`, so there is still one definition of "the suite", and skips itself on docs-only commits using the same path list as `.github/workflows/tests.yml`. `--no-verify` and `STOCKROOM_SKIP_TESTS=1` are the documented escapes; CI runs the same suite on the PR, so a skipped hook delays a failure rather than hiding it
 
 ### Still open in Phase 6
 - [ ] Wire the **command palette** (`/` focuses search today; `Cmd/Ctrl+K` jump-to-asset is unbuilt, design doc §5.1)
 - [ ] Below-900px behaviour is untested. §7.2 calls it a courtesy, not a target, but "make sure it isn't broken" is still unchecked
 - [ ] Run the desktop app under `wails dev` against real hardware. Only the web host has been exercised in a browser so far
 
-## Phase 7: Backup (Week 8)
-- [x] `ExportAllTablesToCSV(dir)` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx, into `BACKUP_DIR/<yyyy-mm-dd>/`
-- [ ] `cmd/backup/main.go`. Loads `.env`, runs the export, then shells out to `rclone copy BACKUP_DIR <RCLONE_REMOTE>:` to push it to Google Drive (2026-09-12, replaces the local-only/Drive-client-syncs-it plan; CLAUDE.md §11). Exits non-zero if either step fails; the local CSVs stay on disk regardless of upload success
-- [ ] One-time setup doc: running `rclone config` interactively to authorize the Drive remote, naming it to match `RCLONE_REMOTE`
-- [ ] Scheduling docs in README: Windows Task Scheduler entry; launchd plist / cron line for macOS
-- [ ] Restore test (CLAUDE.md §11): scratch DB → migrations → load CSVs → row counts match
+## Phase 7: Backup & restore (Week 8)
+Specified in full in **`docs/design/backup.md`** (2026-09-14) after a grilling pass over the original three-line plan. The spec is the detail; this is the checklist. Section references below are to that file.
+
+### What already works
+- [x] `ExportAllTablesToCSV` in `internal/stockroom/backup.go`. `COPY … TO STDOUT WITH CSV HEADER` per table via pgx into `BACKUP_DIR/<yyyy-mm-dd>/`, one repeatable-read snapshot, staged and renamed into place. Verified against the live database: all 12 tables, 16 assets, 2 profiles, with `password_hash`, `student_number`, `is_admin`, `serial_number` and `asset_tag` present (§A.1)
+
+### The ten gaps it does not cover (§A.2)
+Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_value` = 89) not captured · CSVs load in FK-violating alphabetical order · a restore would fire `trg_asset_status_log` · schema version not recorded · silent failure invisible · `backupReplace` is in-process only · no restore path at all · all config is `.env`.
+
+### Settings out of `.env`, into the database (§C.2)
+- [ ] Migration: single-row `app_settings` (`check (id)`) holding dirs, `keep_days`, `stale_hours`, `schedule_hour` and per-target config
+- [ ] Bound the three numbers in the DDL **and** in the settings endpoint, so a bad value is a 400 naming the field, not a 500 from a constraint: `keep_days >= 1`, `stale_hours >= 1`, `schedule_hour between 0 and 23`. Zero is valid for the hour (midnight) and for neither of the others — a 0-day retention re-copies every photo nightly and prunes the backup it just wrote, and a 0-hour staleness threshold fires the sign-in warning permanently
+- [ ] `internal/stockroom/settings.go`: load/save, `.env` as a first-boot seed only, `github_token` and `archive_passphrase` masked on read
+- [ ] Optional **archive encryption** (§C.5), off by default: AES-256-GCM under a scrypt-derived `archive_passphrase`, applied before the zip reaches any target, prompted for on restore. Document that the passphrase lives outside both targets and that losing it loses the backup — it trades a confidentiality risk for an availability one, which is why it is opt-in
+- [ ] **Redact secret columns from the export.** `app_settings` is in `public`, so `publicTables` sweeps `github_token` into `app_settings.csv` and pushes it to the repo it unlocks; GitHub secret scanning would auto-revoke it and kill backups silently. Restore must not overwrite the live value with the redacted null
+
+### Export (§E.1)
+- [ ] `sequences.csv` with **`last_value` and `is_called`**, read from each sequence relation directly — `pg_sequences` reports a null `last_value` for a never-read sequence and exposes no `is_called`, and replaying one with `setval`'s default `true` burns its first value (measured: `setval('s', 5, true)` on a fresh `start 5` sequence → `nextval` = 6); `schema_version` in `manifest.json` from `supabase_migrations.schema_migrations`
+- [ ] `inventory.csv` (one readable row per item) and `accounts.csv` (one per account, `password_hash` included — plaintext is not recoverable, bcrypt is one-way). Reuse `loadCategoryTree`/`tree.pathOf` and `openCustodySQL` rather than a recursive CTE
+- [ ] Zip the raw tables + sequences + manifest + an embedded `RESTORE.md`
+- [ ] Cross-process lock via `pg_try_advisory_lock` on a dedicated connection, held for the whole run and released when that connection closes. **Not a lock file with a timeout**: too short and it is torn off a slow-but-live backup, letting a second process write the same dated folder; too long and a killed process wedges backups until someone deletes a file by hand. `false` is a skip, not an error
+
+### Photos (§E.2)
+- [ ] `photos_backup.go`: **one live folder, updated in place**, rolling to a new frozen generation every `keep_days`. Never deletes. A missing `uploads/` is a no-op, not an error
+- [ ] `RestorePhotos` + a generation picker in the UI. Local only by decision — see §H for what that costs
+- [ ] **Bound the mirror with an alert, not a purge**: `photo_min_free_gb` (default 5) and `photo_max_generations` (default 8, two years at the default `keep_days`), warning on the same surfaces staleness uses, with the backup screen listing each generation's size and a delete button. Never delete automatically — auto-purging the only copy of a deleted photo defeats the mirror. Without the bound the mirror grows until the disk fills, and because photos are mirrored in the same run that writes the database backup, what breaks is the backup itself
+
+### Targets, both active when both are configured (§C.3, §E.3, §E.4)
+- [ ] `BackupTarget` interface: `Push` / `Versions` / `Fetch` / `Test`
+- [ ] Drive via `rclone` (`copy`, `lsjson`, `cat`, `lsd`), with retry/backoff and a UI-driven `rclone authorize` connect flow so a revoked token never needs a terminal
+- [ ] GitHub via the REST API, no `git` binary: Git Data API for one atomic commit, commits list for versions, tarball for fetch, and an auto-written repo README
+- [ ] Layout: Drive gets dated folders; GitHub overwrites a fixed `backup/` path so git history *is* the backup list and the repo grows by KB of text, not a zip a night
+- [ ] **Bound the GitHub history at `keep_days` and purge it by rewriting the branch onto a fresh orphan root.** Overwriting `accounts.csv` does not remove its old versions, and that file is a credential roster — a deleted student stays a working scan-login in every commit predating the deletion. Document both caveats: unreachable objects survive until GitHub GCs them, so scrubbing one account means deleting and recreating the repo, and the force-update is the one irreversible write the app makes
+
+### Restore — one code path, three sources (§E.5)
+- [ ] `manifest.json` gains a **SHA-256 per file**, written by the export and verified by the restore *before* the transaction opens. A corrupted download then costs nothing, and it is the only check that catches a CSV truncated mid-quoted-field — one truncated on a line boundary shows up as a row count, one truncated mid-field does not
+- [ ] `RestoreFromZip`: schema-version check, checksum check, `set local session_replication_role = replica` (kills the FK-order and trigger-pollution gaps in one line), truncate + `CopyFrom`, then **validate inside the transaction, then `setval` last** — returning an error there lets the deferred rollback leave the live database untouched, where verifying after the commit would only be a report on a half-restored database that is already live. Commit, then clear all sessions
+- [ ] Those pre-commit checks are three, not one: **row counts** against the manifest; **referential integrity**, by resetting `session_replication_role` to `origin` in the same transaction and running an anti-join per FK enumerated from `pg_constraint where contype = 'f'` (never hand-listed, so a later migration's FK is covered without anyone remembering); and **every sequence's effective next value** (`last_value + increment_by` when `is_called`, else `last_value`) **strictly above its column's max**, an empty table constraining nothing. Capture `increment_by`/`cycle` from `pg_sequences` and **refuse a descending or cycling sequence with `ErrInvalid`** rather than run a check that was never designed for one — nothing in this schema is either, and a check that quietly passes on a sequence it cannot reason about is the bug the step exists to prevent. Replica mode is what makes the FK check necessary — nothing on the way in rejects an `assets` row pointing at a category the archive does not contain, and unchecked that turns a clean failure into a permanently inconsistent database. No separate trigger-state check is needed: `activity_log` and `updated_at` are restored from the backup by design, and the row-count check already covers them
+- [ ] Upload, Drive date-pick and GitHub date-pick all funnel into it — the GitHub fetch repackages its tarball into the same zip
+- [ ] `cmd/restore/main.go`, calling the **same** `RestoreFromZip` — for when the server will not start, and for when a wiped database has no account to sign in with
+- [ ] **`setval` runs after every rollback-triggering check, never before**, because `setval` is not transactional — verified: a `setval` inside an explicit `rollback` survives it. Written first, a failed validation would roll the tables back while leaving the sequences advanced: a database that looks untouched and hands out colliding keys. Capture each sequence's prior `last_value`/`is_called` beforehand and replay them if the commit fails; that compensation is non-transactional too, so log a failure to compensate loudly and name it in the error
+- [ ] `LocalCLIActor() Actor` so the CLI **satisfies** `RequireAdmin` instead of being exempt from it: `Actor{ID: "cli", IsAdmin: true, trustedCLI: true}`, where `trustedCLI` is **unexported**, so `server/` cannot construct one and `Resolve` never sets one — no request can forge it. Dropping the gate would open the HTTP path; a second CLI-only restore would be emergency code first run during an emergency. Log which of `cli` or a named admin ID performed a restore
+- [ ] **Zero-account recovery test**, in this order: `supabase db reset` (reseeds), sign in as the seeded admin and confirm the "no failsafe admin" warning fires — it lives on an admin-only screen, so it is unobservable once the accounts are gone — *then* `truncate profiles`, confirm every HTTP restore route is refused, restore end to end through `cmd/restore`, and confirm the backed-up accounts sign in again. Test the exported API: assert `LocalCLIActor()` yields an actor `RequireAdmin` accepts and that `Resolve` returns `trustedCLI` unset for every session (that second one carries the security claim). An external `Actor` literal naming `trustedCLI` failing to compile is a compile-time fact — record it in a comment, not a test that pretends to check it. Without it the CLI path is first exercised during an actual disaster
+- [ ] **The failsafe admin is best-effort, so the panel route is conditional.** An unfilled `.env` restores into zero accounts and makes the admin panel unreachable exactly when it is needed. Do not make `.env` a startup requirement (2026-09-08 decision stands); instead have `BackupStatus` report whether a failsafe admin exists and warn on the backup screen when it does not
+
+### Scheduling, in-server (§E.6)
+- [ ] Goroutine in `server/main.go`: fires at `schedule_hour`, and **runs immediately on boot if the last success is stale**, which is the whole of "back up first thing when the machine is available"
+- [ ] Replaces Task Scheduler and launchd entirely, and with them the `findDotEnv` problem (it walks up from CWD; a Windows task starts in `System32`)
+
+### Failure visibility (§E.7)
+- [ ] `BackupStatus` + `.last-success.json` per target + rotating `backup.log`
+- [ ] `LoginResult`/`MeResult` gain `BackupWarning`, beside the existing `HasOverdue`
+- [ ] Three surfaces: admin sign-in, **every** user's sign-in (naming the admins to tell, names only — never student numbers, per CLAUDE.md §7), and a banner on the backup screen
+
+### UI (§E.9) — no admin ever edits a file
+- [ ] New **Settings** tab: folders with a validator, retention, schedule hour, a card per target with Connect / Test connection
+- [ ] **Backup** tab gains the staleness banner, per-target last-run table, restore-by-upload, restore-by-date, restore-photos, and a `backup.log` tail
+
+### Docs
+- [ ] `docs/BACKUP-SETUP.md` from §F: the click-by-click Drive and GitHub walkthroughs, including the "Google hasn't verified this app" screen and the fine-grained-PAT permission
+- [ ] README backup section; CLAUDE.md §11 kept in step
+
+### Verification (§G)
+- [ ] Unit tests incl. the token-redaction case
+- [ ] **The round-trip**: `supabase db reset` → restore → row counts match the manifest, `assets_asset_tag_seq` resumes at **the captured value, not 1** (read it before backing up; it was 89 when Phase 7 was specced and 130 the next day, so never hard-code it), no spurious `activity_log` rows, seeded accounts still sign in. Cover both sequence states — a used sequence over a populated table, and a never-read one (`is_called = false`) over an empty table, where `nextval` must return the start value and not start + 1. Closes CLAUDE.md §11's outstanding restore test
+- [ ] Both targets at once; break one, confirm the other still succeeds and the status names which failed
+- [ ] A config-only run-through from a fresh clone, without opening a text editor
 
 ## Phase 8: Kits (Week 9, only if everything above is done)
 - [ ] `ListKits`, `CreateKit`, `UpdateKit`, `DeleteKit`, `AddAssetToKit`, `RemoveAssetFromKit`

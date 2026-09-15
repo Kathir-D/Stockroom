@@ -8,6 +8,8 @@ Run everything with:
 ./scripts/test-all.sh
 ```
 
+`.githooks/pre-commit` runs that same script before a commit is created, so the suite is the default rather than something you remember. `scripts/ensure-deps.sh` installs it by pointing `core.hooksPath` at `.githooks`. Docs-only commits skip it; `git commit --no-verify` or `STOCKROOM_SKIP_TESTS=1` skip it deliberately. See `CI.md`, "Pre-commit".
+
 Or one layer at a time:
 
 ```bash

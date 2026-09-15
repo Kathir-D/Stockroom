@@ -51,6 +51,7 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - 'scripts/**'
+              - '.githooks/**'
               - '.github/workflows/**'
 
       - name: Set up Go

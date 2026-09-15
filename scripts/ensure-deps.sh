@@ -24,6 +24,29 @@ fi
 
 echo "== Dependencies =="
 
+# Point git at the tracked hooks directory, so .githooks/pre-commit runs the
+# suite before a commit lands (CI.md, "Pre-commit"). It is set here rather than
+# documented as a manual step because a hook that depends on every contributor
+# remembering one git config line is a hook that is off in most clones.
+# Idempotent, and harmless when git is not present (a tarball download).
+#
+# A failure here is fatal rather than a warning. Every other step in this script
+# is recoverable by rerunning it; this one silently decides whether the test
+# suite guards a commit at all, and a script that prints a warning nobody reads
+# and then exits 0 is how a clone ends up committing untested code for a week.
+if command -v git >/dev/null 2>&1 && [ -d .githooks ]; then
+  if [ "$(git config --get core.hooksPath 2>/dev/null)" != ".githooks" ]; then
+    if git config core.hooksPath .githooks; then
+      echo "  [OK] git hooks -> .githooks"
+    else
+      echo "  [FAIL] could not set core.hooksPath; the pre-commit hook will not run" >&2
+      exit 1
+    fi
+  fi
+  chmod +x .githooks/* 2>/dev/null || true
+fi
+
+
 # A nested node_modules under a workspace shadows the hoisted one, and the
 # failure is silent: that app gets its own copy of Svelte and Vite, components
 # render, and their state stops updating (docs/design/design-system.md §2.2).
