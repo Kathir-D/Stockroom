@@ -76,7 +76,7 @@ This was raised and accepted on 2026-09-14. It is why the GitHub repository
 ### C.1 Why upload-to-restore works at all
 
 If the database is wiped there are no accounts, so nobody can sign in to the
-admin panel to restore it. This is already solved, by accident:
+admin panel to restore it. This is mostly solved already, by accident:
 `EnsureFailsafeAdmin` (`failsafe.go`) runs on **every server start** and recreates
 the `.env` admin. The recovery sequence is:
 
@@ -84,7 +84,31 @@ the `.env` admin. The recovery sequence is:
 2. Start the Go server → the failsafe admin exists
 3. Sign in → Admin → Backup → restore from an upload, or pick a date from Drive/GitHub
 
-`cmd/restore` exists for the narrower case where the *server itself* will not start.
+**"Mostly" is doing real work in that sentence, and the gap has to be closed
+rather than glossed.** The failsafe is deliberately best-effort: per `CLAUDE.md`
+§7 and the 2026-09-08 decision, unset, malformed or rejected `.env` values are
+logged as a warning and the server starts *without* a failsafe admin, because a
+typo in `.env` must not take the whole API down. That decision is right and stays.
+But it means step 2 is conditional, and the condition is invisible until the
+morning somebody needs it: a site that never filled in `ADMIN_STUDENT_NUMBER`
+restores a wiped database into zero accounts and finds the admin panel — the
+entire documented restore route — unreachable.
+
+Two things close it, and both are required:
+
+- **`cmd/restore` is the guaranteed path, not the narrow one.** It connects with
+  `DATABASE_URL` and takes no session, because its trust boundary is shell access
+  to the closet PC, which is already strictly more access than any account grants.
+  It therefore works with zero accounts in the database, and it is what the
+  disaster procedure in `F.3` leads with. It calls the same `RestoreFromZip` as
+  the panel (§E.5) rather than reimplementing a restore — a second restore
+  implementation used only in emergencies is a restore that has never been tested
+  at the moment it is needed.
+- **The app says so while it still can.** `BackupStatus` (§E.7) reports whether a
+  failsafe admin is actually configured, and the backup screen warns when it is
+  not: *"No failsafe admin is configured. If the database is lost you will not be
+  able to sign in to restore it."* The check costs one comparison and turns a
+  silent, latent unrecoverability into a visible setup defect.
 
 ### C.2 Settings move into the database
 
@@ -105,6 +129,9 @@ create table app_settings (
   github_enabled   boolean not null default false,
   github_repo      text,
   github_token     text,
+  archive_passphrase text,                          -- null = unencrypted (§C.5)
+  photo_min_free_gb  integer not null default 5  check (photo_min_free_gb     >= 0),
+  photo_max_generations integer not null default 8 check (photo_max_generations >= 1),
   updated_at       timestamptz not null default now()
 );
 insert into app_settings (id) values (true);
@@ -118,6 +145,8 @@ names the field rather than a 500 from a constraint violation:
 |---|---|---|
 | `keep_days` | `>= 1` | It is a rollover *interval*. At 0 the photo mirror starts a fresh generation on every run — a full copy of every photo, nightly, which is the one behaviour the generational design exists to avoid — and local dated-folder pruning would delete the backup that had just been written. |
 | `stale_hours` | `>= 1` | At 0 the last run is stale the instant it finishes, so the sign-in warning fires at every sign-in forever and the scheduler's catch-up runs on every boot. A warning that is always on is a warning nobody reads. |
+| `photo_min_free_gb` | `>= 0` | A disk-headroom warning threshold (§E.2). 0 is meaningful — it turns the free-space alert off for someone who watches the disk another way — where a negative is not. |
+| `photo_max_generations` | `>= 1` | A count of frozen photo generations before the alert fires. At 0 the alert is on from the first rollover and never off, which is the same always-on-warning failure as `stale_hours = 0`. |
 | `schedule_hour` | `0`–`23` | An hour of the local clock, so 0 is midnight and is ordinary. Anything outside the range names a time that does not exist; without the constraint it would just never match and backups would silently never fire. |
 
 Negative values are refused for all three by the same constraints — there is no
@@ -133,9 +162,11 @@ source of truth.
 > written into `app_settings.csv` and pushed to the very repository it grants
 > write access to. GitHub's secret scanning would spot the `github_pat_` prefix
 > and revoke it, silently killing backups a few hours after the first successful
-> push. **The export nulls `github_token`, and any secret column added later, on
-> the way out.** Restore leaves the live value alone rather than overwriting it
-> with the null it finds.
+> push. **The export nulls `github_token`, `archive_passphrase`, and any secret
+> column added later, on the way out.** Restore leaves the live value alone rather
+> than overwriting it with the null it finds. `archive_passphrase` is on that list
+> for a blunter reason than the token: a passphrase written inside the archive it
+> encrypts protects nothing at all.
 
 ### C.3 The target interface
 
@@ -170,6 +201,40 @@ GitHub uses the REST API rather than the `git` binary deliberately: one secret,
 nothing to install, no credential helper, no SSH keys, and the same token serves
 both the push and the browse-history feature.
 
+### C.5 Optional archive encryption
+
+Off by default, and specified here because the risk it addresses is real even
+though the default is a deliberate decision rather than an oversight.
+
+What leaves the machine is a credential file. `accounts.csv` carries student
+numbers, which sign their owner in by scan with no password (§B.1), and
+`password_hash`, which is bcrypt — one-way, so nobody reads a password out of it,
+but offline-crackable at leisure by anyone holding the file, which a private
+repository or an unshared Drive account is exactly one compromised account away
+from being. The project's owner was shown this and accepted it for a
+localhost-only school deployment; the access controls on the target are the
+control, and they are load-bearing rather than defence in depth.
+
+For a site that needs more than that, setting `archive_passphrase` in the admin
+panel encrypts the zip with AES-256-GCM, the key derived with `scrypt`, before it
+reaches any target. Restore prompts for the passphrase. Two consequences to state
+plainly rather than bury:
+
+- **The passphrase must be stored outside both targets** — a password manager, a
+  sealed envelope in the department office. Written in a file next to the backup
+  it protects, it is decoration.
+- **It trades a confidentiality risk for an availability risk.** A lost passphrase
+  is a lost backup, with no recovery path, where the unencrypted default always
+  restores. That trade is why it is opt-in: for this deployment, losing the backup
+  is the likelier and worse outcome.
+
+Omitting `password_hash` instead was considered and rejected. It would force a
+password reset for every account after a restore while protecting the *weaker*
+credential in the file — the student number sitting beside it is a working
+password-free login, so the archive stays exactly as sensitive and the restore
+gets worse. Encrypt the whole archive or accept the whole archive; there is no
+useful position between them.
+
 ---
 
 ## Part D — Output shapes
@@ -187,8 +252,16 @@ backup_dir/
 ```
 
 Zip contents: `tables/*.csv` (the 12 raw tables) · `sequences.csv` ·
-`manifest.json` (row counts, `ran_at`, `schema_version`) · `inventory.csv` ·
-`accounts.csv` · `RESTORE.md`.
+`manifest.json` (row counts, `ran_at`, `schema_version`, and a **SHA-256 per
+file**) · `inventory.csv` · `accounts.csv` · `RESTORE.md`.
+
+The digests are what make a row count mean anything. A zip that came back down
+from Drive or was rebuilt from a GitHub tarball can be truncated or corrupted in
+transit, and a CSV truncated on a line boundary loads without complaint — the
+count is simply lower, so it is caught, but a CSV truncated mid-quoted-field, or
+one whose bytes were mangled while the line count survived, is not. Each file's
+digest is checked as it is read out of the zip, **before** anything is loaded, so
+a damaged archive is refused without the database being touched at all.
 
 Local dated folders are pruned past `keep_days`.
 
@@ -219,6 +292,32 @@ to prune without rewriting history.
 The **git history is the dated backup list**. Commit messages read
 `Backup 2026-09-14 02:00 — 16 assets, 2 accounts, 63 categories`, and that is
 what the in-app version picker lists.
+
+**The history is bounded, and pruning it is a real operation rather than an
+overwrite.** Overwriting `backup/accounts.csv` does not remove last month's copy
+— it adds a commit, and every prior version stays reachable forever. That matters
+here more than it would in most repositories: `accounts.csv` is a credential file
+(§B.1), so a student who leaves and is deleted from the database is still a
+working scan-login in every commit made before the deletion. "Deleted" that does
+not propagate is not deleted.
+
+So the GitHub target keeps a **retention window of `keep_days`** over its history,
+the same knob that governs the local folders and the photo mirror, and enforces it
+by **rewriting the branch to a fresh root**: build an orphan commit containing only
+the current `backup/` tree, force-update `refs/heads/main` to it, and every older
+commit becomes unreachable. It runs on the first backup after the window elapses,
+not nightly, so the picker keeps a useful span of dates.
+
+Two honest caveats, both of which belong in the operator's head and in `F.2`:
+
+- Unreachable is not immediately erased. GitHub garbage-collects unreachable
+  objects on its own schedule, and until it does they remain fetchable by SHA to
+  anyone who already knows one. Deleting and recreating the repository is the only
+  way to be *certain*, and it is the documented procedure when an account has to
+  be scrubbed rather than merely aged out.
+- A force-update is destructive by design. It is the one write the app makes that
+  cannot be undone, which is why it is bounded by a setting, logged like a backup
+  run, and never triggered by anything but the retention clock.
 
 ---
 
@@ -291,6 +390,25 @@ photo_backup_dir/
    accidental delete is recoverable, which is the point of a backup.
 5. A missing `uploads/` is "nothing to do", not an error — it does not exist on a
    machine where no photo has been uploaded yet.
+6. **Measure the mirror and the free space on its disk, and report both.** Step 4
+   means the mirror only ever grows: a frozen generation is a full copy, one
+   arrives every `keep_days`, and nothing removes any of them. Left unbounded that
+   ends one way — the disk fills, and because photos are mirrored in the same run
+   that writes the database backup, the thing that breaks is *the backup*, at the
+   moment its output stops fitting. A backup system whose failure mode is silently
+   not backing up is the failure this whole phase exists to remove.
+
+`MirrorPhotos` therefore carries a bound, and the bound is an **alert, not an
+automatic purge**: two settings, `photo_min_free_gb` (default 5) and
+`photo_max_generations` (default 8, which is two years at the default
+`keep_days`), each of which raises a warning on the same three surfaces staleness
+uses (§E.7) when crossed. Nothing is deleted for the reason step 4 gives — an
+automatic purge of the only copy of a deleted photo defeats the mirror — so the
+remedy is a human deleting a named generation, which the backup screen lists with
+its size and a delete button. The bound applies to *photo generations only*; the
+local dated database folders are pruned automatically past `keep_days` (§D.1),
+because those are redundant with the off-site copies and photo generations are
+not.
 
 `RestorePhotos(ctx, actor, generation)` copies a chosen generation back into
 `uploads/`, preserving anything it would overwrite.
@@ -330,20 +448,48 @@ Plain `net/http` against `api.github.com`, bearer token from `app_settings`.
 1. `RequireAdmin`.
 2. Read `manifest.json`; compare `schema_version` to live. A mismatch is
    `ErrConflict` unless `opts.Force`.
-3. One transaction, opening with `set local session_replication_role = replica`.
+3. **Verify every file's SHA-256 against the manifest before opening the
+   transaction.** A mismatch is `ErrInvalid` naming the file. Doing this first
+   means a corrupted download costs nothing — no truncate, no transaction, no
+   lock — and it is the only check that can distinguish "this archive is damaged"
+   from "this archive is fine and your data really did change".
+4. One transaction, opening with `set local session_replication_role = replica`.
    **That single line closes gaps 4 and 5**: foreign keys are not checked, so load
    order stops mattering, and `trg_asset_status_log` stays quiet, so
    `activity_log` restores clean instead of gaining junk rows.
-4. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`, keeping the
+5. `truncate` all 12 tables, then `pgx.CopyFrom` each `tables/*.csv`, keeping the
    row count `CopyFrom` returns for each.
-5. `setval` every sequence from `sequences.csv`.
-6. **Verify, still inside the transaction and before `Commit`.** Count each table
-   and compare against `manifest.json`; on any mismatch return an error, which
-   leaves the deferred `tx.Rollback()` to put the live database back exactly as it
-   was. Verifying after a commit would be a report, not a guard — there would be
-   nothing left to roll back to, and the half-restored database would already be
-   the live one. Commit only once every count matches.
-7. `db.Sessions.Clear()`, after the commit — every existing token now points at a
+6. `setval` every sequence from `sequences.csv`.
+7. **Verify, still inside the transaction and before `Commit`.** On any failure
+   return an error, which leaves the deferred `tx.Rollback()` to put the live
+   database back exactly as it was. Verifying after a commit would be a report,
+   not a guard — there would be nothing left to roll back to, and the
+   half-restored database would already be the live one. Three checks, all of
+   which must pass before the commit:
+
+   a. **Row counts** per table against `manifest.json`.
+
+   b. **Referential integrity.** Step 4 turned foreign-key enforcement *off*, so
+      nothing on the way in rejected an `assets` row pointing at a `category_id`
+      that is not in `categories.csv`. Left unchecked, replica mode converts a
+      clean failure into a database that is quietly and permanently inconsistent
+      — which is worse than the load order problem it was turned on to solve. So
+      reset `session_replication_role` to `origin` inside the same transaction
+      and run one anti-join per foreign key, enumerated from `pg_constraint where
+      contype = 'f'` rather than hand-listed, so a future migration's FK is
+      covered without anyone remembering to add it here.
+
+   c. **Sequences past their tables.** Every sequence's restored `last_value` must
+      be at or above the maximum live value of the column that owns it, or the
+      next insert collides on a unique index. This is gap 3 caught a second time,
+      at the point where it would actually bite.
+
+   Trigger-derived state needs no separate check: the triggers suspended in step 4
+   are `trg_assets_updated_at` and `trg_asset_status_log`, and both are silenced
+   deliberately because `activity_log` and `updated_at` are *restored from the
+   backup* rather than regenerated. Check (a) already covers `activity_log`.
+
+8. Commit, then `db.Sessions.Clear()` — every existing token now points at a
    profile that may no longer exist.
 
 Restoring is destructive, so the request carries `confirm=RESTORE`.
@@ -370,7 +516,11 @@ starts in `System32`, which is not inside the repository.
 ### E.7 Staleness alerts
 
 `BackupStatus(ctx)` returns
-`{per_target: {last_success, age, last_error}, stale, worst_age}`.
+`{per_target: {last_success, age, last_error}, stale, worst_age, failsafe_admin_configured, photo_mirror: {bytes, free_bytes, generations}}`.
+
+Three conditions raise a warning, not one. Staleness is the loudest, but a backup
+system can also fail by filling its disk or by leaving nobody able to sign in and
+use it, and both of those are silent until the day they matter:
 
 - **`LoginResult` and `MeResult` gain `BackupWarning *BackupWarning`.** Both
   already carry `HasOverdue` for exactly this shape (`auth.go:49`, `auth.go:171`),
@@ -381,6 +531,14 @@ starts in `System32`, which is not inside the repository.
   `CLAUDE.md` §7's custodian-visibility rule.
 - **The backup screen** shows a banner with the age, per-target status and last
   error.
+- **No failsafe admin configured** (§C.1) warns on the backup screen:
+  *"No failsafe admin is configured. If the database is lost you will not be able
+  to sign in to restore it."* Admin-facing only — it names a `.env` fix no student
+  can act on.
+- **The photo mirror is near its bound** (§E.2) warns on the backup screen with
+  the mirror's size, the disk's free space and the generation list, each
+  generation carrying its size and a delete button. Nothing is deleted
+  automatically.
 
 ### E.8 Endpoints
 
@@ -481,8 +639,13 @@ No software to install; the app talks to GitHub over the web.
    downloaded by hand.
 2. **From a file.** Admin → Backup → **Restore** → choose a `.zip`.
 3. **Photos.** Admin → Backup → **Restore photos** → pick a generation.
-4. **The app will not start.** `stockroom-restore backup-2026-09-14.zip --yes`,
-   documented in the `RESTORE.md` inside every zip.
+4. **The app will not start, or the database came back with no accounts in it.**
+   `stockroom-restore backup-2026-09-14.zip --yes`, documented in the `RESTORE.md`
+   inside every zip. This is the route that needs no session and therefore no
+   surviving account, so it is the one that works when routes 1 to 3 cannot be
+   reached at all (§C.1). It calls the same `RestoreFromZip`, with the same
+   checksum, row-count and referential-integrity gates, so it is not a second,
+   less-tested restore.
 
 ### F.4 The repository README Stockroom writes
 
@@ -546,9 +709,25 @@ If Stockroom will not start, see `RESTORE.md` inside any backup zip.
 8. Staleness: backdate `.last-success.json` by five days and confirm all three
    surfaces fire — the admin warning, the non-admin warning naming the admins, and
    the panel banner.
-9. **A configuration-only run-through**: from a fresh clone, set up both targets
-   start to finish without opening a text editor. If any step needs one, the
-   requirement in Part B is not met.
+9. **Corruption guards, each proved by breaking one thing.** Flip a byte inside a
+   `tables/*.csv` and expect a checksum failure naming the file, with no
+   transaction ever opened. Separately, hand-edit `categories.csv` to drop a row
+   that `assets.csv` references and expect the referential-integrity check to fail
+   the restore and roll back — that one matters most, because it is the failure
+   replica mode is specifically unable to catch on its own. Truncate a file
+   mid-quoted-field and confirm the checksum catches what the row count cannot.
+10. **Bootstrap**: blank `ADMIN_STUDENT_NUMBER` in `.env`, `supabase db reset`,
+    start the server. Confirm the backup screen's "no failsafe admin" warning
+    would have fired, and that `cmd/restore` restores the zip with zero accounts
+    in the database and no session.
+11. **Retention**: backdate the GitHub history past `keep_days` and confirm the
+    purge leaves a single root commit holding the current backup, that the picker
+    still works afterwards, and that the pruned commits are gone from the list.
+    Cross a photo bound and confirm the alert fires and that **nothing was
+    deleted**.
+12. **A configuration-only run-through**: from a fresh clone, set up both targets
+    start to finish without opening a text editor. If any step needs one, the
+    requirement in Part B is not met.
 
 ---
 
@@ -563,3 +742,14 @@ If Stockroom will not start, see `RESTORE.md` inside any backup zip.
   covers the gap. An OS-level task remains available as a later backstop.
 - **`rclone` is still an installed dependency** for the Drive target. Only GitHub
   is install-free.
+- **A backup that leaves the machine is a credential file that leaves the
+  machine.** See §B's privacy note: `accounts.csv` carries student numbers, which
+  sign their owner in by scan with no password, and `password_hash`, which is
+  bcrypt and therefore offline-crackable at leisure by anyone who obtains the
+  file. Private repository and unshared Drive account are load-bearing, not
+  hygiene. §C.5 specifies optional archive encryption for sites that need the
+  stronger guarantee.
+- **Frozen photo generations are never deleted automatically**, by decision, so
+  the mirror only grows. §E.2 bounds this with a disk-headroom alert rather than
+  an automatic purge — the alert is what keeps "never deletes" from meaning
+  "silently fills the disk and stops backing up".
