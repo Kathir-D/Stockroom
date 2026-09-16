@@ -48,7 +48,7 @@ graphify-out/
 #
 # Unanchored (no leading slash) on purpose: this is an npm workspace, so a
 # nested `node_modules/` under web-app/ or desktop-app/frontend/ is a mistake
-# worth ignoring rather than committing -- see the note in scripts/start-mac.sh.
+# worth ignoring rather than committing -- see the note in scripts/dev.sh.
 node_modules/
 .npm/
 jspm_packages/
@@ -86,3 +86,6 @@ yarn.lock
 desktop-app/frontend/dist/*
 !desktop-app/frontend/dist/.gitkeep
 web-app/dist/
+
+# Per-run service logs written by scripts/dev.sh and dev.ps1
+.run-logs/

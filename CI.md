@@ -9,20 +9,20 @@ One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/t
 3. `supabase start`, which applies every migration and the seed.
 4. `go vet ./...`, then `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`, so a Go test that would skip on a missing database fails instead.
 5. `supabase test db` (pgTAP).
-6. One root `npm ci` (locally, `./scripts/ensure-deps.sh` does the same job), then `npm run check`, `npm test` and `npm run build`, each of which fans out across the workspace (`packages/ui`, `web-app`, `desktop-app/frontend`). A per-app `npm ci --prefix` would give that app its own Svelte and Vite, which breaks reactivity silently (`docs/design/design-system.md` §2.2).
+6. One root `npm ci` (locally, `./scripts/dev.sh deps --ci` does the same job), then `npm run check`, `npm test` and `npm run build`, each of which fans out across the workspace (`packages/ui`, `web-app`, `desktop-app/frontend`). A per-app `npm ci --prefix` would give that app its own Svelte and Vite, which breaks reactivity silently (`docs/design/design-system.md` §2.2).
 7. `supabase stop`, always, if it was started.
 
 A push to a PR cancels the run already going for it.
 
 ## Pre-commit
 
-`.githooks/pre-commit` runs [`scripts/test-all.sh`](scripts/test-all.sh) before a commit is created, so a red build is caught on the machine that broke it rather than ten minutes later in Actions. `scripts/ensure-deps.sh` installs it by setting `core.hooksPath` to `.githooks`, which is why the hook is tracked in the repository instead of sitting in `.git/hooks`: a hook nobody can see is a hook nobody maintains, and a fresh clone would otherwise have no protection at all.
+`.githooks/pre-commit` runs [`scripts/dev.sh test`](scripts/dev.sh) before a commit is created, so a red build is caught on the machine that broke it rather than ten minutes later in Actions. `scripts/dev.sh deps` installs it by setting `core.hooksPath` to `.githooks`, which is why the hook is tracked in the repository instead of sitting in `.git/hooks`: a hook nobody can see is a hook nobody maintains, and a fresh clone would otherwise have no protection at all.
 
 It skips itself on docs-only commits, using the same path list as the workflow below — a Markdown edit cannot break a build, and making people wait on a full suite for one is how a hook earns a permanent `--no-verify` in someone's muscle memory. The hook's `code_paths` regex and the workflow's `paths-filter` are the same entries in the same scope, including `.github/workflows/` rather than all of `.github/`, and they have to stay that way: a path the hook tests but CI skips only wastes a contributor's time, but one CI tests while the hook skips it is a red build that walked past the check meant to catch it. The hook also counts deletions (`--diff-filter=ACMRD`), since removing a migration or a component breaks a build as readily as editing one.
 
 Escapes, both honest: `git commit --no-verify` for one commit, or `STOCKROOM_SKIP_TESTS=1` when you want the reason to show up in a shell history. CI still runs the same suite on the pull request, so a skipped hook delays a failure rather than hiding it.
 
-The hook fails rather than warns when Postgres is down, because `test-all.sh` already reports a skipped pgTAP run as `FAILED` on purpose: a silent skip must never pass for a success. `supabase start` first, or `--no-verify` if the commit genuinely is not the cause.
+The hook fails rather than warns when Postgres is down, because `dev.sh test` already reports a skipped pgTAP run as `FAILED` on purpose: a silent skip must never pass for a success. `supabase start` first, or `--no-verify` if the commit genuinely is not the cause.
 
 ## Docs-only changes
 
@@ -56,7 +56,7 @@ Set `"enforce_admins": false` to keep the ability to override on your own repo.
 ## Running the same thing locally
 
 ```bash
-./scripts/test-all.sh
+./scripts/dev.sh test
 ```
 
 It runs the same steps in the same order, skipping the database suites with a warning if Postgres is not up.

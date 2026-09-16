@@ -30,6 +30,31 @@ export const SCAN_KEY_THRESHOLD_MS = 50
  */
 const MIN_SCAN_LENGTH = 2
 
+/**
+ * Keys that end a burst without telling us what is left in the field.
+ *
+ * A scanner sends the code and an Enter, nothing else, so every one of these is
+ * a person: caret moves, Delete, Escape. Each can leave the field holding
+ * something the buffer has no way to reconstruct, and a buffer that no longer
+ * matches the field is worse than no buffer at all — it is the difference
+ * between "nothing happened" and "somebody was signed in as the wrong student".
+ *
+ * Backspace is deliberately absent: it removes exactly one character, which the
+ * buffer can follow.
+ */
+const DISCARDING_KEYS = new Set([
+  "Delete",
+  "Escape",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+])
+
 export interface ScanBurst {
   /** The characters typed before Enter, untrimmed. */
   code: string
@@ -110,8 +135,22 @@ export function attachScanner(options: ScannerOptions): () => void {
       return
     }
 
-    // A modifier chord is never part of a barcode.
-    if (event.ctrlKey || event.metaKey || event.altKey) return
+    // A modifier chord is never part of a barcode, and several of them edit the
+    // field without emitting a keystroke this buffer can observe:
+    // Alt/Cmd+Backspace delete a word or a whole line, Cmd+A followed by a
+    // character replaces everything, Cmd+X cuts, Cmd+V pastes. Ignoring them
+    // outright is what let the original bug survive its own fix — the field went
+    // empty while the buffer still held "123456" and `fast` stayed true, so
+    // Enter signed the person in as the number they had just deleted.
+    //
+    // Discarding is the only honest reading, because a chord can remove an
+    // unknown amount of text. The pending burst is gone, so nothing downstream
+    // acts on characters that are no longer on screen, and on the sign-in screen
+    // the form's native submit picks the field up instead.
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      reset()
+      return
+    }
 
     if (!captureInsideFields && isTextEntry(event.target)) {
       reset()
@@ -133,6 +172,36 @@ export function attachScanner(options: ScannerOptions): () => void {
       reset()
       lastKey = now
       onBurst(burst)
+      return
+    }
+
+    // Editing and caret keys. A barcode scanner never sends one, so any of these
+    // means a person is correcting what they typed — and the buffer has to
+    // follow, or it keeps characters that are no longer on screen. That was a
+    // real bug: type a number, delete it, press Enter, and the deleted number
+    // signed you in, because the buffer only ever grew (CLAUDE.md §13,
+    // 2026-09-15).
+    //
+    // Everything except Backspace discards the burst, because none of them says
+    // how much text moved or vanished. Backspace is exactly one character, so
+    // the buffer can follow it precisely instead.
+    if (DISCARDING_KEYS.has(event.key)) {
+      reset()
+      lastKey = now
+      return
+    }
+
+    if (event.key === "Backspace") {
+      buffer = buffer.slice(0, -1)
+      timings.pop()
+      // Emptying the buffer starts over rather than leaving `fast` false.
+      // Nothing is pending, so there is nothing left to doubt — and a sticky
+      // `fast = false` meant an idle Backspace on an empty field made the *next*
+      // card scan report as typed, which demands a password from a
+      // roster-imported user who does not have one yet (CLAUDE.md §7).
+      if (buffer.length === 0) reset()
+      else fast = false
+      lastKey = now
       return
     }
 

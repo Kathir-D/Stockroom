@@ -2,7 +2,7 @@
 # Run the full suite before a commit lands, so a red build is caught here rather
 # than in GitHub Actions ten minutes later.
 #
-# Installed by scripts/ensure-deps.sh, which points core.hooksPath at this
+# Installed by `scripts/dev.sh deps`, which points core.hooksPath at this
 # directory. That is why the hook is tracked in the repository instead of living
 # in .git/hooks: a hook nobody can see is a hook nobody maintains, and a fresh
 # clone would silently have no protection at all.
@@ -51,10 +51,10 @@ if ! printf '%s\n' "$staged" | grep -qE "$code_paths"; then
   exit 0
 fi
 
-echo "pre-commit: running ./scripts/test-all.sh (skip with --no-verify)"
+echo "pre-commit: running ./scripts/dev.sh test (skip with --no-verify)"
 echo
 
-if ./scripts/test-all.sh; then
+if ./scripts/dev.sh test; then
   echo
   echo "pre-commit: all suites passed."
   exit 0
@@ -65,7 +65,7 @@ cat <<'MSG'
 pre-commit: the suite failed, so the commit was not created.
 
   - Fix the failures above and commit again, or
-  - `supabase start` first if the database suites were the ones that failed
+  - `./scripts/dev.sh up` first if the database suites were the ones that failed
     (they are reported as FAILED rather than skipped on purpose, so a silent
     skip can never pass for a success), or
   - `git commit --no-verify` if you know this commit is not the cause and you
