@@ -34,8 +34,8 @@
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
   import Serial from "@stockroom/ui/components/app/serial.svelte"
   import * as api from "../../api/index"
-  import type { CustodyRecord, Profile, RosterResult, UserInput } from "../../api/types"
-  import { dateTime } from "../../status"
+  import type { Profile, RosterResult, UserInput } from "../../api/types"
+  import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
   import { session } from "../../stores/session.svelte"
 
   /** The server's own bound, mirrored so the field can say it before the 400. */
@@ -57,9 +57,11 @@
   let newPassword = $state("")
   let passwordError = $state<string | null>(null)
 
+  // The trail itself lives in <UserHistoryDialog>, which loads it; this screen
+  // only says whose. Extracted 2026-09-16 so the browse list, the admin asset
+  // table and this row action all open one popup rather than two shapes of it.
   let historyTarget = $state<Profile | null>(null)
-  let historyRows = $state<CustodyRecord[]>([])
-  let historyError = $state<string | null>(null)
+  let historyOpen = $state(false)
 
   let deleteTarget = $state<Profile | null>(null)
   let deleteError = $state<string | null>(null)
@@ -181,15 +183,9 @@
     }
   }
 
-  async function openHistory(user: Profile) {
+  function openHistory(user: Profile) {
     historyTarget = user
-    historyRows = []
-    historyError = null
-    try {
-      historyRows = await api.userHistory(user.id)
-    } catch (err) {
-      historyError = err instanceof Error ? err.message : String(err)
-    }
+    historyOpen = true
   }
 
   async function confirmDelete() {
@@ -468,49 +464,11 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root open={historyTarget !== null} onOpenChange={(open) => !open && (historyTarget = null)}>
-  <Dialog.Content class="max-w-2xl">
-    <Dialog.Header>
-      <Dialog.Title>{historyTarget ? displayName(historyTarget) : ""} — custody history</Dialog.Title>
-    </Dialog.Header>
-    {#if historyError}
-      <p class="text-status-overdue" role="alert">{historyError}</p>
-    {:else if historyRows.length === 0}
-      <p class="text-fg-muted">Nothing checked out yet.</p>
-    {:else}
-      <div class="max-h-96 overflow-y-auto">
-        <Table.Root>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Item</Table.Head>
-              <Table.Head>Out</Table.Head>
-              <Table.Head>Due</Table.Head>
-              <Table.Head>Returned</Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
-            {#each historyRows as row (row.id)}
-              <Table.Row>
-                <Table.Cell class="text-fg">{row.asset_name}</Table.Cell>
-                <Table.Cell class="tabular-nums text-fg-muted">{dateTime(row.checked_out_at)}</Table.Cell>
-                <Table.Cell class="tabular-nums text-fg-muted">{dateTime(row.due_at)}</Table.Cell>
-                <Table.Cell
-                  class={row.checked_in_at
-                    ? "tabular-nums text-fg-muted"
-                    : row.overdue
-                      ? "text-status-overdue"
-                      : "text-status-out"}
-                >
-                  {row.checked_in_at ? dateTime(row.checked_in_at) : row.overdue ? "Overdue" : "Out"}
-                </Table.Cell>
-              </Table.Row>
-            {/each}
-          </Table.Body>
-        </Table.Root>
-      </div>
-    {/if}
-  </Dialog.Content>
-</Dialog.Root>
+<UserHistoryDialog
+  bind:open={historyOpen}
+  userId={historyTarget?.id ?? null}
+  userName={historyTarget ? displayName(historyTarget) : ""}
+/>
 
 <AlertDialog.Root open={deleteTarget !== null} onOpenChange={(open) => !open && (deleteTarget = null)}>
   <AlertDialog.Content>

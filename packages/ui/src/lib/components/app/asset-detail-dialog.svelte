@@ -23,7 +23,7 @@
   import { Label } from "@stockroom/ui/components/ui/label"
   import { Separator } from "@stockroom/ui/components/ui/separator"
   import * as api from "../../api/index"
-  import type { AssetDetail, CustodyRecord } from "../../api/types"
+  import type { AssetCustody, AssetDetail, CustodyRecord } from "../../api/types"
   import { dateTime, resolveStatus, shortDate } from "../../status"
   import PhotoFrame from "./photo-frame.svelte"
   import Serial from "./serial.svelte"
@@ -42,6 +42,7 @@
     onCheckIn,
     onEdit,
     onMarkUnavailable,
+    onViewHistory,
   }: {
     asset: AssetDetail | null
     open?: boolean
@@ -55,6 +56,8 @@
     onCheckIn?: (asset: AssetDetail, note: string) => Promise<void> | void
     onEdit?: (asset: AssetDetail) => void
     onMarkUnavailable?: (asset: AssetDetail) => void
+    /** Admin pressed the holder's name: show that person's whole trail. */
+    onViewHistory?: (custody: AssetCustody) => void
   } = $props()
 
   let history = $state<CustodyRecord[]>([])
@@ -62,7 +65,7 @@
   let note = $state("")
   let busy = $state(false)
 
-  const status = $derived(asset ? resolveStatus(asset) : null)
+  const status = $derived(asset ? resolveStatus(asset, viewerId) : null)
   const isOut = $derived(asset?.custody != null)
   const path = $derived(asset?.category_path?.map((c) => c.name).join(" › ") ?? "")
 
@@ -143,12 +146,34 @@
           {/if}
 
           {#if asset.custody}
+            {@const held = asset.custody}
+            {@const who = held.custodian_id === viewerId ? "You" : held.custodian_name}
             <dt class="text-xs text-fg-muted">Held by</dt>
             <dd class="truncate text-fg">
-              {asset.custody.custodian_id === viewerId ? "You" : asset.custody.custodian_name}
-              {#if isAdmin && asset.custody.student_number}
+              <!--
+                For an admin the name is a control: it opens that person's custody
+                trail (2026-09-16). This dialog already shows what happened to the
+                *item*; the other half of the question — what else does this person
+                have, and do they bring it back — was only reachable by leaving
+                and going to the admin lists.
+
+                The section below is the asset's trail and stays admin-only for
+                the same reason it always was: GetAssetHistory refuses a student.
+              -->
+              {#if isAdmin && onViewHistory}
+                <button
+                  type="button"
+                  class="rounded-sm underline decoration-dotted underline-offset-4 hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ring)"
+                  onclick={() => onViewHistory(held)}
+                >
+                  {who}
+                </button>
+              {:else}
+                {who}
+              {/if}
+              {#if isAdmin && held.student_number}
                 <span class="ml-1 text-fg-muted">
-                  <Serial value={asset.custody.student_number} label="student number" />
+                  <Serial value={held.student_number} label="student number" />
                 </span>
               {/if}
             </dd>
