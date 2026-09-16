@@ -89,7 +89,9 @@
 
 <div
   class={cn(
-    "flex items-center gap-2 border-b border-line pr-2 last:border-b-0",
+    // Its own rounded edge rather than a rule between rows. overflow-hidden is
+    // what keeps the inner button's hover fill inside the corners.
+    "flex items-center gap-2 overflow-hidden rounded-(--radius) border border-line pr-2",
     "transition-colors duration-(--dur-fast) ease-(--ease-brand)",
     highlighted && "bg-status-available-bg",
     className

@@ -69,3 +69,43 @@ func TestHealthOK(t *testing.T) {
 		t.Errorf("time = %v, want a fresh timestamp", body.Time)
 	}
 }
+
+// TestOriginAllowed pins the four Wails webview origins.
+//
+// A wrong answer here is invisible in the app: the browser blocks the request
+// before any JavaScript runs, and the frontend reports "cannot reach the
+// Stockroom server" — the same message it shows when the server really is down.
+// That cost an afternoon once (the macOS dev origin carries a host and a port,
+// wails://wails.localhost:34115, and only wails://wails was allowed), so every
+// platform and mode is listed rather than trusted to a comment.
+func TestOriginAllowed(t *testing.T) {
+	allowed := []string{
+		"http://localhost:5173",         // web-app, vite dev
+		"http://127.0.0.1:5174",         // vite's next free port
+		"http://localhost:34115",        // wails dev, opened in a browser
+		"wails://wails",                 // macOS/Linux, wails build
+		"wails://wails.localhost:34115", // macOS/Linux, wails dev
+		"http://wails.localhost",        // Windows, wails build
+		"http://wails.localhost:34115",  // Windows, wails dev
+	}
+	for _, origin := range allowed {
+		if !originAllowed(origin) {
+			t.Errorf("originAllowed(%q) = false, want true", origin)
+		}
+	}
+
+	refused := []string{
+		"",
+		"http://example.com",
+		// The host check is exact, not a prefix: this is somebody else's domain.
+		"http://wails.localhost.example.com",
+		// A LAN address, which CLAUDE.md §2 keeps out even on the right port.
+		"http://192.168.1.20:5173",
+		"https://localhost:5173",
+	}
+	for _, origin := range refused {
+		if originAllowed(origin) {
+			t.Errorf("originAllowed(%q) = true, want false", origin)
+		}
+	}
+}

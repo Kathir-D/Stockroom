@@ -40,19 +40,32 @@
 @custom-variant dark (&);
 
 :root {
-  /* ---------- neutrals: Studio Ops (A2) ---------- */
-  --ground: #17191a; /* the window background */
-  --surface: #1e2122; /* cards, sidebar, table container, top bar */
-  --raised: #262a2b; /* hover, selected row, input fill, thumbnails */
-  --overlay: #2b2f30; /* dialogs and popovers, floats above surface */
+  /* ---------- neutrals: Studio Ops (A2) ----------
 
+     Re-anchored 2026-09-15: the window background was asked to be #2E3033,
+     which is lighter than every surface that used to sit *above* it. The other
+     five neutrals are therefore lifted by the exact per-channel steps the
+     original ramp used, so the elevation order still holds. Left alone, a
+     dialog (--overlay, #2B2F30) would have been *darker* than the window behind
+     it and a divider (--line, #2F3435) would have vanished into it.
+  */
+  --ground: #2e3033; /* the window background */
+  --surface: #35383b; /* cards, sidebar, table container, top bar */
+  --raised: #3d4144; /* hover, selected row, input fill, thumbnails */
+  --overlay: #424649; /* dialogs and popovers, floats above surface */
+
+  /* Lifted with the ground, for the same reason: measured against #2E3033 the
+     old --fg-faint (#7C8281) falls to 3.38:1, under the 4.5:1 AA minimum
+     design-system.md §11 calls non-negotiable, and --fg-muted lands close
+     enough to it that the two tiers stop reading as different. New ratios are
+     10.89 / 5.82 / 4.58. */
   --fg: #e9e9e7; /* primary text */
-  --fg-muted: #9a9f9e; /* secondary text, column headers, metadata */
-  --fg-faint: #7c8281; /* placeholder, disabled label, timestamps */
+  --fg-muted: #a8adac; /* secondary text, column headers, metadata */
+  --fg-faint: #949998; /* placeholder, disabled label, timestamps */
 
-  --line: #2f3435; /* decorative dividers, table rules. NEVER a control edge */
-  --line-control: #646b6a; /* borders that define an interactive control (§10) */
-  --line-strong: #414748; /* card and panel edges */
+  --line: #464b4e; /* decorative dividers, table rules. NEVER a control edge */
+  --line-control: #7b8283; /* borders that define an interactive control (§10) */
+  --line-strong: #585e61; /* card and panel edges */
 
   /* ---------- action ---------- */
   --primary: #e9e9e7;

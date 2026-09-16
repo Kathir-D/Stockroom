@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+	"net/url"
+	"sync"
 	"time"
 
 	"stockroom/internal/stockroom"
@@ -102,13 +104,67 @@ func newRouter(d deps) http.Handler {
 // leaves the page — including the preflight on any request carrying an
 // Authorization header. This is not a step toward LAN access: every entry is a
 // loopback address, and CLAUDE.md §2 keeps the app localhost-only.
+//
+// The Wails webview is *not* in this map; see originAllowed, which has to match
+// four different origins across two platforms and two build modes.
 var localOrigins = map[string]bool{
-	"http://localhost:5173":  true, // web-app, vite dev
-	"http://127.0.0.1:5173":  true,
-	"http://localhost:34115": true, // wails dev
+	"http://localhost:5173": true, // web-app, vite dev
+	"http://127.0.0.1:5173": true,
+	// Vite takes the next free port when 5173 is already in use, which happens
+	// whenever a previous dev server is still running. The page then loads
+	// normally and every request fails as "cannot reach the server", because a
+	// blocked preflight is indistinguishable from a server that is down.
+	"http://localhost:5174":  true,
+	"http://127.0.0.1:5174":  true,
+	"http://localhost:34115": true, // wails dev, viewed in a normal browser
 	"http://127.0.0.1:34115": true,
-	"wails://wails":          true, // wails production webview
-	"http://wails.localhost": true,
+}
+
+// wailsWebViewHost is the hostname Wails gives the window it loads the app into.
+//
+// On Windows the page is served over http from this host; on macOS and Linux it
+// is served over the custom wails:// scheme, whose host is either "wails" or
+// this, depending on build mode.
+const wailsWebViewHost = "wails.localhost"
+
+// originAllowed reports whether a browser origin may call this server.
+//
+// The Wails webview needs four cases, not one, and getting them wrong looks
+// exactly like a server that is down — which is how an afternoon went missing:
+//
+//	macOS / Linux, wails build  wails://wails
+//	macOS / Linux, wails dev    wails://wails.localhost:34115
+//	Windows, wails build        http://wails.localhost
+//	Windows, wails dev          http://wails.localhost:34115
+//
+// The port is the asset server's and is only present in dev, where it is also
+// configurable (`wails dev -devserver`), so it is deliberately not matched on:
+// a hard-coded 34115 would break the moment someone moved it, for a value that
+// buys nothing. What is checked is the host, and for the custom scheme the
+// scheme alone — a page can only carry a wails:// origin by being loaded inside
+// a Wails webview on this machine, which is the app itself.
+//
+// None of this is an authorization boundary. CORS constrains browsers, not
+// clients: curl sends whatever Origin it likes and always has. The session
+// token is what protects the API (CLAUDE.md §7); this decides which *local UIs*
+// the browser will let talk to it.
+func originAllowed(origin string) bool {
+	if localOrigins[origin] {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch parsed.Scheme {
+	case "wails":
+		return true
+	case "http":
+		// Hostname() drops the port, and the comparison is exact: a prefix test
+		// would also have matched wails.localhost.example.com.
+		return parsed.Hostname() == wailsWebViewHost
+	}
+	return false
 }
 
 // withCORS answers preflights and echoes an allowed origin back.
@@ -120,13 +176,20 @@ var localOrigins = map[string]bool{
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if localOrigins[origin] {
+		if originAllowed(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			// Without Vary, a cache could hand one origin's response to another.
 			w.Header().Add("Vary", "Origin")
+		} else if origin != "" {
+			// A blocked origin is otherwise invisible: the browser rejects the
+			// response before any JavaScript sees it, and the frontend reports
+			// "cannot reach the server" — indistinguishable from a server that
+			// is down. Naming the origin turns a confusing afternoon into one
+			// log line. Logged once per origin, so a reload loop can't flood.
+			logBlockedOrigin(origin)
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -134,6 +197,15 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+var blockedOrigins sync.Map
+
+func logBlockedOrigin(origin string) {
+	if _, seen := blockedOrigins.LoadOrStore(origin, true); seen {
+		return
+	}
+	log.Printf("warning: refused a request from origin %q; it is not allowed (see originAllowed in server/router.go)", origin)
 }
 
 // logRequests prints one line per request. Localhost-only, low traffic, so a

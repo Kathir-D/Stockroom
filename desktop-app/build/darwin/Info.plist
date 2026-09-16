@@ -23,6 +23,19 @@
         <string>true</string>
         <key>NSHumanReadableCopyright</key>
         <string>{{.Info.Copyright}}</string>
+        <!--
+          The app talks to the Go server over plain http on 127.0.0.1 (CLAUDE.md
+          §3), and App Transport Security blocks http by default. Info.dev.plist
+          already carries this key, which is why `wails dev` works; without it
+          here, a packaged build fails every request with "cannot reach the
+          Stockroom server" and nothing in the app says why. Local networking
+          only — no arbitrary-loads exception.
+        -->
+        <key>NSAppTransportSecurity</key>
+        <dict>
+            <key>NSAllowsLocalNetworking</key>
+            <true/>
+        </dict>
         {{if .Info.FileAssociations}}
         <key>CFBundleDocumentTypes</key>
         <array>

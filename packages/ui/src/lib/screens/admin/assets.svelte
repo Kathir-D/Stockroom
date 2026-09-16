@@ -228,7 +228,7 @@
       description={search ? "Nothing matches that search." : "Create the first unit to get started."}
     />
   {:else}
-    <div class="overflow-hidden rounded-xl border border-line-strong">
+    <div class="flex flex-col gap-2">
       {#each units as unit (unit.id)}
         <UnitRow {unit} showName>
           {#snippet actions(row)}

@@ -121,7 +121,9 @@
       </EmptyState>
     {/if}
   {:else}
-    <div class="overflow-hidden rounded-xl border border-line-strong">
+    <!-- Each model is its own rounded card, not a row in one bordered slab, so
+         the thing a person is aiming at has an edge of its own. -->
+    <div class="flex flex-col gap-2">
       {#each catalog.groups as group (group.key)}
         <ModelRow
           {group}
