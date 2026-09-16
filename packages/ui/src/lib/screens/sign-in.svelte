@@ -22,6 +22,7 @@
   import { Button } from "@stockroom/ui/components/ui/button"
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
+  import PasswordInput from "../components/app/password-input.svelte"
   import * as api from "../api/index"
   import { attachScanner, looksLikeStudentNumber } from "../scanner"
   import { session } from "../stores/session.svelte"
@@ -50,6 +51,14 @@
   const MAX_STUDENT_NUMBER_LENGTH = 32
 
   /**
+   * The field's filter, as a function, so the burst handler can apply the same
+   * one when it asks whether the buffer and the field still agree.
+   */
+  function digitsOnly(value: string): string {
+    return value.replace(/\D+/g, "").slice(0, MAX_STUDENT_NUMBER_LENGTH)
+  }
+
+  /**
    * Keep the student-number field digits-only.
    *
    * `NormalizeStudentNumber` refuses anything else server-side, so letters were
@@ -69,7 +78,7 @@
    */
   function keepDigitsOnly(event: Event & { currentTarget: HTMLInputElement }) {
     const el = event.currentTarget
-    const digits = el.value.replace(/\D+/g, "").slice(0, MAX_STUDENT_NUMBER_LENGTH)
+    const digits = digitsOnly(el.value)
     if (digits !== el.value) {
       const caret = el.selectionStart ?? el.value.length
       const removedBeforeCaret = el.value.slice(0, caret).replace(/\d/g, "").length
@@ -103,7 +112,27 @@
     return attachScanner({
       target,
       captureInsideFields: true,
-      onBurst: ({ code, fast }) => handleBurst(code, fast),
+      /**
+       * A scan is the only thing in this app that signs somebody in without a
+       * password, so it has to clear the higher bar: the keystrokes arrived at
+       * scanner speed **and** the field ended up holding exactly what the buffer
+       * saw. A keyboard-wedge scanner types straight into the focused input, so
+       * for a real scan those two always agree.
+       *
+       * They disagree when a person edited in a way a keystroke buffer cannot
+       * model — pasting over a selection, dragging text in, an autofill, or any
+       * editing chord the scanner had to discard. The box is what the person can
+       * actually see, so the box wins and the burst is treated as typed.
+       *
+       * The comparison runs through the field's own digit filter. Without it an
+       * *item* barcode scanned at this screen could never match — its letters
+       * and dashes are stripped on the way into the box — and the "that looks
+       * like an item barcode" message (§15 Q4) would be lost with it.
+       */
+      onBurst: ({ code, fast }) => {
+        const inSync = target.value === digitsOnly(code)
+        handleBurst(inSync ? code : target.value, fast && inSync)
+      },
     })
   })
 
@@ -272,14 +301,12 @@
         <Label for="password" class="text-fg">
           Password for <span class="font-mono">{studentNumber}</span>
         </Label>
-        <Input
+        <PasswordInput
           id="password"
-          type="password"
           bind:ref={passwordInput}
           bind:value={password}
           autocomplete="current-password"
           disabled={busy}
-          class="h-(--control-h) text-lg"
         />
         <div class="mt-2 flex items-center gap-2">
           <Button type="submit" size="tap" disabled={busy || !password}>
@@ -302,28 +329,24 @@
         </p>
 
         <Label for="new-password" class="mt-2 text-fg">New password</Label>
-        <Input
+        <PasswordInput
           id="new-password"
-          type="password"
           bind:ref={passwordInput}
           bind:value={newPassword}
           autocomplete="new-password"
           minlength={8}
           maxlength={72}
           disabled={busy}
-          class="h-(--control-h) text-lg"
         />
 
         <Label for="confirm-password" class="mt-2 text-fg">Confirm password</Label>
-        <Input
+        <PasswordInput
           id="confirm-password"
-          type="password"
           bind:value={confirmPassword}
           autocomplete="new-password"
           minlength={8}
           maxlength={72}
           disabled={busy}
-          class="h-(--control-h) text-lg"
         />
 
         <Button type="submit" size="tap" class="mt-3" disabled={busy || newPassword.length < 8}>

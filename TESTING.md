@@ -5,16 +5,16 @@ The suite was cut down on 2026-09-13 to the smallest set that still catches a br
 Run everything with:
 
 ```bash
-./scripts/test-all.sh
+./scripts/dev.sh test
 ```
 
-`.githooks/pre-commit` runs that same script before a commit is created, so the suite is the default rather than something you remember. `scripts/ensure-deps.sh` installs it by pointing `core.hooksPath` at `.githooks`. Docs-only commits skip it; `git commit --no-verify` or `STOCKROOM_SKIP_TESTS=1` skip it deliberately. See `CI.md`, "Pre-commit".
+`.githooks/pre-commit` runs that same script before a commit is created, so the suite is the default rather than something you remember. `scripts/dev.sh deps` installs it by pointing `core.hooksPath` at `.githooks`. Docs-only commits skip it; `git commit --no-verify` or `STOCKROOM_SKIP_TESTS=1` skip it deliberately. See `CI.md`, "Pre-commit".
 
 Or one layer at a time:
 
 ```bash
 supabase start            # the Go and pgTAP suites need Postgres up
-./scripts/ensure-deps.sh  # npm workspace + Go modules; ./scripts/test-all.sh runs this for you
+./scripts/dev.sh deps  # npm workspace + Go modules; ./scripts/dev.sh test runs this for you
 go vet ./...
 STOCKROOM_REQUIRE_DB=1 go test ./... -count=1  # fail, rather than skip, when Postgres is down
 supabase test db
@@ -28,7 +28,7 @@ Run every npm command from the **repo root**. It is a workspace: `npm install` o
 directory, and the failure mode is silent — components render but their state never updates
 (`docs/design/design-system.md` §2.2).
 
-Go's database-backed tests skip themselves when Postgres is unreachable, so `go test ./...` still runs on a machine without Docker. `scripts/test-all.sh` and CI set `STOCKROOM_REQUIRE_DB=1` so a skip can never pass for a success.
+Go's database-backed tests skip themselves when Postgres is unreachable, so `go test ./...` still runs on a machine without Docker. `scripts/dev.sh test` and CI set `STOCKROOM_REQUIRE_DB=1` so a skip can never pass for a success.
 
 ## What runs
 
@@ -84,7 +84,7 @@ That is deliberately thin, and the reason is the same one that put every screen 
 hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
 tests belong in `packages/ui`.
 
-### `packages/ui` (6 tests)
+### `packages/ui` (17 tests)
 
 `keep-alive.test.ts`, covering `attachKeepAlive`: it pings when someone has interacted and the connection
 has gone quiet, and stays silent when nobody has, when requests are already flowing, when nobody is signed
@@ -94,9 +94,23 @@ The second of those is the one that matters and the one that caught a real bug: 
 pinged on every tick when there had been *no* interaction at all, which would have kept an abandoned
 closet PC signed in forever — the exact failure the idle timeout exists to prevent.
 
+`scanner.test.ts`, covering `attachScanner`: a fast burst reads as a scan, a slow one as typed, and —
+the nine that exist for a bug rather than for coverage — everything about the keystroke buffer keeping
+step with what the field actually shows. The bug was that typing a student number, deleting it, and
+pressing Enter signed you in as the *deleted* number, with an empty box as the only evidence anything
+had happened, because the buffer only ever grew.
+
+The first four cover Backspace and Escape moving the buffer. The other five cover the two ways the
+first fix could still be walked around, both verified to fail against it: an idle Backspace on an empty
+field left `fast` false forever, so the *next* card scan demanded a password from a user who has none
+yet; and every editing gesture that is a chord or a caret move (Alt/Cmd+Backspace, Cmd+A then
+overtype, arrow keys) bypassed the buffer entirely, leaving it fast and stale — the original bug, one
+keystroke further out. The sign-in screen adds the belt to that brace: a burst only counts as a scan
+when the field holds exactly what the buffer saw.
+
 Still unwritten, and worth doing next: `groupByModel` (the browse list's shape), `resolveStatus` (the five
-states and the 24h due-soon threshold), `dueInstant` (the 7-day cap's clamp), `attachScanner` (scan vs
-typed at the threshold), and the cart store's set semantics. All are pure functions or plain stores with
+states and the 24h due-soon threshold), `dueInstant` (the 7-day cap's clamp), and the cart store's set
+semantics. All are pure functions or plain stores with
 no component and no server needed.
 
 ## Planned

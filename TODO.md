@@ -13,7 +13,7 @@ Backend/functionality work only (no UI/layout/styling; UI is planned separately)
 - [x] `internal/stockroom/` skeleton: `db.go` (pgxpool from `DATABASE_URL`), `types.go` (structs for every table + `active_custody`/`overdue_custody`), `errors.go` (`ErrNotFound`, `ErrForbidden`, `ErrConflict`, `ErrOverdueBlocked`, `ErrPasswordNotSet`, `ErrBadCredentials`)
 - [x] `.env` loading (`godotenv`, searched upward from cwd) in `internal/stockroom/config.go` + `.env.example` with all vars from CLAUDE.md §9
 - [x] `server/main.go`: `net/http` mux, JSON helpers, error→status mapping, `GET /health` hitting the DB; verify with `curl`
-- [x] Update `scripts/start-mac.sh` and `scripts/start-windows.ps1` to also launch `go run ./server` and kill it on exit (Windows script still untested on real Windows)
+- [x] Update the start scripts (since consolidated into `scripts/dev.sh` / `dev.ps1`) to also launch `go run ./server` and kill it on exit (Windows script still untested on real Windows)
 
 ## Phase 1: v1 schema migration + seed (Week 5)
 - [x] New migration (CLAUDE.md §6.2): `profiles` += `student_number text unique`, `first_name`, `last_name`, `photo_path`, `is_admin bool not null default false`; `email` nullable. `supabase/migrations/20260908100000_v1_flow.sql`
@@ -104,14 +104,14 @@ Built as **one shared workspace package**, `packages/ui` (`@stockroom/ui`), not 
 
 ### Phase 6 packaging: one install, everywhere (2026-09-14)
 The workspace only helps if every entry point installs it the same way. These landed together:
-- [x] **`scripts/ensure-deps.sh`** is the one definition of "the dependencies are up to date": it clears any *shadowing* nested `node_modules`, runs `npm install` (or `npm ci` with `--ci`, and automatically after clearing a nested copy, because npm hoists and the remaining tree can have gaps), then `go mod download` so a missing Go module fails with a readable message instead of three lines into the server log. `start-mac.sh` and `test-all.sh` both call it; `start-windows.ps1` carries a PowerShell copy of the same steps
+- [x] **`scripts/ensure-deps.sh`** (now `./scripts/dev.sh deps`) is the one definition of "the dependencies are up to date": it clears any *shadowing* nested `node_modules`, runs `npm install` (or `npm ci` with `--ci`, and automatically after clearing a nested copy, because npm hoists and the remaining tree can have gaps), then `go mod download` so a missing Go module fails with a readable message instead of three lines into the server log. `dev.sh up` and `dev.sh test` both call it; `dev.ps1` carries a PowerShell copy of the same steps
 - [x] "Shadowing" means an installed **package**, not any nested `node_modules` at all. Vite writes its dep-optimisation cache to `<app>/node_modules/.vite` and `.vite-temp`, and npm puts workspace script binaries in `.bin`; a first cut of the check treated those as a stale install and reinstalled the world on every single run. Only non-dot entries count
-- [x] **`scripts/test-all.sh` installs first.** It never did, so on a fresh clone every npm step failed with `vite: not found` while the Go suites passed — a half-green run that looked like a frontend bug
+- [x] **`scripts/test-all.sh` (now `./scripts/dev.sh test`) installs first.** It never did, so on a fresh clone every npm step failed with `vite: not found` while the Go suites passed — a half-green run that looked like a frontend bug
 - [x] Both start scripts `exit 1` on a failed install instead of launching into a broken tree. Neither had `set -e`, so the failure was being swallowed
 - [x] **CI installs once at the root.** It was running `npm ci --prefix desktop-app/frontend` and `--prefix web-app`, which is the nested-install bug in the one place nobody watches, and caching two per-app lockfiles that no longer exist
 - [x] **CI's paths filter gained `packages/**`** (plus the root `package.json` / `package-lock.json`). Without it a change to `packages/ui` — now the entire frontend — was classified docs-only and skipped the build
 - [x] **`.gitignore` covers npm, pnpm and yarn**, not just `node_modules/`: `.npm/`, `.pnpm-store/`, `.yarn/cache`, `.pnp.*`, every `*-debug.log`, and `web-app/dist/`. `pnpm-lock.yaml` and `yarn.lock` are ignored on purpose — one lockfile, and a second means two tools disagree about the tree. The `node_modules/` rule is unanchored so a nested one is caught too. `node_modules/` itself had been committed in `cc6a258` (15,404 files) and is untracked again
-- [x] **`.githooks/pre-commit` runs the full suite before a commit is created** (2026-09-14), installed by `ensure-deps.sh` pointing `core.hooksPath` at the tracked directory rather than asking every contributor to remember a `git config` line. It reuses `scripts/test-all.sh`, so there is still one definition of "the suite", and skips itself on docs-only commits using the same path list as `.github/workflows/tests.yml`. `--no-verify` and `STOCKROOM_SKIP_TESTS=1` are the documented escapes; CI runs the same suite on the PR, so a skipped hook delays a failure rather than hiding it
+- [x] **`.githooks/pre-commit` runs the full suite before a commit is created** (2026-09-14), installed by `dev.sh deps` pointing `core.hooksPath` at the tracked directory rather than asking every contributor to remember a `git config` line. It reuses `scripts/dev.sh test`, so there is still one definition of "the suite", and skips itself on docs-only commits using the same path list as `.github/workflows/tests.yml`. `--no-verify` and `STOCKROOM_SKIP_TESTS=1` are the documented escapes; CI runs the same suite on the PR, so a skipped hook delays a failure rather than hiding it
 
 ### Still open in Phase 6
 - [ ] Wire the **command palette** (`/` focuses search today; `Cmd/Ctrl+K` jump-to-asset is unbuilt, design doc §5.1)
@@ -200,5 +200,5 @@ Bookings & double-booking prevention · locations · tags · saved filters · `c
 - [x] Postgres schema applied (12 tables, 2 views, 4 enums). `supabase/migrations/`
 - [x] Sample seed data. `supabase/seed.sql` (rewritten in Phase 1: 63-node category tree, 12 assets, admin + student)
 - [x] Proof-of-chain admin screen via supabase-js in the Wails app (`desktop-app/frontend/src/lib/db.ts`). To be deleted in Phase 6
-- [x] `scripts/start-mac.sh` tested and working; `start-windows.ps1` written but untested on real Windows
+- [x] The macOS start script tested and working; the Windows one written but untested on real Windows (both now `scripts/dev.sh` / `dev.ps1`)
 - [x] Product flow, auth model, roles, scope, and Go-backend architecture decided (CLAUDE.md §13, 2026-09-04)
