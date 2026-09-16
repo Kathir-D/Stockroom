@@ -41,7 +41,7 @@
 {:else}
   <span
     data-status={status.state}
-    class={cn("inline-flex items-center gap-1.5 whitespace-nowrap", status.fg, className)}
+    class={cn("inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap", status.fg, className)}
   >
     <span class="size-[7px] shrink-0 rounded-full bg-current" aria-hidden="true"></span>
     <!-- truncate, not clip: the unit row's status column carries the holder's
