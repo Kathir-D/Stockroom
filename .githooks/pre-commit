@@ -51,10 +51,14 @@ if ! printf '%s\n' "$staged" | grep -qE "$code_paths"; then
   exit 0
 fi
 
-echo "pre-commit: running ./scripts/dev.sh test (skip with --no-verify)"
+echo "pre-commit: running ./scripts/dev.sh test --no-deps (skip with --no-verify)"
 echo
 
-if ./scripts/dev.sh test; then
+# --no-deps, unlike a manual or CI run: `npm install` can rewrite the tracked
+# package-lock.json, and a hook that edits the working tree mid-commit records
+# code against a lockfile that moved without being staged. A stale tree still
+# fails loudly below, and the message names the command that fixes it.
+if ./scripts/dev.sh test --no-deps; then
   echo
   echo "pre-commit: all suites passed."
   exit 0
@@ -65,6 +69,9 @@ cat <<'MSG'
 pre-commit: the suite failed, so the commit was not created.
 
   - Fix the failures above and commit again, or
+  - `./scripts/dev.sh deps` if the failures look like missing packages ("vite:
+    not found" and the like). The hook runs with --no-deps so it cannot rewrite
+    package-lock.json underneath your commit, so it never installs for you, or
   - `./scripts/dev.sh up` first if the database suites were the ones that failed
     (they are reported as FAILED rather than skipped on purpose, so a silent
     skip can never pass for a success), or

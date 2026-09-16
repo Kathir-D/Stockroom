@@ -156,14 +156,30 @@ db_up() {
 }
 
 cmd_test() {
-  local failed=()
+  local failed=() with_deps=1 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --no-deps) with_deps=0 ;;
+      *) err "unknown flag for test: $arg"; return 2 ;;
+    esac
+  done
 
   # CI runs `npm ci` before any of this; a fresh clone here would otherwise
   # fail every npm step with "vite: not found".
-  if ! cmd_deps; then
-    echo
-    echo "FAILED: dependencies could not be installed; nothing else was run."
-    return 1
+  #
+  # --no-deps exists for .githooks/pre-commit, and for one reason: `npm install`
+  # may rewrite package-lock.json, which is a tracked file. A hook that edits
+  # the working tree in the middle of a commit is its own bug -- the rewrite is
+  # not staged, so the commit records code against a lockfile that has silently
+  # moved, and the next `git status` blames the author. Skipping it is safe
+  # there because a stale tree fails the suite loudly and the commit is blocked
+  # either way; the message below says which command fixes it.
+  if [ "$with_deps" -eq 1 ]; then
+    if ! cmd_deps; then
+      echo
+      echo "FAILED: dependencies could not be installed; nothing else was run."
+      return 1
+    fi
   fi
 
   run_suite() {
@@ -398,10 +414,24 @@ cmd_up() {
   # started this stack and Ctrl+C here must not take it away from them.
   if db_up; then
     ok "Supabase is already up; leaving it running when this script exits"
-    supabase start
+    if ! supabase start; then
+      err "supabase start failed. The stack was already up, so this is likely a"
+      err "partially-started stack; try './scripts/dev.sh stop' and re-run."
+      return 1
+    fi
   else
-    supabase start
+    # The flag goes up *before* the call, not after. `supabase start` creates
+    # containers as it goes, so a Ctrl+C in the middle of it leaves a stack
+    # this run brought up -- and cleanup only stops what it owns. Set it after
+    # and that interrupt leaks the containers. Setting it early can at worst
+    # make cleanup run `supabase stop` against a stack that never started,
+    # which is a no-op.
     STARTED_SUPABASE=1
+    if ! supabase start; then
+      err "supabase start failed. Check that Docker is running and has room,"
+      err "then re-run. Nothing below this point can work without Postgres."
+      return 1
+    fi
   fi
 
   say ""

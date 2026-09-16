@@ -459,17 +459,21 @@ returned by either login route and sent as `Authorization: Bearer <token>` or as
 `stockroom_session` cookie. "Admin" below is enforced inside `internal/stockroom`, not by the
 router.
 
+In the **Who** column: *anyone* needs no session · *any session* includes a password-less "limited"
+one (§7) · **any full** is every signed-in user whose password is set — a limited session gets `403
+{"error":"password not set","needs_password":true}` from these.
+
 | Route | Who | Notes |
 |---|---|---|
 | `GET /health` | anyone | Pings Postgres |
 | `POST /auth/scan` · `POST /auth/password` | anyone | `{student_number}` / `{student_number, password}` |
 | `POST /auth/set-password` · `POST /auth/logout` · `GET /me` | any session | Reachable from a password-less "limited" session |
-| `GET /categories/tree` | any | Nested Type → Category → Model, in `sort_order` |
-| `GET /assets?category=&status=&q=` · `GET /assets/{id}` | any | Rows carry `category_path`, `photo_url` and the current holder |
-| `POST /scan` | any | `{serial}` — checked out ⇒ checked in; available ⇒ detail |
-| `POST /checkout` | any | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
-| `POST /assets/{id}/checkin` | any | Optional `{note}` |
-| `POST /custody/{id}/note` | any | Adds a damage note to a *closed* custody event |
+| `GET /categories/tree` | any full | Nested Type → Category → Model, in `sort_order` |
+| `GET /assets?category=&status=&q=` · `GET /assets/{id}` | any full | Rows carry `category_path`, `photo_url` and the current holder |
+| `POST /scan` | any full | `{serial}` — checked out ⇒ checked in; available ⇒ detail |
+| `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
+| `POST /assets/{id}/checkin` | any full | Optional `{note}` |
+| `POST /custody/{id}/note` | any full | Adds a damage note to a *closed* custody event |
 | `GET /users/{id}/history` | self or admin | |
 | `GET /custody/active` · `GET /custody/overdue` · `GET /assets/{id}/history` | admin | |
 | `GET/POST /users` · `GET/PUT/DELETE /users/{id}` · `POST /users/{id}/password` | admin | |

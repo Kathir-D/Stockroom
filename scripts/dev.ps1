@@ -29,7 +29,8 @@ param(
     [switch]$NoDesktop,
     [switch]$NoWeb,
     [switch]$NoOpen,
-    [switch]$Ci
+    [switch]$Ci,
+    [switch]$NoDeps
 )
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -109,7 +110,7 @@ function Invoke-Deps {
     # reads is worse than a stop.
     if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path ".githooks")) {
         if ((git config --get core.hooksPath) -ne ".githooks") {
-            git config core.hooksPath .githooks
+            git config core.hooksPath .githooks | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "could not set core.hooksPath; the pre-commit hook will not run"
                 return $false
@@ -149,12 +150,12 @@ function Invoke-Deps {
     $useCi = ($Ci -or $nestedFound) -and (Test-Path (Join-Path $RepoRoot "package-lock.json"))
     if ($useCi) {
         Write-Host "  npm ci (exact lockfile) across packages/ui, web-app, desktop-app/frontend..."
-        npm ci
+        npm ci | Out-Host
     } else {
         # A no-op in a few hundred ms when the tree already matches, and an
         # update when package.json moved, so it is safe to run on every start.
         Write-Host "  npm install across packages/ui, web-app, desktop-app/frontend..."
-        npm install
+        npm install | Out-Host
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "npm install failed. Nothing below will work; fix it and re-run."
@@ -165,7 +166,7 @@ function Invoke-Deps {
     # here means a missing module fails now, with a readable message, rather
     # than three lines into the server's startup log.
     Write-Host "  Go modules..."
-    go mod download
+    go mod download | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Err "go mod download failed. Check your network or GOPROXY."
         return $false
@@ -181,17 +182,30 @@ function Invoke-Deps {
 function Invoke-Test {
     $failed = @()
 
-    if (-not (Invoke-Deps)) {
-        Write-Host ""
-        Write-Host "FAILED: dependencies could not be installed; nothing else was run."
-        return 1
+    # -NoDeps is dev.sh's --no-deps, for .githooks/pre-commit: `npm install` can
+    # rewrite the tracked package-lock.json, and a hook that edits the working
+    # tree mid-commit records code against a lockfile that moved without being
+    # staged. A stale tree still fails the suite loudly.
+    if (-not $NoDeps) {
+        if (-not (Invoke-Deps)) {
+            Write-Host ""
+            Write-Host "FAILED: dependencies could not be installed; nothing else was run."
+            return 1
+        }
     }
 
+    # & $Body | Out-Host, never a bare & $Body. PowerShell returns everything a
+    # function writes to the success stream, so `go test` output would be
+    # prepended to Invoke-Test's 0/1 and `$code = Invoke-Test` would be an
+    # array -- `exit` on which does not carry the suite's status. A failing
+    # suite exiting 0 is the "a skip must never pass for a success" rule
+    # inverted, in the place nobody watches. Out-Host writes straight to the
+    # console and preserves $LASTEXITCODE.
     function Invoke-Suite {
         param([string]$Name, [scriptblock]$Body)
         Write-Host ""
         Write-Host "=== $Name ==="
-        & $Body
+        & $Body | Out-Host
         if ($LASTEXITCODE -eq 0) {
             Write-Host "--- $Name`: PASS"
         } else {
@@ -289,7 +303,7 @@ function Test-Tools {
     if (-not (Get-Command wails -ErrorAction SilentlyContinue)) {
         if (Get-Command go -ErrorAction SilentlyContinue) {
             Write-Host "  [MISSING] Wails CLI - installing via 'go install'..."
-            go install github.com/wailsapp/wails/v2/cmd/wails@latest
+            go install github.com/wailsapp/wails/v2/cmd/wails@latest | Out-Host
             $goBin = Join-Path (go env GOPATH) "bin"
             $env:Path += ";$goBin"
             if (Get-Command wails -ErrorAction SilentlyContinue) {
@@ -380,10 +394,26 @@ function Invoke-Up {
     # started this stack and Ctrl+C here must not take it away from them.
     if (Test-DbUp) {
         Write-Ok "Supabase is already up; leaving it running when this script exits"
-        supabase start
+        supabase start | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "supabase start failed. The stack was already up, so this is likely a"
+            Write-Err "partially-started stack; try '.\scripts\dev.ps1 stop' and re-run."
+            return 1
+        }
     } else {
-        supabase start
+        # The flag goes up *before* the call, not after. `supabase start`
+        # creates containers as it goes, so a Ctrl+C in the middle of it leaves
+        # a stack this run brought up -- and Cleanup only stops what it owns.
+        # Set it after and that interrupt leaks the containers. Setting it
+        # early can at worst make Cleanup run `supabase stop` against a stack
+        # that never started, which is a no-op.
         $script:StartedSupabase = $true
+        supabase start | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "supabase start failed. Check that Docker is running and has room,"
+            Write-Err "then re-run. Nothing below this point can work without Postgres."
+            return 1
+        }
     }
 
     Write-Host ""
