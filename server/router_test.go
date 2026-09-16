@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,5 +110,37 @@ func TestOriginAllowed(t *testing.T) {
 		if originAllowed(origin) {
 			t.Errorf("originAllowed(%q) = true, want false", origin)
 		}
+	}
+}
+
+// TestLogBlockedOriginIsBounded pins the cap on the remembered-origin set.
+//
+// Origin is a caller-controlled header read before any session check, so the
+// set that makes the warning fire once per origin is also a map an outsider can
+// grow a key at a time. The cap is the whole point of the map's shape; without
+// it, `sync.Map` and one log line per distinct value is unbounded in both.
+func TestLogBlockedOriginIsBounded(t *testing.T) {
+	prev := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	blockedOrigins.mu.Lock()
+	blockedOrigins.seen = make(map[string]struct{})
+	blockedOrigins.mu.Unlock()
+
+	// One repeat first: the same origin twice must still be one entry.
+	logBlockedOrigin("http://example.com")
+	logBlockedOrigin("http://example.com")
+
+	for i := 0; i < maxBlockedOrigins+50; i++ {
+		logBlockedOrigin(fmt.Sprintf("http://attacker-%d.example", i))
+	}
+
+	blockedOrigins.mu.Lock()
+	n := len(blockedOrigins.seen)
+	blockedOrigins.mu.Unlock()
+
+	if n != maxBlockedOrigins {
+		t.Errorf("remembered %d origins, want exactly the cap %d", n, maxBlockedOrigins)
 	}
 }

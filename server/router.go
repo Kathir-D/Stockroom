@@ -188,7 +188,9 @@ func withCORS(next http.Handler) http.Handler {
 			// response before any JavaScript sees it, and the frontend reports
 			// "cannot reach the server" — indistinguishable from a server that
 			// is down. Naming the origin turns a confusing afternoon into one
-			// log line. Logged once per origin, so a reload loop can't flood.
+			// log line. Logged once per origin, and only for the first
+			// maxBlockedOrigins of them, so neither a reload loop nor a caller
+			// inventing a header value can flood the log.
 			logBlockedOrigin(origin)
 		}
 		if r.Method == http.MethodOptions {
@@ -199,10 +201,30 @@ func withCORS(next http.Handler) http.Handler {
 	})
 }
 
-var blockedOrigins sync.Map
+// maxBlockedOrigins caps how many distinct refused origins are remembered.
+// The set exists only to log each one once; it is keyed by a header the caller
+// controls, so without a bound a caller sending a fresh Origin per request
+// would grow the map — and the log — for the life of the process. Past the cap
+// the origin is neither stored nor logged: the first hundred have already told
+// whoever is reading the log what is misconfigured, and the alternative
+// (logging without storing) is the flood the set was added to prevent.
+const maxBlockedOrigins = 100
+
+var blockedOrigins = struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}{seen: make(map[string]struct{})}
 
 func logBlockedOrigin(origin string) {
-	if _, seen := blockedOrigins.LoadOrStore(origin, true); seen {
+	blockedOrigins.mu.Lock()
+	_, seen := blockedOrigins.seen[origin]
+	full := len(blockedOrigins.seen) >= maxBlockedOrigins
+	if !seen && !full {
+		blockedOrigins.seen[origin] = struct{}{}
+	}
+	blockedOrigins.mu.Unlock()
+
+	if seen || full {
 		return
 	}
 	log.Printf("warning: refused a request from origin %q; it is not allowed (see originAllowed in server/router.go)", origin)
