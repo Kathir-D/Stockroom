@@ -79,6 +79,12 @@
   --status-available-bg: #0e2b1c;
   --status-out: #7db3ff;
   --status-out-bg: #12233d;
+  /* Checked out by *somebody else*. Blue means "out, and it's yours"; this hue
+     means "out, and it isn't". Hue 27, sitting deliberately between overdue's 4
+     and due-soon's 43 so the three stay separable, and never carried by colour
+     alone -- the label names the holder (§6, status.ts). */
+  --status-out-other: #fb923c;
+  --status-out-other-bg: #3a2310;
   --status-due-soon: #fbbf24;
   --status-due-soon-bg: #33260a;
   --status-overdue: #ff7a70;
@@ -231,6 +237,8 @@
   --color-status-available-bg: var(--status-available-bg);
   --color-status-out: var(--status-out);
   --color-status-out-bg: var(--status-out-bg);
+  --color-status-out-other: var(--status-out-other);
+  --color-status-out-other-bg: var(--status-out-other-bg);
   --color-status-due-soon: var(--status-due-soon);
   --color-status-due-soon-bg: var(--status-due-soon-bg);
   --color-status-overdue: var(--status-overdue);

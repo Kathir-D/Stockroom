@@ -27,7 +27,7 @@
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right"
   import * as Collapsible from "@stockroom/ui/components/ui/collapsible"
   import { cn } from "@stockroom/ui/utils"
-  import type { AssetListItem } from "../../api/types"
+  import type { AssetCustody, AssetListItem } from "../../api/types"
   import type { ModelGroup } from "../../stores/catalog.svelte"
   import { groupStatus } from "../../status"
   import PhotoFrame from "./photo-frame.svelte"
@@ -44,6 +44,7 @@
   let {
     group,
     viewerId = null,
+    isAdmin = false,
     cartIds = [],
     canAdd = true,
     /**
@@ -56,9 +57,11 @@
     onOpenUnit,
     onAddUnit,
     onRemoveUnit,
+    onViewHistory,
   }: {
     group: ModelGroup
     viewerId?: string | null
+    isAdmin?: boolean
     cartIds?: string[]
     canAdd?: boolean
     forceOpen?: boolean
@@ -66,6 +69,8 @@
     onOpenUnit?: (unit: AssetListItem) => void
     onAddUnit?: (unit: AssetListItem) => void
     onRemoveUnit?: (unit: AssetListItem) => void
+    /** Passed straight through to <UnitRow>; see its `onViewHistory`. */
+    onViewHistory?: (custody: AssetCustody) => void
   } = $props()
 
   let showAll = $state(false)
@@ -150,7 +155,9 @@
         <UnitRow
           {unit}
           {viewerId}
+          {isAdmin}
           {canAdd}
+          {onViewHistory}
           inCart={cartIds.includes(unit.id)}
           highlighted={highlightedUnitId === unit.id}
           onOpen={onOpenUnit}

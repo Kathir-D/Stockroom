@@ -39,6 +39,7 @@
   let {
     canAdd = true,
     inCart = false,
+    viewerId = null,
     onAdd,
     onRemove,
     onSaveNote,
@@ -46,6 +47,8 @@
   }: {
     canAdd?: boolean
     inCart?: boolean
+    /** Who is signed in, so an item they hold reads as theirs (status.ts). */
+    viewerId?: string | null
     onAdd?: (asset: AssetDetail) => void
     /** Same button as Add, pressed again. */
     onRemove?: (asset: AssetDetail) => void
@@ -152,7 +155,7 @@
   }
 
   const status = $derived(
-    surface?.kind === "scan" ? resolveStatus(surface.result.asset) : null
+    surface?.kind === "scan" ? resolveStatus(surface.result.asset, viewerId) : null
   )
 </script>
 

@@ -193,7 +193,7 @@
         <EmptyState title="Loading your cart…" />
       {:else}
         {#each cartItems.items as item (item.id)}
-          {@const status = resolveStatus(item)}
+          {@const status = resolveStatus(item, session.profile?.id ?? null)}
           <!-- One rounded card per line item, matching the browse list. -->
           <div
             class="flex items-center gap-3 rounded-(--radius) border border-line px-(--gutter) py-2"

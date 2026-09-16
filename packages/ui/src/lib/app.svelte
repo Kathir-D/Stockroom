@@ -325,6 +325,7 @@
   </div>
 
   <ScanResult
+    viewerId={session.profile?.id ?? null}
     canAdd={!session.checkoutBlocked}
     inCart={scanStore.surface?.kind === "scan" ? cart.has(scanStore.surface.result.asset.id) : false}
     onAdd={addToCart}
