@@ -25,6 +25,7 @@ const in3Days = new Date(NOW.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString()
 const in12Hours = new Date(NOW.getTime() + 12 * 60 * 60 * 1000).toISOString()
 const twoDaysAgo = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString()
 
+/** Build a complete custody fixture, applying any field overrides. */
 function custody(over: Partial<AssetCustody> = {}): AssetCustody {
   return {
     custody_event_id: 'event-1',
@@ -38,6 +39,7 @@ function custody(over: Partial<AssetCustody> = {}): AssetCustody {
   }
 }
 
+/** Build a checked-out asset fixture with optional custody field overrides. */
 const out = (over: Partial<AssetCustody> = {}) =>
   ({status: 'checked_out', custody: custody(over)}) as const
 
