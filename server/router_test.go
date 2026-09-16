@@ -84,7 +84,7 @@ func TestHealthOK(t *testing.T) {
 func TestOriginAllowed(t *testing.T) {
 	allowed := []string{
 		"http://localhost:5173",         // web-app, vite dev
-		"http://127.0.0.1:5174",         // vite's next free port
+		"http://127.0.0.1:5173",         // the same, by address
 		"http://localhost:34115",        // wails dev, opened in a browser
 		"wails://wails",                 // macOS/Linux, wails build
 		"wails://wails.localhost:34115", // macOS/Linux, wails dev
@@ -105,6 +105,10 @@ func TestOriginAllowed(t *testing.T) {
 		// A LAN address, which CLAUDE.md §2 keeps out even on the right port.
 		"http://192.168.1.20:5173",
 		"https://localhost:5173",
+		// Vite's next free port. Refused on purpose: the dev script pins 5173
+		// with --strictPort, so a second dev server must fail to start rather
+		// than come up on a port whose every request the browser will block.
+		"http://localhost:5174",
 	}
 	for _, origin := range refused {
 		if originAllowed(origin) {

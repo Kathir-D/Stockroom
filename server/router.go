@@ -107,15 +107,18 @@ func newRouter(d deps) http.Handler {
 //
 // The Wails webview is *not* in this map; see originAllowed, which has to match
 // four different origins across two platforms and two build modes.
+// 5173 is the only web-app port, and deliberately: `web-app/package.json` runs
+// Vite with --strictPort, so a busy port makes it refuse to start instead of
+// quietly taking the next one. Chasing the drift here — 5174, 5175, a range —
+// was the other option and is worse. Vite's fallback port is unbounded in
+// principle, so any range still has an edge past which the app loads normally
+// and every request fails as "cannot reach the server": a blocked preflight and
+// a dead server raise the same fetch error, so the UI blames the server. A
+// refusal to start names the actual problem; a wider allow-list only moves the
+// silent failure further out.
 var localOrigins = map[string]bool{
-	"http://localhost:5173": true, // web-app, vite dev
-	"http://127.0.0.1:5173": true,
-	// Vite takes the next free port when 5173 is already in use, which happens
-	// whenever a previous dev server is still running. The page then loads
-	// normally and every request fails as "cannot reach the server", because a
-	// blocked preflight is indistinguishable from a server that is down.
-	"http://localhost:5174":  true,
-	"http://127.0.0.1:5174":  true,
+	"http://localhost:5173":  true, // web-app, vite dev (--strictPort)
+	"http://127.0.0.1:5173":  true,
 	"http://localhost:34115": true, // wails dev, viewed in a normal browser
 	"http://127.0.0.1:34115": true,
 }
