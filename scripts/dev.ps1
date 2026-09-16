@@ -101,6 +101,17 @@ function Test-DbUp {
 # ===========================================================================
 # deps -- one definition of "the dependencies are up to date"
 # ===========================================================================
+# Every native command below is preceded by `$global:LASTEXITCODE = $null` and
+# checked with `Test-NativeOk`, never a bare `$LASTEXITCODE -eq 0`.
+#
+# PowerShell does not set $LASTEXITCODE when a command fails to *resolve* -- an
+# absent `npm` or `go` raises CommandNotFoundException and leaves the variable
+# holding whatever the previous native call left there. A stale 0 then reads as
+# success, so on a machine without Go `dev.ps1 test` would report every suite
+# PASS. Clearing it first turns "the command never ran" into a distinguishable
+# $null instead of an inherited pass.
+function Test-NativeOk { $null -ne $LASTEXITCODE -and $LASTEXITCODE -eq 0 }
+
 function Invoke-Deps {
     Write-Host "== Dependencies =="
 
@@ -110,8 +121,9 @@ function Invoke-Deps {
     # reads is worse than a stop.
     if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path ".githooks")) {
         if ((git config --get core.hooksPath) -ne ".githooks") {
+            $global:LASTEXITCODE = $null
             git config core.hooksPath .githooks | Out-Host
-            if ($LASTEXITCODE -ne 0) {
+            if (-not (Test-NativeOk)) {
                 Write-Err "could not set core.hooksPath; the pre-commit hook will not run"
                 return $false
             }
@@ -150,15 +162,17 @@ function Invoke-Deps {
     $useCi = ($Ci -or $nestedFound) -and (Test-Path (Join-Path $RepoRoot "package-lock.json"))
     if ($useCi) {
         Write-Host "  npm ci (exact lockfile) across packages/ui, web-app, desktop-app/frontend..."
+        $global:LASTEXITCODE = $null
         npm ci | Out-Host
     } else {
         # A no-op in a few hundred ms when the tree already matches, and an
         # update when package.json moved, so it is safe to run on every start.
         Write-Host "  npm install across packages/ui, web-app, desktop-app/frontend..."
+        $global:LASTEXITCODE = $null
         npm install | Out-Host
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "npm install failed. Nothing below will work; fix it and re-run."
+    if (-not (Test-NativeOk)) {
+        Write-Err "npm install failed (or npm is not installed). Nothing below will work; fix it and re-run."
         return $false
     }
 
@@ -166,9 +180,10 @@ function Invoke-Deps {
     # here means a missing module fails now, with a readable message, rather
     # than three lines into the server's startup log.
     Write-Host "  Go modules..."
+    $global:LASTEXITCODE = $null
     go mod download | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "go mod download failed. Check your network or GOPROXY."
+    if (-not (Test-NativeOk)) {
+        Write-Err "go mod download failed (or go is not installed). Check your toolchain, network or GOPROXY."
         return $false
     }
 
@@ -205,8 +220,9 @@ function Invoke-Test {
         param([string]$Name, [scriptblock]$Body)
         Write-Host ""
         Write-Host "=== $Name ==="
+        $global:LASTEXITCODE = $null
         & $Body | Out-Host
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-NativeOk) {
             Write-Host "--- $Name`: PASS"
         } else {
             Write-Host "--- $Name`: FAIL"
@@ -394,8 +410,9 @@ function Invoke-Up {
     # started this stack and Ctrl+C here must not take it away from them.
     if (Test-DbUp) {
         Write-Ok "Supabase is already up; leaving it running when this script exits"
+        $global:LASTEXITCODE = $null
         supabase start | Out-Host
-        if ($LASTEXITCODE -ne 0) {
+        if (-not (Test-NativeOk)) {
             Write-Err "supabase start failed. The stack was already up, so this is likely a"
             Write-Err "partially-started stack; try '.\scripts\dev.ps1 stop' and re-run."
             return 1
@@ -408,8 +425,9 @@ function Invoke-Up {
         # early can at worst make Cleanup run `supabase stop` against a stack
         # that never started, which is a no-op.
         $script:StartedSupabase = $true
+        $global:LASTEXITCODE = $null
         supabase start | Out-Host
-        if ($LASTEXITCODE -ne 0) {
+        if (-not (Test-NativeOk)) {
             Write-Err "supabase start failed. Check that Docker is running and has room,"
             Write-Err "then re-run. Nothing below this point can work without Postgres."
             return 1
