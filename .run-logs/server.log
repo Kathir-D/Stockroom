@@ -1,0 +1,5 @@
+2026/09/15 14:12:39 warning: ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD not set; no failsafe admin
+2026/09/15 14:12:39 stockroom server listening on http://127.0.0.1:8080
+2026/09/15 14:12:40 GET /health 3ms
+2026/09/15 14:13:04 OPTIONS /me 5ms
+2026/09/15 14:13:04 GET /me 3ms

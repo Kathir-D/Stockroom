@@ -188,13 +188,16 @@
 
   <div class="flex flex-col gap-(--gutter) lg:flex-row lg:items-start">
     <!-- Left: the line items. -->
-    <div class="min-w-0 flex-1 overflow-hidden rounded-xl border border-line-strong">
+    <div class="flex min-w-0 flex-1 flex-col gap-2">
       {#if cartItems.items.length === 0}
-        <EmptyState title="Loading your cart…" class="rounded-none border-0" />
+        <EmptyState title="Loading your cart…" />
       {:else}
         {#each cartItems.items as item (item.id)}
           {@const status = resolveStatus(item)}
-          <div class="flex items-center gap-3 border-b border-line px-(--gutter) py-2 last:border-b-0">
+          <!-- One rounded card per line item, matching the browse list. -->
+          <div
+            class="flex items-center gap-3 rounded-(--radius) border border-line px-(--gutter) py-2"
+          >
             <PhotoFrame src={item.photo_url} alt={item.name} class="size-10" />
             <div class="flex min-w-0 flex-1 flex-col">
               <span class="truncate font-medium text-fg">{item.name}</span>
