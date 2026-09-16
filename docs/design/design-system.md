@@ -235,18 +235,22 @@ There is deliberately **no brand accent colour**. Primary actions are near-white
 
 :root {
   /* ---------- neutrals: Studio Ops (A2) ---------- */
-  --ground:          #17191A;   /* the window background */
-  --surface:         #1E2122;   /* cards, sidebar, table container, top bar */
-  --raised:          #262A2B;   /* hover, selected row, input fill, thumbnails */
-  --overlay:         #2B2F30;   /* dialogs and popovers, floats above surface */
+  /* Re-anchored 2026-09-15: the window background was set to #2E3033 and every
+     other neutral was lifted by the step it already held above the old ground,
+     so the elevation order survives. The two lower text tiers moved too -- see
+     the contrast table in §11. */
+  --ground:          #2E3033;   /* the window background */
+  --surface:         #35383B;   /* cards, sidebar, table container, top bar */
+  --raised:          #3D4144;   /* hover, selected row, input fill, thumbnails */
+  --overlay:         #424649;   /* dialogs and popovers, floats above surface */
 
   --fg:              #E9E9E7;   /* primary text */
-  --fg-muted:        #9A9F9E;   /* secondary text, column headers, metadata */
-  --fg-faint:        #7C8281;   /* placeholder, disabled label, timestamps */
+  --fg-muted:        #A8ADAC;   /* secondary text, column headers, metadata */
+  --fg-faint:        #949998;   /* placeholder, disabled label, timestamps */
 
-  --line:            #2F3435;   /* decorative dividers, table rules */
-  --line-control:    #646B6A;   /* borders that define an interactive control (§10) */
-  --line-strong:     #414748;   /* card and panel edges */
+  --line:            #464B4E;   /* decorative dividers, table rules */
+  --line-control:    #7B8283;   /* borders that define an interactive control (§10) */
+  --line-strong:     #585E61;   /* card and panel edges */
 
   /* ---------- action ---------- */
   --primary:         #E9E9E7;
@@ -780,20 +784,26 @@ theme. It is the same shell, `data-density="compact"`.
 
 Non-negotiable, and cheap if done from the start.
 
-**Contrast.** Measured against `--ground: #17191A`:
+**Contrast.** Re-measured 2026-09-15 against `--ground: #2E3033`. A lighter
+ground costs every foreground some ratio — the old values against `#17191A` are
+kept in the last column, because the *reason* a token has the value it does is
+usually the ratio it was chosen to clear:
 
-| Pair | Ratio | Verdict |
-|---|---|---|
-| `--fg` `#E9E9E7` | 14.51 | AA / AAA |
-| `--fg-muted` `#9A9F9E` | 6.58 | AA |
-| `--fg-faint` `#7C8281` | 4.51 | AA (this is why it is not `#6E7473`, which measures 3.70 and fails) |
-| `--status-available` `#4ADE80` | 10.12 | AA |
-| `--status-out` `#7DB3FF` | 8.20 | AA |
-| `--status-due-soon` `#FBBF24` | 10.57 | AA |
-| `--status-overdue` `#FF7A70` | 6.95 | AA |
-| `--primary-fg` on `--primary` | 14.51 | AA |
-| `--line-control` `#646B6A` | 3.24 | meets the 3:1 non-text minimum |
-| `--line` `#2F3435` | 1.40 | **decorative only**. Never use it to define a control's boundary |
+| Pair | Ratio | Verdict | Was (on `#17191A`) |
+|---|---|---|---|
+| `--fg` `#E9E9E7` | 10.89 | AA / AAA | 14.51 |
+| `--fg-muted` `#A8ADAC` | 5.82 | AA | 6.58 (as `#9A9F9E`) |
+| `--fg-faint` `#949998` | 4.58 | AA. It had to move: the old `#7C8281` measures **3.38** here and fails | 4.51 (as `#7C8281`) |
+| `--status-available` `#4ADE80` | 7.59 | AA | 10.12 |
+| `--status-out` `#7DB3FF` | 6.15 | AA | 8.20 |
+| `--status-due-soon` `#FBBF24` | 7.93 | AA | 10.57 |
+| `--status-overdue` `#FF7A70` | 5.21 | AA | 6.95 |
+| `--primary-fg` on `--primary` | 14.51 | AA | 14.51 (unaffected; neither token moved) |
+| `--line-control` `#7B8283` | 3.38 | meets the 3:1 non-text minimum | 3.24 |
+| `--line` `#464B4E` | 1.50 | **decorative only**. Never use it to define a control's boundary | 1.40 |
+
+The status hues are the tightest of these: `--status-overdue` has 5.21 to give
+before it stops clearing 4.5:1, so a further lift of the ground is not free.
 
 The `--line` / `--line-control` split exists precisely because of that last row. A table rule may be
 invisible; an input border may not.

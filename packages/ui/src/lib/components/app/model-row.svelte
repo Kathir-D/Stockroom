@@ -91,11 +91,17 @@
   const parentPath = $derived(group.categoryPath.slice(0, -1).map((c) => c.name).join(" › "))
 </script>
 
-<Collapsible.Root {open} onOpenChange={(next) => (userToggled = next)}>
+<!-- The card edge lives on the root, with overflow-hidden so the header fill and
+     the open body are both clipped to the radius. -->
+<Collapsible.Root
+  {open}
+  onOpenChange={(next) => (userToggled = next)}
+  class="overflow-hidden rounded-(--radius) border border-line-strong"
+>
   <div
     class={cn(
-      "flex items-center border-b border-line bg-surface",
-      open && "bg-raised"
+      "flex items-center bg-surface",
+      open && "border-b border-line bg-raised"
     )}
   >
     <Collapsible.Trigger
@@ -137,7 +143,9 @@
   </div>
 
   <Collapsible.Content>
-    <div class="border-b border-line bg-ground pl-8">
+    <!-- Units are cards too (see <UnitRow>), so this is a spaced stack rather
+         than a divided list. The left inset keeps them visibly nested. -->
+    <div class="flex flex-col gap-1 bg-ground p-2 pl-8">
       {#each visibleUnits as unit (unit.id)}
         <UnitRow
           {unit}

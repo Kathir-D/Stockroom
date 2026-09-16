@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,5 +70,81 @@ func TestHealthOK(t *testing.T) {
 	}
 	if body.Time.IsZero() || time.Since(body.Time) > time.Minute {
 		t.Errorf("time = %v, want a fresh timestamp", body.Time)
+	}
+}
+
+// TestOriginAllowed pins the four Wails webview origins.
+//
+// A wrong answer here is invisible in the app: the browser blocks the request
+// before any JavaScript runs, and the frontend reports "cannot reach the
+// Stockroom server" — the same message it shows when the server really is down.
+// That cost an afternoon once (the macOS dev origin carries a host and a port,
+// wails://wails.localhost:34115, and only wails://wails was allowed), so every
+// platform and mode is listed rather than trusted to a comment.
+func TestOriginAllowed(t *testing.T) {
+	allowed := []string{
+		"http://localhost:5173",         // web-app, vite dev
+		"http://127.0.0.1:5173",         // the same, by address
+		"http://localhost:34115",        // wails dev, opened in a browser
+		"wails://wails",                 // macOS/Linux, wails build
+		"wails://wails.localhost:34115", // macOS/Linux, wails dev
+		"http://wails.localhost",        // Windows, wails build
+		"http://wails.localhost:34115",  // Windows, wails dev
+	}
+	for _, origin := range allowed {
+		if !originAllowed(origin) {
+			t.Errorf("originAllowed(%q) = false, want true", origin)
+		}
+	}
+
+	refused := []string{
+		"",
+		"http://example.com",
+		// The host check is exact, not a prefix: this is somebody else's domain.
+		"http://wails.localhost.example.com",
+		// A LAN address, which CLAUDE.md §2 keeps out even on the right port.
+		"http://192.168.1.20:5173",
+		"https://localhost:5173",
+		// Vite's next free port. Refused on purpose: the dev script pins 5173
+		// with --strictPort, so a second dev server must fail to start rather
+		// than come up on a port whose every request the browser will block.
+		"http://localhost:5174",
+	}
+	for _, origin := range refused {
+		if originAllowed(origin) {
+			t.Errorf("originAllowed(%q) = true, want false", origin)
+		}
+	}
+}
+
+// TestLogBlockedOriginIsBounded pins the cap on the remembered-origin set.
+//
+// Origin is a caller-controlled header read before any session check, so the
+// set that makes the warning fire once per origin is also a map an outsider can
+// grow a key at a time. The cap is the whole point of the map's shape; without
+// it, `sync.Map` and one log line per distinct value is unbounded in both.
+func TestLogBlockedOriginIsBounded(t *testing.T) {
+	prev := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	blockedOrigins.mu.Lock()
+	blockedOrigins.seen = make(map[string]struct{})
+	blockedOrigins.mu.Unlock()
+
+	// One repeat first: the same origin twice must still be one entry.
+	logBlockedOrigin("http://example.com")
+	logBlockedOrigin("http://example.com")
+
+	for i := 0; i < maxBlockedOrigins+50; i++ {
+		logBlockedOrigin(fmt.Sprintf("http://attacker-%d.example", i))
+	}
+
+	blockedOrigins.mu.Lock()
+	n := len(blockedOrigins.seen)
+	blockedOrigins.mu.Unlock()
+
+	if n != maxBlockedOrigins {
+		t.Errorf("remembered %d origins, want exactly the cap %d", n, maxBlockedOrigins)
 	}
 }
