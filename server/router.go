@@ -42,6 +42,13 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /auth/scan", d.handleLoginByScan)
 	mux.HandleFunc("POST /auth/password", d.handleLoginByPassword)
 
+	// The sign-in photo wall (docs/design/signin-photo-wall.html §5). No
+	// session: this is what the sign-in screen renders behind the card, and
+	// there is no session to require yet. Both routes are nil-safe on a reel
+	// that was never built, which is the common case -- see server/photowall.go.
+	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
+	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))
+
 	// A limited session (scan login, no password yet) may only set its
 	// password, sign out, or ask who it is.
 	mux.Handle("POST /auth/set-password", d.withSession(d.handleSetInitialPassword, allowLimited))
@@ -71,7 +78,7 @@ func newRouter(d deps) http.Handler {
 
 	// Photos, served straight off UPLOADS_DIR. Unauthenticated on purpose;
 	// see fileServer.
-	mux.Handle("GET /files/", fileServer(d.db.UploadsDir))
+	mux.Handle("GET /files/", fileServer("/files/", d.db.UploadsDir))
 
 	// The admin panel's writes: the asset table, the category tree, and the
 	// backup button. Admin-only, enforced inside internal/stockroom.
