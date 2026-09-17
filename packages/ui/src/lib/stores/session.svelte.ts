@@ -10,7 +10,7 @@
  */
 
 import * as api from "../api/index"
-import type { CustodyRecord, Profile } from "../api/types"
+import type { BackupWarning, CustodyRecord, Profile } from "../api/types"
 import { cart } from "./cart.svelte"
 
 class SessionStore {
@@ -22,6 +22,35 @@ class SessionStore {
   overdueItems = $state<CustodyRecord[]>([])
   /** False until the first `/me` settles, so the shell can hold a blank frame. */
   ready = $state(false)
+
+  /**
+   * The backup-staleness sentence the server wants this person to see, or null.
+   *
+   * It rides on every `/me` and both login responses because sign-in is the one
+   * moment everybody passes through (docs/design/backup.md §E.7). The wording is
+   * the server's — an admin is told where to go, a student is told who to tell —
+   * and this store never rewrites it.
+   */
+  backupWarning = $state<BackupWarning | null>(null)
+
+  /**
+   * Whether this person has dismissed the banner in this session.
+   *
+   * Kept beside the warning rather than inside the component, because `refresh()`
+   * runs after every check-in and would otherwise reopen a banner somebody just
+   * closed — which is the behaviour that teaches people to ignore banners. It
+   * resets on `clear()`, so the next person at the shared machine sees it again.
+   */
+  backupWarningDismissed = $state(false)
+
+  /** The warning to actually render: absent once dismissed. */
+  get visibleBackupWarning() {
+    return this.backupWarningDismissed ? null : this.backupWarning
+  }
+
+  dismissBackupWarning() {
+    this.backupWarningDismissed = true
+  }
 
   get signedIn() {
     return this.profile !== null
@@ -58,7 +87,7 @@ class SessionStore {
     }
     try {
       const result = await api.me()
-      this.adoptProfile(result.profile, result.has_overdue)
+      this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
       // `/me` answers for a limited session too, so the token being valid does
       // not by itself mean the session is full. A 403 from the first full-only
       // read is what reveals that; ask for the tree to find out now rather than
@@ -81,22 +110,32 @@ class SessionStore {
   }
 
   /** Adopt a fresh login response. */
-  async adopt(result: { profile: Profile; has_overdue: boolean; needs_password?: boolean }) {
-    this.adoptProfile(result.profile, result.has_overdue)
+  async adopt(result: {
+    profile: Profile
+    has_overdue: boolean
+    needs_password?: boolean
+    backup_warning?: BackupWarning | null
+  }) {
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning ?? null)
     this.needsPassword = result.needs_password === true
     if (!this.needsPassword) await this.refreshOverdue()
   }
 
-  private adoptProfile(profile: Profile, hasOverdue: boolean) {
+  private adoptProfile(
+    profile: Profile,
+    hasOverdue: boolean,
+    backupWarning: BackupWarning | null = null
+  ) {
     this.profile = profile
     this.hasOverdue = hasOverdue
+    this.backupWarning = backupWarning
   }
 
   /** Called after `setInitialPassword` upgrades a limited token in place. */
   async completePasswordSetup() {
     this.needsPassword = false
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue)
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
     await this.refreshOverdue()
   }
 
@@ -131,7 +170,7 @@ class SessionStore {
   async refresh() {
     if (!this.signedIn) return
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue)
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
     await this.refreshOverdue()
   }
 
@@ -150,6 +189,8 @@ class SessionStore {
     this.hasOverdue = false
     this.needsPassword = false
     this.overdueItems = []
+    this.backupWarning = null
+    this.backupWarningDismissed = false
     api.setToken(null)
     cart.clear()
   }

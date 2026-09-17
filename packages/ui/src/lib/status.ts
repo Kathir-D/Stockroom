@@ -75,6 +75,47 @@ export function dateTime(iso: string | null | undefined): string {
   })
 }
 
+/**
+ * A byte count as a person would say it: `4.2 MB`, `1.1 GB`.
+ *
+ * Here beside the other formatters rather than in a module of its own, because
+ * the backup and photo-mirror screens are the only callers and a second
+ * formatting home is how `Sep 12` and `12 Sep` end up on adjacent screens.
+ * Base 1024 with the short units, matching what the operating system's file
+ * browser shows for the same folder — a backup screen that disagrees with
+ * Explorer about the size of a directory is a backup screen nobody trusts.
+ */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "—"
+  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`
+  const units = ["KB", "MB", "GB", "TB", "PB"]
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  // One decimal below 10, none above: `4.2 MB` is useful, `412.7 MB` is noise.
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
+/**
+ * How long ago something happened, from an age already measured in hours.
+ *
+ * The server sends `age_hours` rather than letting the client subtract two
+ * clocks, because the closet PC's clock and the browser's are the same clock
+ * only by coincidence. This just words it.
+ */
+export function ageWords(hours: number | null | undefined): string {
+  if (hours === null || hours === undefined || !Number.isFinite(hours)) return "never"
+  if (hours < 1) {
+    const minutes = Math.max(1, Math.round(hours * 60))
+    return `${minutes} min ago`
+  }
+  if (hours < 48) return `${Math.round(hours)} h ago`
+  return `${Math.round(hours / 24)} days ago`
+}
+
 /** Whole days between now and `iso`, negative once it's in the past. */
 function daysUntil(iso: string): number {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000))

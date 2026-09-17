@@ -22,66 +22,70 @@ export type AssetStatus =
   | "reserved"
   | "maintenance"
   | "retired"
-  | "lost"
+  | "lost";
 
 /** The three statuses v1 actually uses, in the order the browse list sorts them. */
-export const V1_STATUSES: AssetStatus[] = ["available", "checked_out", "unavailable"]
+export const V1_STATUSES: AssetStatus[] = [
+  "available",
+  "checked_out",
+  "unavailable",
+];
 
 export interface Profile {
-  id: string
-  email: string | null
-  full_name: string | null
-  role: string
-  student_number: string | null
-  first_name: string | null
-  last_name: string | null
-  photo_path: string | null
-  is_admin: boolean
-  created_at: string
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+  student_number: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  photo_path: string | null;
+  is_admin: boolean;
+  created_at: string;
   /** photo_path under `/files/`, derived server-side. Never built by hand. */
-  photo_url: string | null
+  photo_url: string | null;
 }
 
 export interface Category {
-  id: string
-  name: string
-  parent_id: string | null
+  id: string;
+  name: string;
+  parent_id: string | null;
   /** Position among siblings, ascending, name breaking a tie. */
-  sort_order: number
-  created_at: string
+  sort_order: number;
+  created_at: string;
 }
 
 /** One node of `GET /categories/tree`: Type -> Category -> Model, three deep. */
 export interface CategoryNode extends Category {
-  children: CategoryNode[]
+  children: CategoryNode[];
 }
 
 /** A single hop of an asset's `category_path`, root first. */
 export interface CategoryRef {
-  id: string
-  name: string
+  id: string;
+  name: string;
 }
 
 export interface Asset {
-  id: string
+  id: string;
   /** Internal, database-generated (`AST-000001`). Not shown to students. */
-  asset_tag: string
-  name: string
-  description: string | null
-  category_id: string | null
-  location_id: string | null
-  status: AssetStatus
-  condition: string | null
+  asset_tag: string;
+  name: string;
+  description: string | null;
+  category_id: string | null;
+  location_id: string | null;
+  status: AssetStatus;
+  condition: string | null;
   /** The scan key. Barcode stickers encode this. */
-  serial_number: string | null
-  purchase_date: string | null
-  purchase_price: number | null
-  warranty_expiration: string | null
-  custom_fields: Record<string, unknown> | null
-  photo_path: string | null
-  created_by: string | null
-  created_at: string
-  updated_at: string
+  serial_number: string | null;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  warranty_expiration: string | null;
+  custom_fields: Record<string, unknown> | null;
+  photo_path: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -94,13 +98,13 @@ export interface Asset {
  * signed-in user, which is the part the visibility decision was about.
  */
 export interface AssetCustody {
-  custody_event_id: string
-  custodian_id: string
-  custodian_name: string
-  student_number: string | null
-  checked_out_at: string
-  due_at: string | null
-  overdue: boolean
+  custody_event_id: string;
+  custodian_id: string;
+  custodian_name: string;
+  student_number: string | null;
+  checked_out_at: string;
+  due_at: string | null;
+  overdue: boolean;
 }
 
 /**
@@ -110,108 +114,124 @@ export interface AssetCustody {
  * (CLAUDE.md §13, 2026-09-13).
  */
 export interface AssetListItem extends Asset {
-  category_path: CategoryRef[]
-  photo_url: string | null
-  custody: AssetCustody | null
+  category_path: CategoryRef[];
+  photo_url: string | null;
+  custody: AssetCustody | null;
 }
 
-export type AssetDetail = AssetListItem
+export type AssetDetail = AssetListItem;
 
-export type ScanAction = "checked_in" | "detail"
+export type ScanAction = "checked_in" | "detail";
 
 export interface ScanResult {
-  action: ScanAction
-  asset: AssetDetail
+  action: ScanAction;
+  asset: AssetDetail;
   /**
    * Whether this scan may lead to the cart. True only on the detail branch for
    * an available asset: an unavailable unit can't be borrowed, and an item that
    * was just checked in gets a confirmation, not an add screen.
    */
-  checkable: boolean
+  checkable: boolean;
   /** Who held the item, set only when `action` is `checked_in`. */
-  returned_from: AssetCustody | null
+  returned_from: AssetCustody | null;
 }
 
 export interface CheckInResult {
-  asset: AssetDetail
-  returned_from: AssetCustody
+  asset: AssetDetail;
+  returned_from: AssetCustody;
 }
 
 export interface CheckoutInput {
   /** Blank means the actor, which is the only value a non-admin may send. */
-  custodian_id?: string
-  asset_ids: string[]
+  custodian_id?: string;
+  asset_ids: string[];
   /** RFC 3339. Must be in the future and at most MAX_CHECKOUT_DAYS away. */
-  due_at: string
+  due_at: string;
   /** Admin-only. A non-admin sending it is a 403, not a dropped field. */
-  override_overdue?: boolean
+  override_overdue?: boolean;
 }
 
 export interface CheckoutItem {
-  custody_event_id: string
-  asset_id: string
-  asset_tag: string
-  name: string
-  serial_number: string | null
+  custody_event_id: string;
+  asset_id: string;
+  asset_tag: string;
+  name: string;
+  serial_number: string | null;
 }
 
 export interface CheckoutResult {
-  custodian_id: string
-  custodian_name: string
-  due_at: string
-  items: CheckoutItem[]
+  custodian_id: string;
+  custodian_name: string;
+  due_at: string;
+  items: CheckoutItem[];
 }
 
 /** One row of the custody lists and of both history reads. */
 export interface CustodyRecord {
-  id: string
-  asset_id: string
-  asset_name: string
-  asset_tag: string
-  serial_number: string | null
+  id: string;
+  asset_id: string;
+  asset_name: string;
+  asset_tag: string;
+  serial_number: string | null;
 
-  custodian_id: string
-  custodian_name: string
-  custodian_student_number: string | null
+  custodian_id: string;
+  custodian_name: string;
+  custodian_student_number: string | null;
 
-  checked_out_by: string
-  checked_out_by_name: string
-  checked_out_at: string
+  checked_out_by: string;
+  checked_out_by_name: string;
+  checked_out_at: string;
 
-  due_at: string | null
-  checked_in_at: string | null
-  checked_in_by: string | null
-  checked_in_by_name: string | null
+  due_at: string | null;
+  checked_in_at: string | null;
+  checked_in_by: string | null;
+  checked_in_by_name: string | null;
 
-  condition_out: string | null
-  condition_in: string | null
-  notes: string | null
+  condition_out: string | null;
+  condition_in: string | null;
+  notes: string | null;
 
   /** True only while the item is still out and past due; a late return is not. */
-  overdue: boolean
+  overdue: boolean;
   /** Whole days past due, to the return for a closed event, to now for an open one. */
-  days_overdue: number
+  days_overdue: number;
+}
+
+/**
+ * Something the person signing in should be told before they start, beside
+ * `has_overdue` because it is the same shape of fact and sign-in is the one
+ * moment everybody passes through (docs/design/backup.md §E.7).
+ *
+ * `admins` is names only. A student number is a working scan login
+ * (CLAUDE.md §7), so a warning carrying one would hand every student an admin
+ * credential.
+ */
+export interface BackupWarning {
+  message: string;
+  admins: string[];
 }
 
 export interface LoginResult {
-  token: string
+  token: string;
   /** The token is limited: only set-password, logout and /me will answer. */
-  needs_password: boolean
-  has_overdue: boolean
-  profile: Profile
+  needs_password: boolean;
+  has_overdue: boolean;
+  profile: Profile;
+  backup_warning: BackupWarning | null;
 }
 
 export interface MeResult {
-  profile: Profile
-  has_overdue: boolean
+  profile: Profile;
+  has_overdue: boolean;
+  backup_warning: BackupWarning | null;
 }
 
 export interface UserInput {
-  student_number: string
-  first_name: string
-  last_name: string
-  email?: string | null
-  is_admin: boolean
+  student_number: string;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  is_admin: boolean;
 }
 
 /**
@@ -225,55 +245,202 @@ export interface UserInput {
  * cannot be checked in.
  */
 export interface AssetInput {
-  name: string
-  description?: string | null
-  category_id?: string | null
-  serial_number: string
-  condition?: string | null
-  purchase_date?: string | null
-  purchase_price?: number | null
-  warranty_expiration?: string | null
+  name: string;
+  description?: string | null;
+  category_id?: string | null;
+  serial_number: string;
+  condition?: string | null;
+  purchase_date?: string | null;
+  purchase_price?: number | null;
+  warranty_expiration?: string | null;
 }
 
 export interface CategoryInput {
-  name: string
+  name: string;
   /** Null means a Type, at the root of the tree. On an update this is a move. */
-  parent_id?: string | null
+  parent_id?: string | null;
   /** Omit to leave the node where it is; a new node lands after its siblings. */
-  sort_order?: number | null
+  sort_order?: number | null;
 }
 
-export type RosterAction = "created" | "updated" | "error"
+export type RosterAction = "created" | "updated" | "error";
 
 export interface RosterRow {
-  row: number
-  student_number: string
-  action: RosterAction
-  error?: string
+  row: number;
+  student_number: string;
+  action: RosterAction;
+  error?: string;
 }
 
 export interface RosterResult {
-  created: number
-  updated: number
-  failed: number
-  rows: RosterRow[]
+  created: number;
+  updated: number;
+  failed: number;
+  rows: RosterRow[];
 }
 
 export interface TableExport {
-  table: string
-  file: string
-  rows: number
+  table: string;
+  /** The path *inside the archive*: the raw tables live in the zip. */
+  file: string;
+  rows: number;
+}
+
+/** One off-site push. A failure here is never the run's failure. */
+export interface TargetResult {
+  target: string;
+  ok: boolean;
+  /** What the target calls what it wrote: a commit sha, a folder. */
+  ref: string;
+  error: string;
+}
+
+export interface PhotoMirrorResult {
+  configured: boolean;
+  generation: string;
+  rolled_over: boolean;
+  copied: number;
+  unchanged: number;
+  bytes: number;
+  error: string;
 }
 
 export interface BackupResult {
-  dir: string
-  tables: TableExport[]
-  rows: number
-  ran_at: string
+  dir: string;
+  /** Full path to the restorable archive the run wrote. */
+  archive: string;
+  ran_at: string;
+  source: string;
+  tables: TableExport[];
+  rows: number;
+  schema_version: string;
+  encrypted: boolean;
+  /** Another process held the backup lock; this run did nothing, on purpose. */
+  skipped: boolean;
+  targets: TargetResult[];
+  photos: PhotoMirrorResult | null;
+  pruned: string[];
+}
+
+/**
+ * Backup configuration (docs/design/backup.md §C.2). It lives in the database
+ * rather than `.env` so no admin ever edits a file.
+ *
+ * The two secrets come back **blank** with a `_set` boolean beside them, never
+ * masked with asterisks: a mask round-trips, and the panel would eventually
+ * write it back as the literal new token. Leaving a secret field empty on save
+ * means "leave it alone".
+ */
+export interface Settings {
+  backup_dir: string;
+  photo_backup_dir: string;
+  keep_days: number;
+  stale_hours: number;
+  schedule_hour: number;
+  drive_enabled: boolean;
+  drive_remote: string;
+  drive_path: string;
+  github_enabled: boolean;
+  github_repo: string;
+  github_token: string;
+  archive_passphrase: string;
+  photo_min_free_gb: number;
+  photo_max_generations: number;
+  updated_at: string;
+  github_token_set: boolean;
+  archive_passphrase_set: boolean;
+}
+
+/** A partial update: an omitted field is left alone. */
+export type SettingsInput = Partial<
+  Omit<Settings, "updated_at" | "github_token_set" | "archive_passphrase_set">
+>;
+
+export interface BackupTargetStatus {
+  target: string;
+  enabled: boolean;
+  last_success: string | null;
+  age_hours: number | null;
+  ref: string;
+  last_error: string;
+  last_error_at: string | null;
+}
+
+export interface PhotoGeneration {
+  name: string;
+  at: string;
+  files: number;
+  bytes: number;
+  /** The generation the next mirror run writes into. It cannot be deleted. */
+  live: boolean;
+}
+
+export interface PhotoMirrorStatus {
+  configured: boolean;
+  dir: string;
+  current: string;
+  generations: PhotoGeneration[];
+  bytes: number;
+  free_bytes: number;
+  min_free_gb: number;
+  max_generations: number;
+  warnings: string[];
+}
+
+export interface BackupStatusResult {
+  configured: boolean;
+  dir: string;
+  stale_hours: number;
+  stale: boolean;
+  worst_age_hours: number | null;
+  targets: BackupTargetStatus[];
+  last_run_at: string | null;
+  last_run_source: string;
+  /**
+   * Whether a failsafe admin exists. When it does not, a restored-from-empty
+   * database has nobody to sign in as and the admin panel — the whole
+   * documented restore route — is unreachable (§C.1).
+   */
+  failsafe_admin_configured: boolean;
+  photo_mirror: PhotoMirrorStatus | null;
+  /** Already-worded sentences. The UI decides how to render them, not what they say. */
+  warnings: string[];
+  log: string[];
+  schedule: string;
+}
+
+/** One past backup a target can hand back. `id` is opaque to the UI. */
+export interface BackupVersion {
+  id: string;
+  label: string;
+  at: string;
+  bytes: number;
+  note: string;
+}
+
+export interface RestoreResult {
+  ran_at: string;
+  source: string;
+  /** An account id, or `cli`. The log's identifier, not a label for a screen. */
+  by: string;
+  /** The same person in words, resolved before the tables were replaced. */
+  by_name: string;
+  schema_version: string;
+  archive_ran_at: string;
+  tables: TableExport[];
+  rows: number;
+  sequences: number;
+  /** What could not be checked, rather than a pretence that it was. */
+  warnings: string[];
+}
+
+export interface DriveConnectResult {
+  url: string;
+  id: string;
 }
 
 export interface HealthResult {
-  ok: boolean
-  db: string
-  time: string
+  ok: boolean;
+  db: string;
+  time: string;
 }
