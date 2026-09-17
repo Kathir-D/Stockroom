@@ -16,7 +16,7 @@ Or one layer at a time:
 supabase start            # the Go and pgTAP suites need Postgres up
 ./scripts/dev.sh deps  # npm workspace + Go modules; ./scripts/dev.sh test runs this for you
 go vet ./...
-STOCKROOM_REQUIRE_DB=1 go test ./... -count=1  # fail, rather than skip, when Postgres is down
+STOCKROOM_REQUIRE_DB=1 go test ./... -count=1 -p 1  # fail, rather than skip, when Postgres is down
 supabase test db
 npm run check             # svelte-check over packages/ui and both hosts
 npm test                  # both hosts' Vitest suites

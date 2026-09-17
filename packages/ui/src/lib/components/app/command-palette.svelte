@@ -127,6 +127,12 @@
       searching = false
       return
     }
+    // Drop the previous query's rows at the moment the query changes, not
+    // when the replacement lands. Held through the debounce and the round
+    // trip, they are rows for a search nobody can still see -- and they stay
+    // arrow-selectable the whole time, so Enter opens whatever the *old*
+    // query matched.
+    results = []
     searching = true
     if (searchTimer) clearTimeout(searchTimer)
     const seq = ++searchSeq

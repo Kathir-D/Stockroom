@@ -36,8 +36,13 @@ same restore the admin panel runs — the same checksum, row-count and
 foreign-key checks. It needs no account, because anyone who can run it already
 has the machine.
 
-If the archive is encrypted (its name ends in `.zip.enc`), add
-`--passphrase` and it will prompt, or set `--passphrase=<the passphrase>`.
+If the archive is encrypted (its name ends in `.zip.enc`), the passphrase saved
+in the admin panel is used automatically — omit the flag and it just works, and
+the secret stays out of your shell history and out of `ps`.
+
+If this database has no saved passphrase (you are restoring onto a fresh
+machine, say), pass it explicitly with `--passphrase '<the passphrase>'`. The
+flag takes its value on the command line; there is no prompt.
 
 ## What is in here
 

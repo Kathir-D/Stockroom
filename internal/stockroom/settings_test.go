@@ -115,33 +115,38 @@ func TestSettingsRefuseAHalfConfiguredTarget(t *testing.T) {
 	}
 }
 
-// .env is a first-boot seed, not the source of truth. Once an admin has typed
-// a value, a restart must not take it back.
-func TestEnsureSettingsOnlySeedsNulls(t *testing.T) {
+// .env is a first-boot seed, not the source of truth. It fills a blank column
+// once; after that neither a value an admin typed nor one an admin cleared may
+// be taken back by a restart.
+func TestEnsureSettingsSeedsOnceThenLeavesTheAdminAlone(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 
-	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr("/chosen/by/the/admin")})
+	// env_seeded is one-shot and per-database, so this test spends it. Put it
+	// back on the way out, and clear it on the way in, so the test describes a
+	// fresh install regardless of what ran before it.
+	var seededBefore bool
+	if err := db.Pool.QueryRow(ctx, `select env_seeded from app_settings where id = true`).Scan(&seededBefore); err != nil {
+		t.Fatalf("read env_seeded: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `update app_settings set env_seeded = $1 where id = true`, seededBefore)
+	})
+	setSeeded := func(v bool) {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, `update app_settings set env_seeded = $1 where id = true`, v); err != nil {
+			t.Fatalf("set env_seeded=%v: %v", v, err)
+		}
+	}
+
+	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr("")})
 	defer restore()
 
+	// First boot against a blank column: this is what the seed is for.
+	setSeeded(false)
 	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
 		t.Fatalf("EnsureSettings: %v", err)
-	}
-	after, err := db.loadSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.BackupDir != "/chosen/by/the/admin" {
-		t.Errorf("backup_dir is %q after a restart; the environment overwrote what an admin set", after.BackupDir)
-	}
-
-	// A blank column, though, is exactly what the seed is for.
-	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("")}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
-		t.Fatal(err)
 	}
 	seeded, err := db.loadSettings(ctx)
 	if err != nil {
@@ -149,6 +154,41 @@ func TestEnsureSettingsOnlySeedsNulls(t *testing.T) {
 	}
 	if seeded.BackupDir != "/from/dot/env" {
 		t.Errorf("backup_dir is %q; an unset folder was not seeded from the environment", seeded.BackupDir)
+	}
+
+	// The admin now clears it. A restart must leave it cleared: before the
+	// env_seeded marker this is exactly where .env reinstated the value and
+	// silently undid the change.
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.BackupDir != "" {
+		t.Errorf("backup_dir is %q after a restart; the environment reinstated a setting the admin had cleared", cleared.BackupDir)
+	}
+
+	// And the original guard still holds on its own: even on a database that
+	// has not been seeded yet, a column an admin has filled in is not null, so
+	// the seed passes over it.
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("/chosen/by/the/admin")}); err != nil {
+		t.Fatal(err)
+	}
+	setSeeded(false)
+	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.BackupDir != "/chosen/by/the/admin" {
+		t.Errorf("backup_dir is %q after a restart; the environment overwrote what an admin set", kept.BackupDir)
 	}
 }
 

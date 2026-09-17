@@ -488,14 +488,20 @@ one (§7) · **any full** is every signed-in user whose password is set — a li
 | `POST /assets` · `PUT/DELETE /assets/{id}` · `POST /assets/{id}/status` | admin | `serial_number` required; `asset_tag` is generated |
 | `POST /assets/{id}/photo` | admin | Multipart, 10 MB, `.jpg .jpeg .png .gif .webp` |
 | `POST /categories` · `PUT/DELETE /categories/{id}` | admin | Depth capped at 3 |
-| `POST /admin/backup` | admin | CSV export into `BACKUP_DIR` |
+| `POST /admin/backup` | admin | Runs a backup now: CSV per table, sequences, a manifest, then every enabled target |
+| `GET/PUT /admin/settings` · `POST /admin/settings/test` | admin | Backup configuration, and a dry run against one target |
+| `POST /admin/drive/connect` · `POST /admin/drive/finish` | admin | Connects a Google account through `rclone authorize`, no terminal |
+| `GET /admin/backup/status` | admin | Last run per target, staleness, photo-mirror warnings |
+| `GET /admin/backup/versions` | admin | The dated backups available on Drive or GitHub |
+| `POST /admin/restore` · `POST /admin/restore/remote` | admin | Restore from an uploaded archive, or one picked by date |
+| `GET /admin/photos/generations` · `POST /admin/photos/restore` · `DELETE /admin/photos/generations/{name}` | admin | The local photo mirror |
 | `GET /files/...` | anyone | Photos; `<img>` tags cannot send a bearer token |
 
 Error mapping: `404` not found · `400` invalid · `401` unauthorised or bad credentials · `403`
 forbidden · `409` conflict or overdue-blocked · **`503` not configured** (an unset `UPLOADS_DIR` or
-`BACKUP_DIR`, with the message passed through — that is neither the client's fault nor a bug, and
-the admin reading it is the person who edits `.env`) · `500` for everything else, with the detail
-logged rather than sent.
+an unset backup folder, with the message passed through — that is neither the client's fault nor a
+bug, and the admin reading it is the person who fixes it on the Settings screen) · `500` for
+everything else, with the detail logged rather than sent.
 
 Full table with request and response shapes: [`CLAUDE.md`](CLAUDE.md) §8.1.
 
@@ -632,12 +638,16 @@ Stockroom is coursework built for a real department, on a nine-week schedule, an
 **Done.** The schema and seed. The Go API: authentication, sessions, permissions, the roster
 import, browse and filtering, the full scan/cart/checkout/check-in loop, custody history, overdue
 handling, and the admin endpoints. The entire frontend, as one shared package rendered by both
-hosts. CSV export.
+hosts. The backup system: configuration in the database rather than `.env`, a scheduler inside the
+server, CSV export with a manifest, Google Drive and GitHub as targets, the local photo mirror, and
+a restore that validates every foreign key, row count, checksum and sequence before it commits.
 
-**In progress or specified.** The nightly backup and the restore path are designed in detail and
-not yet implemented. Real inventory entry is under way. The barcode scanner has not been purchased,
-so the scan-vs-typed threshold is an untuned default. Kits — a named bundle checked out as one unit
-— are the lowest priority and may not ship.
+**In progress or specified.** The backup targets have been exercised against fakes and a local
+folder, not yet against a real Google account or a real GitHub repository from the closet PC, and
+the full wipe-and-restore round-trip in §11 is still to be run before go-live. Real inventory entry
+is under way. The barcode scanner has not been purchased, so the scan-vs-typed threshold is an
+untuned default. Kits — a named bundle checked out as one unit — are the lowest priority and may
+not ship.
 
 [`TODO.md`](TODO.md) tracks this phase by phase. [`CLAUDE.md`](CLAUDE.md) §13 records every decision
 that shaped it, including the ones that were reversed.

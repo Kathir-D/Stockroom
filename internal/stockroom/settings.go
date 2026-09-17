@@ -187,11 +187,25 @@ func (db *DB) GetSettings(ctx context.Context, actor Actor) (Settings, error) {
 // carrying a Postgres constraint name that means nothing to the person reading
 // it. The database keeps its constraints anyway: this is the readable copy,
 // not the only one.
+//
+// The read and the write are one locked transaction because this is a
+// read-modify-write over a single row and the input is a *partial* update.
+// Unlocked, two admins saving different tabs at the same time each read the
+// same row, each fill in the fields they were not editing from that stale
+// copy, and whichever writes second silently reverts the other's change --
+// with both screens reporting success. `for update` makes the second save
+// wait and re-read, so it merges onto the first instead of over it.
 func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (Settings, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return Settings{}, err
 	}
-	cur, err := db.loadSettings(ctx)
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return Settings{}, fmt.Errorf("save settings: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	cur, err := lockSettings(ctx, tx)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -267,7 +281,7 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		}
 	}
 
-	_, err = db.Pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		update app_settings set
 			backup_dir = $1, photo_backup_dir = $2,
 			keep_days = $3, stale_hours = $4, schedule_hour = $5,
@@ -286,7 +300,29 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return Settings{}, fmt.Errorf("save settings: %w", err)
+	}
 	return db.GetSettings(ctx, actor)
+}
+
+// lockSettings is loadSettings for a caller inside a transaction that is about
+// to write: it takes a row lock, so the read it returns is still true at the
+// moment of the update.
+//
+// The missing-row recreate mirrors loadSettings, for the same reason given
+// there -- a settings row deleted by hand is recreated from the DDL's defaults
+// rather than failing the request.
+func lockSettings(ctx context.Context, q querier) (Settings, error) {
+	const sel = `select ` + settingsColumns + ` from app_settings where id = true for update`
+	s, err := scanSettings(q.QueryRow(ctx, sel))
+	if errors.Is(err, ErrNotFound) {
+		if _, ierr := q.Exec(ctx, `insert into app_settings (id) values (true) on conflict (id) do nothing`); ierr != nil {
+			return Settings{}, fmt.Errorf("recreate settings row: %w", ierr)
+		}
+		return scanSettings(q.QueryRow(ctx, sel))
+	}
+	return s, err
 }
 
 // validate repeats the DDL's bounds with a message an admin can act on. The
@@ -323,11 +359,22 @@ func validateRepo(repo string) error {
 // EnsureSettings seeds null columns from the environment on start-up and
 // returns the settings in force.
 //
-// It writes only where the column is null, so it is a first-boot seed and not
-// a per-boot override: once an admin has typed a value into the panel, the
-// environment cannot take it back. That is the whole distinction in §C.2
+// It runs exactly once per database, guarded by the env_seeded marker, and
+// writes only where the column is null. That is the whole distinction in §C.2
 // between "bootstrap fallback" and "source of truth", and getting it backwards
 // would mean an admin's change silently reverting on the next restart.
+//
+// The null check alone was not enough to make it a *first*-boot seed, because
+// clearing a field in the panel writes null (`nullable`): the next start-up
+// saw an empty column, could not tell "never set" from "deliberately cleared",
+// and restored the .env value. The marker records the fact instead of
+// inferring it. It is set even when .env was blank and nothing was copied --
+// the pass is what is one-time, not the copying -- so a value cleared today
+// stays cleared after someone fills in .env tomorrow.
+//
+// One statement, with the marker in the same UPDATE as the seed and `not
+// env_seeded` in the WHERE. Two servers racing to start therefore cannot both
+// seed: the second finds the row already marked and updates nothing.
 func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) {
 	if _, err := db.loadSettings(ctx); err != nil {
 		return Settings{}, err
@@ -336,8 +383,9 @@ func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) 
 		update app_settings set
 			backup_dir       = coalesce(backup_dir,       nullif($1, '')),
 			photo_backup_dir = coalesce(photo_backup_dir, nullif($2, '')),
-			drive_remote     = coalesce(drive_remote,     nullif($3, ''))
-		where id = true`,
+			drive_remote     = coalesce(drive_remote,     nullif($3, '')),
+			env_seeded       = true
+		where id = true and not env_seeded`,
 		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir), strings.TrimSpace(cfg.RcloneRemote))
 	if err != nil {
 		return Settings{}, fmt.Errorf("seed settings from environment: %w", err)

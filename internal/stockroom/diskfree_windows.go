@@ -8,8 +8,8 @@ import (
 )
 
 // freeSpace reports the bytes available to this process on the volume holding
-// dir, or 0 when it cannot be measured (treated as "unknown", never as
-// "full" -- see the unix copy of this file).
+// dir. The error is returned rather than folded into a zero -- see the unix
+// copy of this file for why the distinction matters.
 //
 // GetDiskFreeSpaceExW through a lazy DLL rather than golang.org/x/sys/windows,
 // so the photo mirror's disk check adds no module to go.mod. The first of the
@@ -20,20 +20,20 @@ var (
 	procGetDiskFreeSpaceEx = kernel32.NewProc("GetDiskFreeSpaceExW")
 )
 
-func freeSpace(dir string) int64 {
+func freeSpace(dir string) (int64, error) {
 	path, err := syscall.UTF16PtrFromString(dir)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	var freeToCaller, total, totalFree uint64
-	r, _, _ := procGetDiskFreeSpaceEx.Call(
+	r, _, callErr := procGetDiskFreeSpaceEx.Call(
 		uintptr(unsafe.Pointer(path)),
 		uintptr(unsafe.Pointer(&freeToCaller)),
 		uintptr(unsafe.Pointer(&total)),
 		uintptr(unsafe.Pointer(&totalFree)),
 	)
 	if r == 0 {
-		return 0
+		return 0, callErr
 	}
-	return int64(freeToCaller)
+	return int64(freeToCaller), nil
 }

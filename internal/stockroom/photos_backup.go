@@ -347,13 +347,23 @@ func (db *DB) PhotoMirrorStatus(ctx context.Context, settings Settings) (*PhotoM
 	}
 	sort.Slice(out.Generations, func(i, j int) bool { return out.Generations[i].Name > out.Generations[j].Name })
 
-	out.FreeBytes = freeSpace(dir)
-	if settings.PhotoMinFreeGB > 0 && out.FreeBytes > 0 {
-		minFree := int64(settings.PhotoMinFreeGB) << 30
-		if out.FreeBytes < minFree {
+	// A failed measurement and a full disk are different answers and must not
+	// share one. Folding both into "0 means unknown" meant a disk with
+	// genuinely zero bytes available was skipped by the `> 0` guard -- no
+	// warning at the one moment the warning is the point. The error is
+	// surfaced too, because a check that has quietly stopped checking is the
+	// same silent failure this screen exists to prevent.
+	free, ferr := freeSpace(dir)
+	if ferr != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf(
+			"The free space on the photo backup disk could not be measured (%s), so the low-space warning is switched off until it can be. Check that %s is still reachable.",
+			oneLine(ferr.Error()), dir))
+	} else {
+		out.FreeBytes = free
+		if settings.PhotoMinFreeGB > 0 && free < int64(settings.PhotoMinFreeGB)<<30 {
 			out.Warnings = append(out.Warnings, fmt.Sprintf(
 				"The photo backup disk has %s free, below the %d GB you asked to be warned at. Backups stop working when the disk fills. Delete an old photo generation under Admin → Backup.",
-				humanBytes(out.FreeBytes), settings.PhotoMinFreeGB))
+				humanBytes(free), settings.PhotoMinFreeGB))
 		}
 	}
 	if settings.PhotoMaxGenerations > 0 && len(out.Generations) > settings.PhotoMaxGenerations {
@@ -436,7 +446,15 @@ func (db *DB) RestorePhotos(ctx context.Context, actor Actor, generation string)
 		return 0, fmt.Errorf("%w: there is no photo generation named %s", ErrNotFound, generation)
 	}
 
-	aside := filepath.Join(dir, "pre-restore-"+time.Now().Format("2006-01-02T150405"))
+	// Unique per restore, not per second. Two restores started inside the same
+	// second would otherwise be handed the same folder, and the second one's
+	// safety copy would overwrite the first's -- losing the originals of
+	// exactly the photos somebody is in the middle of trying to recover.
+	nonce, err := randomID()
+	if err != nil {
+		return 0, err
+	}
+	aside := filepath.Join(dir, "pre-restore-"+time.Now().Format("2006-01-02T150405")+"-"+nonce[:8])
 	restored := 0
 	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

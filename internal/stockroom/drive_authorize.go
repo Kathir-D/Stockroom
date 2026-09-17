@@ -35,6 +35,17 @@ import (
 // short enough that a forgotten tab does not leave a process running all term.
 const authorizeTimeout = 15 * time.Minute
 
+// driveAuthRetention is how long a *finished* authorization stays consumable
+// after rclone exits.
+//
+// It has to be non-zero: the token is the last thing rclone prints, so the
+// entry must outlive the process for the admin's Save -- a separate request,
+// possibly seconds behind -- to find it. It has to be bounded: nothing else
+// removes an entry for an attempt the admin never came back to finish, so
+// without an expiry the map holds a live Google refresh token in memory for
+// as long as the server runs.
+const driveAuthRetention = 10 * time.Minute
+
 // driveAuthURL matches the link rclone prints. Its wording has changed between
 // releases, so the pattern matches the URL rather than the sentence around it.
 var driveAuthURL = regexp.MustCompile(`https?://(127\.0\.0\.1|localhost):\d+/auth\S*`)
@@ -100,6 +111,12 @@ func startDriveAuthorize(parent context.Context) (DriveConnectResult, error) {
 		err := cmd.Wait()
 		auth.finish(err)
 		cancel()
+		// The entry deliberately survives rclone exiting, so a Save that
+		// arrives after the token was printed still finds it. Reaping it later
+		// is what keeps that from being a leak: finishDriveAuthorize removes
+		// the entry when it consumes one, and this removes the ones nobody
+		// ever came back for.
+		time.AfterFunc(driveAuthRetention, func() { stopDriveAuthorize(id) })
 	}()
 
 	select {

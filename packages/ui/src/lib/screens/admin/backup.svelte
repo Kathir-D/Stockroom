@@ -277,17 +277,35 @@
     </Button>
   </div>
 
+  <!--
+    A load that failed and a backup that was never set up are different
+    answers, and this used to give both the same one: any error left status
+    null, so a server that was down reported "Backups aren't configured yet"
+    with the network error printed underneath as if it were advice. The admin
+    is then sent to a Settings screen where everything is already filled in.
+    notConfigured is the 503 the server sends for that exact case, so it is
+    what the wording follows.
+  -->
   {#if notConfigured || (!loading && !status)}
     <EmptyState
-      title="Backups aren't configured yet"
-      description={loadError ??
-        "Nothing is being backed up. Choose a backup folder on the Settings screen — no file editing needed."}
+      title={notConfigured ? "Backups aren't configured yet" : "Couldn't load the backup status"}
+      description={notConfigured
+        ? "Nothing is being backed up. Choose a backup folder on the Settings screen — no file editing needed."
+        : (loadError ??
+          "The server didn't answer. It may still be starting up, or it may have stopped.")}
     >
       {#snippet action()}
-        <Button onclick={() => router.go({ name: "admin", tab: "settings" })}>
-          Open Settings
-        </Button>
-        <Button variant="secondary" onclick={load}>Try again</Button>
+        {#if notConfigured}
+          <Button onclick={() => router.go({ name: "admin", tab: "settings" })}>
+            Open Settings
+          </Button>
+          <Button variant="secondary" onclick={load}>Try again</Button>
+        {:else}
+          <Button onclick={load}>Try again</Button>
+          <Button variant="secondary" onclick={() => router.go({ name: "admin", tab: "settings" })}>
+            Open Settings
+          </Button>
+        {/if}
       {/snippet}
     </EmptyState>
   {:else if loading && !status}

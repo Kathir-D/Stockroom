@@ -481,6 +481,7 @@ func repackTarball(r io.Reader) ([]byte, error) {
 	zw := zip.NewWriter(&buf)
 	found := 0
 	var sealed []byte
+	var total int64
 
 	tr := tar.NewReader(gz)
 	for {
@@ -503,10 +504,21 @@ func repackTarball(r io.Reader) ([]byte, error) {
 			continue
 		}
 		inner := strings.TrimPrefix(name, githubDir)
-		content, err := io.ReadAll(tr)
+		// Bounded like the upload path, and for the same reason. A gzip
+		// stream declares nothing about how much it expands to, so an
+		// unbounded ReadAll per member is a decompression bomb read straight
+		// into memory. The cap is on the running total across every backup/
+		// member, not per file: a thousand members just under a per-file
+		// limit would otherwise add up to the same exhaustion.
+		remaining := int64(maxRestoreBytes) - total
+		content, err := io.ReadAll(io.LimitReader(tr, remaining+1))
 		if err != nil {
 			return nil, fmt.Errorf("read %s from the GitHub download: %w", inner, err)
 		}
+		if int64(len(content)) > remaining {
+			return nil, fmt.Errorf("%w: that backup expands to more than %d MB, which is not a Stockroom backup", ErrInvalid, maxRestoreBytes>>20)
+		}
+		total += int64(len(content))
 		if strings.HasSuffix(inner, encryptedSuffix) {
 			sealed = content
 			continue

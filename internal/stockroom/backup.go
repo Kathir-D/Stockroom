@@ -522,19 +522,28 @@ func sequencesCSV(seqs []SequenceState) ([]byte, error) {
 // test fixture -- reports an empty version rather than failing: the point of
 // the field is to catch a restore into the *wrong* schema, and "unknown" is
 // not wrong, it is unknown.
+//
+// The table's absence is established with to_regclass *before* the table is
+// named in a query, not by catching the error afterwards. The export runs
+// inside a transaction, and in Postgres a failed statement aborts the whole
+// transaction: querying a missing table and then swallowing the error left
+// buildInventoryCSV, buildAccountsCSV and Commit to fail with "current
+// transaction is aborted", which is the opposite of the tolerance this
+// function is trying to provide. to_regclass answers with null instead of
+// raising, so nothing is poisoned.
 func schemaVersion(ctx context.Context, q querier) (string, error) {
-	var version *string
-	err := q.QueryRow(ctx, `
-		select max(version) from supabase_migrations.schema_migrations`).Scan(&version)
-	if err != nil {
-		var missing bool
-		if strings.Contains(err.Error(), "does not exist") {
-			missing = true
-		}
-		if !missing {
-			return "", fmt.Errorf("read schema version: %w", err)
-		}
+	var present bool
+	if err := q.QueryRow(ctx, `
+		select to_regclass('supabase_migrations.schema_migrations') is not null`).Scan(&present); err != nil {
+		return "", fmt.Errorf("read schema version: %w", err)
+	}
+	if !present {
 		return "", nil
+	}
+	var version *string
+	if err := q.QueryRow(ctx, `
+		select max(version) from supabase_migrations.schema_migrations`).Scan(&version); err != nil {
+		return "", fmt.Errorf("read schema version: %w", err)
 	}
 	return deref(version), nil
 }
