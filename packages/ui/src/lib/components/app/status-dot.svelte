@@ -41,9 +41,12 @@
 {:else}
   <span
     data-status={status.state}
-    class={cn("inline-flex items-center gap-1.5 whitespace-nowrap", status.fg, className)}
+    class={cn("inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap", status.fg, className)}
   >
     <span class="size-[7px] shrink-0 rounded-full bg-current" aria-hidden="true"></span>
-    <span class="text-[11.5px] font-[650] tracking-[0.01em]">{status.label}</span>
+    <!-- truncate, not clip: the unit row's status column carries the holder's
+         name now, so the one string in it whose length nobody controls is a
+         person. It only ever engages when a parent constrains the width. -->
+    <span class="truncate text-[11.5px] font-[650] tracking-[0.01em]">{status.label}</span>
   </span>
 {/if}

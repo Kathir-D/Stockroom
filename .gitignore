@@ -33,9 +33,6 @@ uploads/
 # Vitest coverage output
 coverage/
 
-# graphify knowledge graph (generated, machine-specific; rebuild with scripts/graphify_fix_extraction.py)
-graphify-out/
-
 # GitNexus index: machine-local, rebuilt per machine
 .gitnexus/
 

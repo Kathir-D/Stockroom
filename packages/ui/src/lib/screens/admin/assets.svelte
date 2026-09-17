@@ -28,8 +28,10 @@
   import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
   import UnitRow from "@stockroom/ui/components/app/unit-row.svelte"
+  import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
+  import { session } from "../../stores/session.svelte"
   import * as api from "../../api/index"
-  import type { AssetInput, AssetListItem, CategoryNode } from "../../api/types"
+  import type { AssetCustody, AssetInput, AssetListItem, CategoryNode } from "../../api/types"
   import { catalog } from "../../stores/catalog.svelte"
 
   let units = $state<AssetListItem[]>([])
@@ -202,6 +204,19 @@
       uploading = false
     }
   }
+
+  /**
+   * The holder's trail, opened by pressing a row's status (2026-09-16). Same
+   * dialog and same gesture as the browse list — <UnitRow> is shared, so this
+   * table could not have got a different answer even if it wanted one.
+   */
+  let holder = $state<AssetCustody | null>(null)
+  let holderOpen = $state(false)
+
+  function showHistory(custody: AssetCustody) {
+    holder = custody
+    holderOpen = true
+  }
 </script>
 
 <div data-density="compact" class="flex flex-col gap-3">
@@ -230,7 +245,13 @@
   {:else}
     <div class="flex flex-col gap-2">
       {#each units as unit (unit.id)}
-        <UnitRow {unit} showName>
+        <UnitRow
+          {unit}
+          showName
+          viewerId={session.profile?.id ?? null}
+          isAdmin={session.isAdmin}
+          onViewHistory={showHistory}
+        >
           {#snippet actions(row)}
             <Tooltip.Provider>
               <Tooltip.Root>
@@ -433,3 +454,10 @@
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
+
+
+<UserHistoryDialog
+  bind:open={holderOpen}
+  userId={holder?.custodian_id ?? null}
+  userName={holder?.custodian_name ?? ""}
+/>

@@ -262,6 +262,7 @@ There is deliberately **no brand accent colour**. Primary actions are near-white
   /* ---------- status: the ONLY saturated colour in the app ---------- */
   --status-available:      #4ADE80;  --status-available-bg:  #0E2B1C;
   --status-out:            #7DB3FF;  --status-out-bg:        #12233D;
+  --status-out-other:      #FB923C;  --status-out-other-bg:  #3A2310;
   --status-due-soon:       #FBBF24;  --status-due-soon-bg:   #33260A;
   --status-overdue:        #FF7A70;  --status-overdue-bg:    #3A1614;
   --status-unavailable:    #9A9F9E;  --status-unavailable-bg:#232727;
@@ -439,16 +440,57 @@ These live in `packages/ui/src/lib/components/app/`.
 
 ## 6. The status system
 
-Five states. `CLAUDE.md` §6.2 puts three on the asset (`available`, `checked_out`, `unavailable`); the
-other two are *derived* from `custody_events.due_at` and exist only in the UI and in `overdue_custody`.
+Six states. `CLAUDE.md` §6.2 puts three on the asset (`available`, `checked_out`, `unavailable`); the
+other three are *derived* — two from `custody_events.due_at` (and `overdue_custody`), one from who is
+looking.
 
 | State | Colour | Label | Derivation |
 |---|---|---|---|
 | Available | `--status-available` | `Available` | `assets.status = 'available'` |
-| Checked out | `--status-out` | `Checked out · due Sep 12` | `assets.status = 'checked_out'`, `due_at > now + 24h` |
-| Due soon | `--status-due-soon` | `Due tomorrow` | `checked_out` and `due_at` within 24h |
-| Overdue | `--status-overdue` | `Overdue 3 days` | row present in `overdue_custody` |
+| Checked out (yours) | `--status-out` | `Checked out · due Sep 12` | open custody row, `custodian_id` is the viewer, `due_at > now + 24h` |
+| Checked out (theirs) | `--status-out-other` | `Checked out by Jordan S · due Sep 15` | the same, with anybody else as custodian |
+| Due soon | `--status-due-soon` | `Due tomorrow`, or `Due tomorrow · Jordan S` | open custody row and `due_at` within 24h |
+| Overdue | `--status-overdue` | `Overdue 3 days`, or `Overdue 3 days · Jordan S` | row present in `overdue_custody` |
 | Unavailable | `--status-unavailable` | `Unavailable` | `assets.status = 'unavailable'` |
+
+**Two of the six are about the viewer, not the asset** (added 2026-09-16). The same row is honestly two
+different things to two different people, and on a shared closet machine the question the browse list is
+actually scanned for is "is that one mine?". Before this it was answerable only by hovering each
+checked-out row in turn. `resolveStatus` therefore takes a viewer id; passing none reads every out item as
+somebody else's, which is the safe default because the worst it can do is show you your own name.
+
+**Urgency outranks ownership.** Due-soon stays amber and overdue stays red whoever is holding the item: they
+are statements about a deadline, and a late item is late regardless. They name the holder in the *label*
+instead, so the ownership question is still answered — just not by hue. That keeps the orange from reading
+as a fourth step on a red-amber lateness ramp, which is the one way these three hues could be confused.
+
+**The holder's surname is an initial with no period**, `Jordan S` — the status line sits in a fixed-width
+column and a full name is the only thing in it that can be arbitrarily long, and the row already uses `·` as
+its separator, so a period beside it was a second mark doing no work. `abbreviateName` in `status.ts` does
+it, and leaves alone anything with no surname to shorten, including the student-number fallback
+`displayName` produces for a profile with no name at all. The unabbreviated name is still in the row's
+tooltip. Neither surface shows the student number: it is the scan-login key (`CLAUDE.md` §13, 2026-09-13).
+
+**For an admin the status is a control** (2026-09-16). Pressing it on any held row — in the browse list or
+in the admin asset table — opens `<UserHistoryDialog>`, that person's whole custody trail. It answers the
+question the label provokes: *what else does Jordan have, and do they bring things back?* The same dialog
+opens from **Held by** inside `<AssetDetailDialog>`, where it stacks over the item so closing it returns to
+where the question was asked. For everybody else the status still falls through to the row's own press, so
+the area that opens an item is unchanged — and because `GET /users/{id}/history` is own-or-admin in
+`internal/stockroom`, the gate is the server's, not this component's.
+
+`<UserHistoryDialog>` **is the admin panel's Users → History popup, extracted** — the same title, the same
+`Item / Out / Due / Returned` table, the same 560-ish dialog. That popup was already the established answer
+to "show me this person's trail", so a second, differently-shaped one would have been exactly the drift this
+codebase avoids by having one component serve every caller (the same reason `<UnitRow>` serves the browse
+list *and* the admin asset table). `screens/admin/users.svelte` renders the shared component rather than its
+own copy, and gained a loading state on the way: it used to fetch after opening with nothing to show, so a
+slow read looked like "Nothing checked out yet".
+
+Any held row, not only the orange ones. Restricting it to `out-other` would let an admin see the trail of
+somebody merely borrowing a lens but not of the person whose loan is *overdue*, which is backwards: the red
+row is the one worth chasing. It is why the status had to leave the row's `<button>` and become its
+sibling — a button inside a button is invalid, which is the same reason **Add** sits outside it (§8.2).
 
 **Expression is `C1`, dot plus label.** A 7px filled dot in the status colour, followed by the word in the
 same colour at 11.5px/650. The word is never omitted; the dot is never used alone.
@@ -654,7 +696,7 @@ admin. `TODO.md` Phase 3/4 own that response shape.
 **The custodian's name, not their number** (2026-09-13). `custody.student_number` is null for a non-admin
 viewer. A student number signs its owner in by scan with no password, so a browse list that carried one per
 checked-out unit would be a list of usable credentials. Nothing in §8.2 or §8.3 displays it to a student
-anyway: the unit row shows `You · Sep 12` or `Jordan S. · Sep 15`.
+anyway: the unit row shows `You · Sep 12` or `Jordan Smith · Sep 15`.
 
 ### 8.4 Cart: bottom dock, full cart page
 
@@ -796,6 +838,7 @@ usually the ratio it was chosen to clear:
 | `--fg-faint` `#949998` | 4.58 | AA. It had to move: the old `#7C8281` measures **3.38** here and fails | 4.51 (as `#7C8281`) |
 | `--status-available` `#4ADE80` | 7.59 | AA | 10.12 |
 | `--status-out` `#7DB3FF` | 6.15 | AA | 8.20 |
+| `--status-out-other` `#FB923C` | 5.85 | AA. Added 2026-09-16; hue 27, chosen to sit between overdue's 4 and due-soon's 43 | — |
 | `--status-due-soon` `#FBBF24` | 7.93 | AA | 10.57 |
 | `--status-overdue` `#FF7A70` | 5.21 | AA | 6.95 |
 | `--primary-fg` on `--primary` | 14.51 | AA | 14.51 (unaffected; neither token moved) |

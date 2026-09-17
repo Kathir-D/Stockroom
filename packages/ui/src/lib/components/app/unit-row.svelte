@@ -19,7 +19,7 @@
   import { Button } from "@stockroom/ui/components/ui/button"
   import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
   import { cn } from "@stockroom/ui/utils"
-  import type { AssetListItem } from "../../api/types"
+  import type { AssetCustody, AssetListItem } from "../../api/types"
   import { custodianLine, resolveStatus } from "../../status"
   import PhotoFrame from "./photo-frame.svelte"
   import Serial from "./serial.svelte"
@@ -28,6 +28,8 @@
   let {
     unit,
     viewerId = null,
+    /** Gates the holder's history behind the same rule the server enforces. */
+    isAdmin = false,
     inCart = false,
     /** False when the viewer is overdue: the whole cart path disables at once. */
     canAdd = true,
@@ -42,24 +44,28 @@
     onOpen,
     onAdd,
     onRemove,
+    onViewHistory,
     actions,
     class: className,
   }: {
     unit: AssetListItem
     viewerId?: string | null
+    isAdmin?: boolean
     inCart?: boolean
     canAdd?: boolean
     highlighted?: boolean
     showName?: boolean
     onOpen?: (unit: AssetListItem) => void
     onAdd?: (unit: AssetListItem) => void
+    /** Admin pressed the status of a held item: show that person's trail. */
+    onViewHistory?: (custody: AssetCustody) => void
     /** Takes it back out. Same button as Add, which is the point (see below). */
     onRemove?: (unit: AssetListItem) => void
     actions?: Snippet<[AssetListItem]>
     class?: string
   } = $props()
 
-  const status = $derived(resolveStatus(unit))
+  const status = $derived(resolveStatus(unit, viewerId))
   const isUnavailable = $derived(unit.status === "unavailable")
   const isOut = $derived(unit.custody !== null)
   /**
@@ -72,6 +78,16 @@
    * source for what state a unit is in (status.ts), as the file says.
    */
   const addable = $derived(status.state === "available" && canAdd && onAdd !== undefined)
+
+  /**
+   * Whether pressing the status opens the holder's history instead of the item.
+   *
+   * Any held row, not only the orange ones. Restricting it to `out-other` would
+   * have meant an admin could see the trail of somebody merely borrowing a lens
+   * but not of the person whose loan is *overdue*, which is backwards — the red
+   * row is the one worth chasing.
+   */
+  const historyOpens = $derived(isAdmin && unit.custody !== null && onViewHistory !== undefined)
 
   /** Why **Add** is disabled, shown in a tooltip rather than left to guesswork. */
   const blockedReason = $derived(
@@ -137,39 +153,80 @@
       <span class="hidden w-28 shrink-0 truncate text-fg-faint xl:inline">{unit.condition}</span>
     {/if}
 
-    <!--
-      Status, and who holds it *on hover only*.
-
-      The custodian is still visible to any signed-in viewer (§8.3, resolved
-      2026-09-12) — a student being able to find who has the lens they want
-      outweighs withholding it — but it is no longer a column. It was the widest
-      thing in the row and the least often needed, and burying it behind the
-      hover keeps the row scannable while leaving the answer one gesture away.
-      The name and due date only: the student number is the scan-login key and is
-      already null in the payload for a non-admin.
-    -->
-    <span class="w-44 shrink-0 text-left">
-      {#if unit.custody}
-        <!-- Bound out here: the `{#if}` narrowing doesn't reach inside a
-             snippet's closure, so `unit.custody` reads as nullable in there. -->
-        {@const holder = custodianLine(unit.custody, viewerId)}
-        <Tooltip.Provider>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              {#snippet child({ props })}
-                <span {...props} title={holder}>
-                  <StatusDot {status} />
-                </span>
-              {/snippet}
-            </Tooltip.Trigger>
-            <Tooltip.Content>{holder}</Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-      {:else}
-        <StatusDot {status} />
-      {/if}
-    </span>
   </button>
+
+  <!--
+    Status, and who holds it.
+
+    The custodian is visible to any signed-in viewer (§8.3, resolved
+    2026-09-12) — a student being able to find who has the lens they want
+    outweighs withholding it — and as of 2026-09-16 the *status label itself*
+    names them: `Checked out by Jordan S · due Sep 15`, in orange, against the
+    blue `Checked out · due Sep 15` of one the viewer is holding. "Is that
+    mine?" is the question this list is scanned for on a shared machine, and it
+    was previously answerable only by hovering every out row in turn.
+
+    **Its own button, and a sibling of the row's** (2026-09-16), because for an
+    admin it now does something different: it opens the holder's history. A
+    button inside a button is invalid markup, which is the same reason **Add**
+    sits out here. For everybody else it falls through to `onOpen`, so the
+    area of the row that opens the item is exactly what it was before.
+
+    The tooltip stays, and is no longer redundant: it carries the *unabbreviated*
+    name. Neither surface shows the student number, which is the scan-login key
+    and is already null in the payload for a non-admin.
+
+    Wider than it was, because the holder now sits inside it. The label still
+    truncates rather than pushing the row apart when a long name meets a narrow
+    window — the tooltip is the full answer in that case.
+  -->
+  {#if unit.custody}
+    <!-- Bound out here: the `{#if}` narrowing doesn't reach inside a snippet's
+         closure, so `unit.custody` reads as nullable in there. -->
+    {@const held = unit.custody}
+    {@const holder = custodianLine(held, viewerId)}
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              title={historyOpens ? `${held.custodian_name} — see their history` : holder}
+              aria-label={historyOpens
+                ? `See ${held.custodian_name}'s custody history`
+                : `${unit.name}, ${status.label}`}
+              disabled={!historyOpens && !onOpen}
+              onclick={() => (historyOpens ? onViewHistory?.(held) : onOpen?.(unit))}
+              class={cn(
+                "flex min-h-(--row-h) w-64 shrink-0 items-center justify-start overflow-hidden",
+                "rounded-none px-2 text-left hover:bg-raised disabled:pointer-events-none",
+                // Only the admin path is a link-like affordance; without this the
+                // cursor would promise an action the row doesn't have.
+                historyOpens && "cursor-pointer underline-offset-4 hover:underline"
+              )}
+            >
+              <StatusDot {status} />
+            </button>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>
+          {historyOpens ? `${held.custodian_name} — see their history` : holder}
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  {:else}
+    <!-- Nothing to look up, so it stays part of the row's own click target. -->
+    <button
+      type="button"
+      disabled={!onOpen}
+      onclick={() => onOpen?.(unit)}
+      aria-label={`${unit.name}, ${status.label}`}
+      class="flex min-h-(--row-h) w-64 shrink-0 items-center justify-start overflow-hidden rounded-none px-2 text-left hover:bg-raised disabled:pointer-events-none"
+    >
+      <StatusDot {status} />
+    </button>
+  {/if}
 
   {#if actions}
     <div class="flex shrink-0 items-center gap-1">{@render actions(unit)}</div>

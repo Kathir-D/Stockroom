@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Decide whether anything that runs changed. Everything not listed
-      # here (Markdown, LICENSE, docs/, the graphify output) is docs-only.
+      # here (Markdown, LICENSE, docs/) is docs-only.
       - name: Detect code changes
         id: changes
         uses: dorny/paths-filter@v3

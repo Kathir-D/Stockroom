@@ -219,7 +219,7 @@ stockroom/
 ├── .githooks/                 # pre-commit: runs `scripts/dev.sh test`; installed by `dev.sh deps` via core.hooksPath
 ├── scripts/                   # dev.sh: the one script (up|deps|test|stop|status). dev.ps1 is its Windows
 │                              # counterpart (untested on Windows). Plus Start Stockroom.command (a
-│                              # double-click wrapper for dev.sh up) and graphify_fix_extraction.py
+│                              # double-click wrapper for dev.sh up)
 ├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system, backup spec)
 ├── Catagories.md              # source of truth for the initial category tree
 ├── CONTEXT.md                 # domain glossary
@@ -483,20 +483,12 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
-### Knowledge graph (graphify)
-
-`graphify-out/` holds a graphify knowledge graph of the repo (`graph.json`, `graph.html`, `GRAPH_REPORT.md`). It is gitignored: the files are regenerated wholesale on every rebuild and carry machine-specific paths, so each machine builds its own. Stock graphify extracts this repo badly in four ways, so rebuild through `scripts/graphify_fix_extraction.py` instead of a plain `/graphify` or `/graphify --update`:
-
-- **Svelte.** Stock graphify parses the whole `.svelte` file with the JavaScript grammar, so the markup and `lang="ts"` annotations fail and most script symbols are lost. The script blanks everything outside `<script>` (line numbers kept) and parses the rest as TypeScript.
-- **Dangling edges.** Imports of `stockroom/internal/stockroom` are pointed at a real package node that `contains` the package's files. Imports of external packages (Go stdlib, npm) have no node, so those edges are dropped and listed under `external_imports` on the importing file's node.
-- **Self-loops.** A file node that `contains` itself is dropped. The two SQL self-loops (`locations.parent_id`, `categories.parent_id`) are real foreign keys to their own table and stay.
-- **Collapsed edges.** graphify keeps one edge per node pair, so repeats were silently lost (e.g. `Asset`'s four `time.Time` fields). They are merged into one edge with `weight` = count and every line kept in `source_locations`.
-
-The script writes `graphify-out/.graphify_detect.json` and `.graphify_extract.json`; after it, run the normal graphify build, cluster, label, report, and `graphify export html` steps. It reuses graphify's semantic cache for docs and images and warns if any are uncached; those need a full `/graphify` run first. It needs `tree_sitter_sql` installed (`pip install "graphifyy[sql]"`) or the `.sql` files are skipped.
-
-```bash
-$(cat graphify-out/.graphify_python) scripts/graphify_fix_extraction.py
-```
+## Code Exploration Rules
+- If available, ALWAYS query `codebase-memory-mcp` tools FIRST before using standard file tools (`grep`, `glob`, or reading individual files) to explore or analyze code structure.
+- For finding symbols, function definitions, or references, use the `search_graph` tool instead of plain text search.
+- For analyzing architectural context, call chains, or dependencies across files, use `trace_path` or `get_architecture`.
+- Only read raw source files directly after narrowing down the specific targets through graph queries.
+- If MCP memory tools are not available, use standard search tools (`grep`, directory listings, file reading) to analyze the codebase structure.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

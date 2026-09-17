@@ -18,7 +18,8 @@
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
   import ModelRow from "@stockroom/ui/components/app/model-row.svelte"
   import AssetDetailDialog from "@stockroom/ui/components/app/asset-detail-dialog.svelte"
-  import type { AssetDetail, AssetListItem } from "../api/types"
+  import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
+  import type { AssetCustody, AssetDetail, AssetListItem } from "../api/types"
   import { addShouldOpenDetail } from "../add-flow"
   import { cart } from "../stores/cart.svelte"
   import { catalog } from "../stores/catalog.svelte"
@@ -37,6 +38,19 @@
 
   let detail = $state<AssetDetail | null>(null)
   let detailOpen = $state(false)
+
+  /**
+   * Who the history dialog is pointed at (2026-09-16). Owned here rather than in
+   * <UnitRow> so one dialog serves every row *and* the asset dialog, instead of
+   * one per rendered row.
+   */
+  let holder = $state<AssetCustody | null>(null)
+  let holderOpen = $state(false)
+
+  function showHistory(custody: AssetCustody) {
+    holder = custody
+    holderOpen = true
+  }
 
   /**
    * Rows are collapsed by default. Two things open one: a search result opens the
@@ -128,6 +142,7 @@
         <ModelRow
           {group}
           viewerId={session.profile?.id ?? null}
+          isAdmin={session.isAdmin}
           cartIds={cart.ids}
           canAdd={!session.checkoutBlocked}
           forceOpen={searching || highlightedGroupKey === group.key}
@@ -135,6 +150,7 @@
           onOpenUnit={openDetail}
           onAddUnit={requestAdd}
           onRemoveUnit={onRemove}
+          onViewHistory={showHistory}
         />
       {/each}
     </div>
@@ -157,4 +173,13 @@
     detailOpen = false
   }}
   onCheckIn={handleCheckIn}
+  onViewHistory={showHistory}
+/>
+
+<!-- Stacks over the asset dialog when it is opened from there, so closing it
+     returns to the item the question was asked about. -->
+<UserHistoryDialog
+  bind:open={holderOpen}
+  userId={holder?.custodian_id ?? null}
+  userName={holder?.custodian_name ?? ""}
 />
