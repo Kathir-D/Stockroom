@@ -45,16 +45,17 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `roster_test.go` | 2 | import refuses a student; one CSV with good and bad rows, a photo, a BOM and CRLF line endings |
 | `assets_admin_test.go` | 2 | every asset write refuses a student; `CreateAsset` |
 | `categories_admin_test.go` | 2 | every category write refuses a student; `CreateCategory` |
-| `custody_test.go` | 4 | checkout to self; a student cannot check out to someone else; scanning a checked-out item returns it; the custody lists refuse a student |
+| `custody_test.go` | 5 | checkout to self; a student cannot check out to someone else; scanning a checked-out item returns it; the custody lists refuse a student; a damage note lands on a **closed** event, and an open one is a conflict |
 | `backup_test.go` | 5 | backup refuses a student; a run writes a restorable archive; `github_token` is redacted out of the export; a second concurrent run is a **skip**, not an error; no folder configured is `ErrNotConfigured` |
 | `archive_test.go` | 3 | the encryption round-trip; a wrong passphrase is refused; an encrypted archive asks for one |
 | `restore_test.go` | 8 | restore refuses a student; refuses without the typed confirmation; **a real truncate-and-reload round-trip against the live database**; a damaged archive is caught by its checksum; an archive whose rows point at absent parents is caught by the FK anti-join; `LocalCLIActor` satisfies `RequireAdmin` and `Resolve` never sets `trustedCLI`; `last_value`/`is_called` survive a round-trip (including the never-read, `is_called = false` case, where replaying with `setval`'s default would burn the first value); a descending or cycling sequence is refused outright rather than checked by a rule never designed for one |
-| `settings_test.go` | 5 | settings are admin-only; a secret never comes back over the API; each bound is a readable message rather than a Postgres constraint name; a target cannot be enabled half-configured; `EnsureSettings` seeds **only** null columns, so `.env` cannot out-vote the panel on a restart |
+| `settings_test.go` | 5 | settings are admin-only; a secret never comes back over the API; each bound is a readable message rather than a Postgres constraint name; a target cannot be enabled half-configured; `EnsureSettings` seeds a blank column **once**, so neither a value an admin typed nor one an admin cleared is taken back by a restart |
 | `backup_status_test.go` | 4 | staleness is computed over the targets that are supposed to be running; the no-failsafe-admin warning fires; the state file and log are written; dated folders are pruned |
 | `photos_backup_test.go` | 4 | the mirror copies only what changed; a missing `uploads/` is a no-op rather than an error; a generation rolls over at the retention boundary; the live generation cannot be deleted |
+| `photowall_test.go` | 11 | the wall is wiped at boot and adopts only a directory it owns, refusing a foreign one; the fill/take/invalidate lifecycle; a take is atomic and answers when empty; filling backs off; a stale generation is discarded; tile names give nothing away; the run loop stops with its context |
 | `failsafe_test.go` | 1 | the failsafe admin is created, then updated in place |
 | `sessions_test.go` | 1 | create and get |
-| `config_test.go` | 1 | defaults, including the 10-minute idle timeout |
+| `config_test.go` | 3 | defaults, including the 10-minute idle timeout; the photo-wall defaults; a bad photo-wall number is refused rather than silently defaulted |
 | `db_test.go` | 1 | open, ping, close |
 | `password_test.go` | 1 | hash and check |
 | `hashcost_test.go` | 1 | the shipped bcrypt cost stays at bcrypt.DefaultCost (10); the suite runs at the minimum cost and this is what stops that leaking into a build |
@@ -66,7 +67,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 | File | Tests | Covers |
 |---|---|---|
-| `router_test.go` | 1 | `GET /health` |
+| `router_test.go` | 3 | `GET /health`; the CORS origin allow-list; the blocked-origin log is bounded, so a hostile page cannot grow it without limit |
 | `json_test.go` | 1 | each sentinel error becomes the right status, and `ErrNotConfigured` is a 503 with its message intact |
 | `auth_test.go` | 1 | scan in with no password, be refused on a full-only route, set a password, be a normal session |
 | `custody_test.go` | 1 | `POST /checkout` round trip |
