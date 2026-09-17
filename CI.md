@@ -7,7 +7,7 @@ One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/t
 1. Checks out, then decides whether any code changed (see below).
 2. Sets up Go, Node 22 and the Supabase CLI.
 3. `supabase start`, which applies every migration and the seed.
-4. `go vet ./...`, then `go test ./... -count=1` with `STOCKROOM_REQUIRE_DB=1`, so a Go test that would skip on a missing database fails instead.
+4. `go vet ./...`, then `go test ./... -count=1 -p 1` with `STOCKROOM_REQUIRE_DB=1`, so a Go test that would skip on a missing database fails instead.
 5. `supabase test db` (pgTAP).
 6. One root `npm ci` (locally, `./scripts/dev.sh deps --ci` does the same job), then `npm run check`, `npm test` and `npm run build`, each of which fans out across the workspace (`packages/ui`, `web-app`, `desktop-app/frontend`). A per-app `npm ci --prefix` would give that app its own Svelte and Vite, which breaks reactivity silently (`docs/design/design-system.md` §2.2).
 7. `supabase stop`, always, if it was started.

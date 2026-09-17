@@ -85,6 +85,24 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
 	mux.Handle("POST /admin/backup", d.withSession(d.handleBackupNow, fullOnly))
 
+	// Backup configuration, status, restore and the photo mirror
+	// (docs/design/backup.md §E.8). Admin-only, enforced inside
+	// internal/stockroom. The restore routes are the destructive ones and each
+	// carries its own typed confirmation, checked in the package rather than
+	// here so the CLI is held to it too.
+	mux.Handle("GET /admin/settings", d.withSession(d.handleGetSettings, fullOnly))
+	mux.Handle("PUT /admin/settings", d.withSession(d.handleSaveSettings, fullOnly))
+	mux.Handle("POST /admin/settings/test", d.withSession(d.handleTestTarget, fullOnly))
+	mux.Handle("POST /admin/drive/connect", d.withSession(d.handleDriveConnect, fullOnly))
+	mux.Handle("POST /admin/drive/finish", d.withSession(d.handleDriveFinish, fullOnly))
+	mux.Handle("GET /admin/backup/status", d.withSession(d.handleBackupStatus, fullOnly))
+	mux.Handle("GET /admin/backup/versions", d.withSession(d.handleBackupVersions, fullOnly))
+	mux.Handle("POST /admin/restore", d.withSession(d.handleRestoreUpload, fullOnly))
+	mux.Handle("POST /admin/restore/remote", d.withSession(d.handleRestoreRemote, fullOnly))
+	mux.Handle("GET /admin/photos/generations", d.withSession(d.handlePhotoGenerations, fullOnly))
+	mux.Handle("POST /admin/photos/restore", d.withSession(d.handleRestorePhotos, fullOnly))
+	mux.Handle("DELETE /admin/photos/generations/{name}", d.withSession(d.handleDeletePhotoGeneration, fullOnly))
+
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))

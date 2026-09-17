@@ -25,9 +25,12 @@
   import { toast } from "svelte-sonner"
   import { Toaster } from "@stockroom/ui/components/ui/sonner"
   import * as Sheet from "@stockroom/ui/components/ui/sheet"
+  import BackupNotice from "@stockroom/ui/components/app/backup-notice.svelte"
   import CartDock from "@stockroom/ui/components/app/cart-dock.svelte"
+  import CommandPalette from "@stockroom/ui/components/app/command-palette.svelte"
   import OverdueNotice from "@stockroom/ui/components/app/overdue-notice.svelte"
   import ScanListener from "@stockroom/ui/components/app/scan-listener.svelte"
+  import RestoreReport from "@stockroom/ui/components/app/restore-report.svelte"
   import ScanResult from "@stockroom/ui/components/app/scan-result.svelte"
   import Sidebar from "@stockroom/ui/components/app/sidebar.svelte"
   import TopBar from "@stockroom/ui/components/app/top-bar.svelte"
@@ -35,6 +38,7 @@
   import AdminBackup from "@stockroom/ui/screens/admin/backup.svelte"
   import AdminCategories from "@stockroom/ui/screens/admin/categories.svelte"
   import AdminOverdue from "@stockroom/ui/screens/admin/overdue.svelte"
+  import AdminSettings from "@stockroom/ui/screens/admin/settings.svelte"
   import AdminUsers from "@stockroom/ui/screens/admin/users.svelte"
   import Browse from "@stockroom/ui/screens/browse.svelte"
   import CartPage from "@stockroom/ui/screens/cart-page.svelte"
@@ -187,6 +191,21 @@
     }
   }
 
+  /**
+   * The command palette's jump-to-asset.
+   *
+   * It puts the unit's own serial into the browse search rather than opening a
+   * detail dialog on top of whatever screen is showing. The serial matches
+   * exactly one row, so the browse list *becomes* that item, in the place the
+   * person would have gone looking for it anyway — and they end up somewhere
+   * they can keep working from, instead of behind a dialog they have to close.
+   */
+  function jumpToAsset(unit: AssetListItem) {
+    catalog.search = unit.serial_number ?? unit.name
+    router.go({ name: "browse", category: undefined })
+    catalog.highlightUnit(unit.id)
+  }
+
   function addToCart(unit: AssetListItem) {
     if (session.checkoutBlocked) return
     if (cart.add(unit.id)) return
@@ -232,6 +251,11 @@
 
 <Toaster position="bottom-center" />
 
+<!-- Outside every branch below, and deliberately: a restore drops every session
+     as its last act, so by the time there is a report to show the shell has
+     already fallen back to the sign-in screen. See stores/restore.svelte.ts. -->
+<RestoreReport />
+
 {#if !session.ready}
   <!-- A blank frame rather than a spinner: /me settles in a few ms on localhost
        and a flash of loading state is worse than a beat of nothing. -->
@@ -240,6 +264,16 @@
   <SignIn {onSignedIn} />
 {:else}
   <ScanListener onBurst={(burst) => onBurst(burst)} />
+
+  <!-- Cmd/Ctrl+K. Its own scoped scanner hands a real scan straight back to
+       `onBurst`, so a barcode read while the palette is open still checks the
+       item in rather than typing a serial into a search box (§9.3). -->
+  <CommandPalette
+    isAdmin={session.isAdmin}
+    onNavigate={(next) => router.go(next)}
+    onPickAsset={jumpToAsset}
+    onScan={(code) => onBurst({ code })}
+  />
 
   <div class="flex h-screen flex-col bg-ground text-fg" data-density="comfortable">
     <TopBar
@@ -288,6 +322,20 @@
 
       <main class="min-w-0 flex-1 overflow-y-auto">
         <div class="mx-auto max-w-[1440px] p-(--gutter)">
+          <!-- The backup-staleness warning, above whatever screen is open rather
+               than only on the admin one: a stale backup is a fact about the
+               machine, and the admin is the person least likely to be standing
+               at it (docs/design/backup.md §E.7). The server decides the wording
+               and who sees which sentence; this only places it. -->
+          {#if session.visibleBackupWarning}
+            <BackupNotice
+              warning={session.visibleBackupWarning}
+              isAdmin={session.isAdmin}
+              onOpenBackup={() => router.go({ name: "admin", tab: "backup" })}
+              onDismiss={() => session.dismissBackupWarning()}
+            />
+          {/if}
+
           {#if route.name === "cart"}
             <CartPage onBack={() => router.backToBrowse()} {onCheckedOut} />
           {:else if route.name === "history"}
@@ -301,6 +349,8 @@
               <AdminUsers />
             {:else if route.tab === "overdue"}
               <AdminOverdue />
+            {:else if route.tab === "settings"}
+              <AdminSettings />
             {:else}
               <AdminBackup />
             {/if}

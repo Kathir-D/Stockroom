@@ -27,16 +27,24 @@
 		} = $props();
 </script>
 
+<!-- The header sits *inside* Dialog.Content, which is a change from the
+     generated shadcn-svelte file. As generated it was a sibling of the content,
+     so the sr-only title and description rendered on every page whether or not
+     the palette was open -- verified in the browser: a 1x16px node reading
+     "Jump to / Search for an item..." above the browse screen, invisible but
+     live in the accessibility tree. It also left the dialog with nothing to
+     point aria-labelledby at once it did open. Inside, it both names the dialog
+     and exists only while the dialog does. -->
 <Dialog.Root bind:open {...restProps}>
-	<Dialog.Header class="sr-only">
-		<Dialog.Title>{title}</Dialog.Title>
-		<Dialog.Description>{description}</Dialog.Description>
-	</Dialog.Header>
 	<Dialog.Content
 		class={cn("rounded-xl! top-1/3 translate-y-0 overflow-hidden p-0", className)}
 		{showCloseButton}
 		{portalProps}
 	>
+		<Dialog.Header class="sr-only">
+			<Dialog.Title>{title}</Dialog.Title>
+			<Dialog.Description>{description}</Dialog.Description>
+		</Dialog.Header>
 		<Command {...restProps} bind:value bind:ref {children} />
 	</Dialog.Content>
 </Dialog.Root>

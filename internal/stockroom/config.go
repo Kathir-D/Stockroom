@@ -18,8 +18,15 @@ type Config struct {
 	AdminStudentNumber string
 	AdminPassword      string
 	UploadsDir         string
-	BackupDir          string
 	SessionIdleMinutes int
+
+	// These three are a first-boot seed for the app_settings row and nothing
+	// more (docs/design/backup.md §C.2). EnsureSettings copies them into null
+	// columns once; after that the admin panel owns them and the environment
+	// is ignored, so a value an admin typed is never reverted by a restart.
+	BackupDir      string
+	PhotoBackupDir string
+	RcloneRemote   string
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). The
 	// remote is the switch: blank disables the feature entirely and no
@@ -52,6 +59,8 @@ func LoadConfig() (Config, error) {
 		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
 		UploadsDir:         getenv("UPLOADS_DIR", "./uploads"),
 		BackupDir:          os.Getenv("BACKUP_DIR"),
+		PhotoBackupDir:     os.Getenv("PHOTO_BACKUP_DIR"),
+		RcloneRemote:       os.Getenv("RCLONE_REMOTE"),
 
 		SignInPhotosRemote: os.Getenv("SIGNIN_PHOTOS_REMOTE"),
 		SignInPhotosDir:    getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),

@@ -92,8 +92,40 @@
   /**
    * Keep focus on whichever field is live. A scanner can fire at any moment and
    * there is nobody at the machine to click first.
+   *
+   * It only reclaims focus that fell *nowhere*. Focus that moved to another
+   * real control is left alone, and that is not a nicety — it is what stops the
+   * screen locking up the machine.
+   *
+   * A modal dialog traps focus inside itself. Rendered over this screen, the
+   * unconditional version fought it: the dialog pulled focus in, this handler
+   * pulled it back out, the dialog pulled it in again, forever, at whatever
+   * rate the event loop could manage. Measured: the tab stopped responding
+   * entirely and had to be closed. The restore report is the first overlay to
+   * appear above sign-in (a restore signs everybody out), but the bug was
+   * always here waiting for one.
+   *
+   * Two guards, because they fail differently. `relatedTarget` names where
+   * focus went and is the precise answer, but it is null in a few real cases —
+   * so an open dialog anywhere on the page is also enough to stand down.
+   *
+   * `:not([data-state='closed'])` on that second guard, not a bare role match.
+   * A dialog stays in the DOM through its close animation with
+   * `data-state="closed"` on it (observed: roughly 150ms after the palette is
+   * dismissed), and a guard that counted those would eventually meet one that
+   * lingers — leaving the field unfocusable and the scanner, which types into
+   * whatever has focus, dead with no symptom but "scanning stopped working".
+   * The negated form also treats a dialog carrying no `data-state` as open,
+   * which is the right way round: standing down for a beat too long costs a
+   * refocus, mistaking an open dialog for a closed one costs the lock-up.
    */
-  function refocus() {
+  function refocus(event?: FocusEvent) {
+    if (event?.relatedTarget instanceof HTMLElement) return
+    if (
+      typeof document !== "undefined" &&
+      document.querySelector("[role='dialog']:not([data-state='closed'])")
+    )
+      return
     if (step === "number") numberInput?.focus()
     else passwordInput?.focus()
   }
@@ -290,7 +322,7 @@
           disabled={busy}
           placeholder="or type your student number and press Enter"
           class="h-(--control-h) text-lg"
-          onblur={() => queueMicrotask(refocus)}
+          onblur={(event) => queueMicrotask(() => refocus(event))}
         />
         <p class="text-fg-faint">
           A scanned ID signs you in straight away. Typing the number asks for your password.

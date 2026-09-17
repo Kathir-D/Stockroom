@@ -21,9 +21,13 @@ type Options struct {
 	// UploadsDir is where photos are copied and the root /files/ serves.
 	// Empty means photo uploads answer ErrNotConfigured.
 	UploadsDir string
-	// BackupDir is where ExportAllTablesToCSV writes. Empty means backups
-	// answer ErrNotConfigured.
-	BackupDir string
+	// BackupDir and PhotoBackupDir are *overrides* for the folders in
+	// app_settings, not the configured values. main leaves both empty so
+	// production always reads the settings row an admin can edit
+	// (docs/design/backup.md §C.2); tests set them to a temp directory so a
+	// run never touches whatever the machine has configured.
+	BackupDir      string
+	PhotoBackupDir string
 }
 
 // DB is the package's one handle: the connection pool, the session store and
@@ -40,10 +44,13 @@ type DB struct {
 	// and does not guard it, so a DB literal must set it (NewSessionStore).
 	Sessions *SessionStore
 
-	// UploadsDir and BackupDir come from Options. They are plain values, so
-	// a test may point them at a temp dir after Open.
-	UploadsDir string
-	BackupDir  string
+	// UploadsDir comes from Options. BackupDir and PhotoBackupDir are the
+	// overrides described there: empty in production, where the app_settings
+	// row decides. All three are plain values, so a test may point them at a
+	// temp dir after Open.
+	UploadsDir     string
+	BackupDir      string
+	PhotoBackupDir string
 
 	// PhotoWall is the sign-in photo wall's reel
 	// (docs/design/signin-photo-wall.html §2), or nil when the feature is
@@ -81,10 +88,11 @@ func Open(ctx context.Context, databaseURL string, opts Options) (*DB, error) {
 		idle = DefaultSessionIdle
 	}
 	db := &DB{
-		Pool:       pool,
-		Sessions:   NewSessionStore(idle),
-		UploadsDir: opts.UploadsDir,
-		BackupDir:  opts.BackupDir,
+		Pool:           pool,
+		Sessions:       NewSessionStore(idle),
+		UploadsDir:     opts.UploadsDir,
+		BackupDir:      opts.BackupDir,
+		PhotoBackupDir: opts.PhotoBackupDir,
 	}
 	if err := db.Ping(ctx); err != nil {
 		pool.Close()

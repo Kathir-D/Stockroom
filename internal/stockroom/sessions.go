@@ -136,3 +136,14 @@ func newToken() (string, error) {
 	}
 	return hex.EncodeToString(b[:]), nil
 }
+
+// Clear ends every session. A restore replaces the profiles table, so every
+// live token points at a row that may no longer exist -- or, worse, at an id
+// that now belongs to a different account with a different admin flag. There
+// is no way to reconcile that, and signing everybody out is both the safe
+// answer and an honest one: the database they signed in to is gone.
+func (s *SessionStore) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = map[string]*Session{}
+}

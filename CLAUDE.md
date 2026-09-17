@@ -89,8 +89,8 @@ Why this shape:
 | Desktop app | Wails (Go window host + Svelte 5 + TypeScript frontend, Tailwind CSS v4). Renders `<StockroomApp>`; calls the Go server over HTTP |
 | Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Renders the same `<StockroomApp>`; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
-| Backup | Built: manual CSV export to a local folder. Specified (§11, `docs/design/backup.md`): a scheduler goroutine in the Go server → CSV per table + zip → local folder → `rclone copy` to Google Drive and/or the GitHub REST API. No OS scheduler, no `cmd/backup` |
-| Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options` |
+| Backup | A scheduler goroutine in the Go server → CSV per table + sequences + manifest + zip → local folder → `rclone copy` to Google Drive and/or the GitHub REST API. No OS scheduler, no `cmd/backup`. Restore is an admin-panel feature over one `RestoreFromZip`, with `cmd/restore` as the session-free floor (§11) |
+| Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options`. Backup configuration is the exception: it lives in the `app_settings` row, with `.env` only seeding it on first boot |
 
 ---
 
@@ -189,11 +189,22 @@ stockroom/
 │   ├── assets_admin.go        # asset create/update/delete/status/photo
 │   ├── custody.go             # ScanItem, CheckOutAssets, CheckInAsset, the lists and histories
 │   ├── photos.go              # staged photo writes, FilesPrefix, photo URLs
-│   └── backup.go              # ExportAllTablesToCSV, BackupNow
+│   ├── settings.go            # app_settings: load/save, .env as a first-boot seed, secrets redacted
+│   ├── backup.go              # the nightly run: snapshot, CSVs, inventory/accounts, prune, push
+│   ├── archive.go             # manifest (SHA-256 per file + sequences), zip, optional AES-256-GCM
+│   ├── restore.go             # the ONE RestoreFromZip every entry point calls
+│   ├── backup_status.go       # BackupStatus, .last-success.json, backup.log, the sign-in warning
+│   ├── scheduler.go           # StartBackupScheduler: the in-process nightly + boot catch-up
+│   ├── photos_backup.go       # the generational photo mirror (+ diskfree_{unix,windows}.go)
+│   ├── target.go              # BackupTarget: Push/Versions/Fetch/Test
+│   ├── target_drive.go        # Google Drive via the rclone binary
+│   ├── target_github.go       # GitHub via the REST API, no git binary
+│   ├── drive_authorize.go     # `rclone authorize drive` driven from the admin panel
+│   └── RESTORE.md             # embedded in every zip; the instructions travel with the backup
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
 │   └── auth.go, users.go, assets.go, custody.go, admin.go
-├── cmd/restore/               # (Phase 7, not yet written) disaster CLI: calls the same RestoreFromZip as
+├── cmd/restore/               # disaster CLI: calls the same RestoreFromZip as
 │                              # the admin panel, passing stockroom.LocalCLIActor() -- so RequireAdmin still
 │                              # holds, and it works with zero accounts in the database (§11)
 │                              # NB: no cmd/backup. Phase 7 schedules the backup inside the server (§11)
@@ -250,7 +261,15 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}` |
 | `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
 | `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
-| `POST /admin/backup` | admin | runs the CSV export into `BACKUP_DIR` |
+| `POST /admin/backup` | admin | the whole run: archive, photo mirror, every enabled target. A failed push is in `targets`, not an error |
+| `GET /admin/backup/status` | admin | the backup screen's one read: warnings (already worded), per-target state, photo generations, log tail |
+| `GET /admin/backup/versions?target=` | admin | `local` / `drive` / `github`; `id` is opaque to the UI |
+| `GET/PUT /admin/settings` | admin | secrets come back **blank** with a `_set` boolean, never masked; PUT is a partial update |
+| `POST /admin/settings/test` | admin | `{target}`; runs that target's own connection check |
+| `POST /admin/drive/connect`, `POST /admin/drive/finish` | admin | `rclone authorize drive` driven from the panel, so a revoked token never needs a terminal |
+| `POST /admin/restore` | admin | multipart `file` + `confirm=RESTORE` (+ `passphrase`, `force`) |
+| `POST /admin/restore/remote` | admin | the same restore, bytes fetched from a target by date |
+| `GET /admin/photos/generations`, `POST /admin/photos/restore`, `DELETE /admin/photos/generations/{name}` | admin | the mirror. Deleting is the only deletion it has, and it is a person pressing a button |
 | `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
 
 **Statuses.** `ErrNotFound` 404, `ErrInvalid` 400, `ErrUnauthorized`/`ErrBadCredentials`/`ErrPasswordNotSet` 401, `ErrForbidden` 403, `ErrConflict`/`ErrOverdueBlocked` 409, anything else 500 with the detail logged, not sent. **`ErrNotConfigured` is 503** with its message intact: an unset `UPLOADS_DIR` or `BACKUP_DIR` is neither the client's fault nor a bug, and the admin reading the response is the person who edits `.env`.
@@ -272,11 +291,15 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
    | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7); digits only | (none) |
    | `ADMIN_PASSWORD` | failsafe admin password; at least 8 characters | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
-   | `BACKUP_DIR` | local CSV export target, also `rclone`'s source folder | (none) |
-   | `RCLONE_REMOTE` | `rclone` remote name (set up via `rclone config`) that the nightly run copies `BACKUP_DIR` to | (none) |
+   | `BACKUP_DIR` | **first-boot seed** for the backup folder | (none) |
+   | `PHOTO_BACKUP_DIR` | first-boot seed for the photo mirror folder | (none) |
+   | `RCLONE_REMOTE` | first-boot seed for the Drive remote name | (none) |
    | `SESSION_IDLE_MINUTES` | idle timeout, from the last interaction | `10` |
+   | `SIGNIN_PHOTOS_*` | the sign-in photo wall; `SIGNIN_PHOTOS_REMOTE` blank disables it entirely | see `.env.example` |
 
-   `BACKUP_DIR` and the `rclone` remote are the last backup settings that live here. Per `docs/design/backup.md` §C.2 they move into an `app_settings` row when Phase 7 lands, with `.env` kept only as a first-boot seed, because an admin must never have to edit a file to change where backups go.
+   Those three backup variables are a **seed, not a setting** (Phase 7, `docs/design/backup.md` §C.2). `EnsureSettings` copies them into null `app_settings` columns on the first start against a fresh database and is ignored afterwards; from then on Admin → Settings owns them. Getting that direction backwards would mean a value an admin typed reverting on the next restart. `main.go` deliberately does *not* pass them through `Options`, so production always reads the row; the `DB.BackupDir` / `DB.PhotoBackupDir` fields exist as an explicit override for tests pointing at a temp directory.
+
+   `docs/BACKUP-SETUP.md` is the click-by-click setup for a non-technical admin.
 
 3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates two development accounts, both with the typed-login password `password` and both able to sign in by scanning their number instead:
 
@@ -328,23 +351,23 @@ Scanner hardware is not yet purchased/tested (Week 7). Confirm it's a plain HID 
 
 ## 11. Backup strategy
 
-**`docs/design/backup.md` is the spec** (2026-09-14). What follows is the summary; that file has the walkthroughs, the endpoint table and the reasoning.
+**Built (Phase 7, 2026-09-17).** `docs/design/backup.md` is the spec and the reasoning; `docs/BACKUP-SETUP.md` is the setup walkthrough for a non-technical admin. What follows is the summary.
 
-**Built today.** `ExportAllTablesToCSV` (`internal/stockroom/backup.go`) writes every table to `BACKUP_DIR/<yyyy-mm-dd>/<table>.csv` through `COPY … TO STDOUT`, in one repeatable-read snapshot, staged and renamed into place. Exposed as "Backup Now" in the admin panel. It is local-only and manual: nothing schedules it, nothing leaves the machine, and the CSVs as they stand **cannot be restored** — the `assets_asset_tag_seq` value is not captured, the files load in foreign-key-violating alphabetical order, and loading `assets.csv` would fire `trg_asset_status_log`.
+**The nightly run** is a goroutine inside the Go server (`scheduler.go`), not Task Scheduler and not launchd. It fires at `schedule_hour` and runs immediately on boot when the last success is stale, which is the whole of "back up first thing when the machine is available". It also sidesteps `findDotEnv` walking up from a working directory that would have been `System32` under a Windows task. One run, guarded by `pg_try_advisory_lock` on a dedicated connection — `false` is a skip, not an error — writes: every table as CSV in one repeatable-read snapshot, `sequences.csv` carrying `last_value` **and** `is_called`, a readable `inventory.csv` and `accounts.csv`, a `manifest.json` with a SHA-256 per file and the schema version, and an embedded `RESTORE.md`, zipped and optionally encrypted.
 
-**Specified, not built.** Two selectable targets, **Google Drive** (via `rclone`) and **GitHub** (via the REST API, no `git` binary), pushing to both when both are configured. Drive gets dated folders; GitHub overwrites a fixed `backup/` path so its git history *is* the dated backup list and the repo grows by a few KB of text a night instead of a zip. Each night also writes a readable `inventory.csv` and `accounts.csv` beside the restorable zip.
+**Two off-site targets, both active when both are configured.** Google Drive through the `rclone` binary and GitHub through its REST API (no `git` binary). Drive gets dated folders; GitHub overwrites a fixed `backup/` path so its commit history *is* the dated backup list and the repo grows by a few KB of text a night rather than a zip. GitHub's history is capped at `keep_days` and pruned by rewriting the branch onto a fresh orphan root, because overwriting `accounts.csv` does not remove its old versions and that file is a credential roster. A push that fails never fails the run: the restorable archive is already on disk, and each failure is carried into the state file and onto the backup screen rather than logged and forgotten.
 
-**The normal restore is a feature, not a script.** An admin uploads a zip, or picks a date from either target, in the admin panel. `set local session_replication_role = replica` is what makes a CSV reload work at all, and because it suspends foreign-key enforcement the restore re-checks every FK — plus per-file checksums and row counts — inside the transaction before it commits. Requiring a sign-in is viable because `EnsureFailsafeAdmin` runs on every server start, but only *when `.env` is filled in*: the failsafe is best-effort by decision (§7), so `cmd/restore` is the guaranteed path rather than the exotic one. It works with zero accounts in the database and calls the same `RestoreFromZip` — four entry points, one implementation. It satisfies `RequireAdmin` rather than bypassing it, via `LocalCLIActor()`: an `Actor` carrying an **unexported** `trustedCLI` marker that `server/`, being another package, cannot construct and `Resolve` never sets, so no request can forge one. A restore logs whether it came from `cli` or from a named admin.
+**One restore, four entry points.** Upload a zip, pick a date on Drive, pick a date on GitHub, or `cmd/restore` — all of them call the same `RestoreFromZip`, and the GitHub fetch repackages its tarball into the same zip the local export writes. `set local session_replication_role = replica` is what makes a CSV reload work at all, and because it suspends foreign-key enforcement the restore re-checks everything inside the transaction *before* it commits: per-file checksums (before the transaction even opens, so a corrupt download costs nothing), row counts against the manifest, an anti-join per foreign key enumerated from `pg_constraint`, and every sequence's effective next value proven strictly above its column's maximum. **Sequences are written last, after every rollback-triggering check**, because `setval` is not transactional; the captured prior values are replayed, loudly, if the commit still fails. A restore clears every session as its last act.
 
-**Photos are mirrored locally only**, to one live folder updated in place, rolling to a new frozen generation every `keep_days` (default 90). Never deleted automatically, so the mirror only grows; a free-space and generation-count alert bounds it, and an admin deletes a named generation. This is a deliberate trade: a failed drive loses `uploads/` and its mirror together.
+`cmd/restore` is the guaranteed floor rather than the exotic path: `EnsureFailsafeAdmin` is best-effort by the 2026-09-08 decision, so an unfilled `.env` restores a wiped database into zero accounts and makes the admin panel unreachable exactly when it is needed. The CLI needs no session, **satisfies** `RequireAdmin` via `LocalCLIActor()` rather than bypassing it, and `BackupStatus` warns whenever no failsafe admin is configured.
 
-**Configuration lives in the database, not `.env`** (an `app_settings` row), because no admin should have to edit a file. `.env` seeds it on first boot. The export **redacts secret columns** — `app_settings` sits in `public`, so an unredacted export would push `github_token` to the very repo it unlocks and GitHub's secret scanning would revoke it.
+**Configuration lives in the database** (`app_settings`), not `.env`, because no admin should have to edit a file. `.env` seeds it on first boot and is ignored afterwards. The export **redacts secret columns** — `app_settings` sits in `public`, so an unredacted export would push `github_token` to the very repo it unlocks and GitHub's secret scanning would revoke it — and the restore puts the live secrets back rather than overwriting them with the redacted nulls.
 
-**Scheduling is a goroutine in the Go server**, not Task Scheduler or launchd: it fires at the configured hour and runs immediately on boot when the last success is stale, which is how "back up first thing when the machine is available" is met. **Staleness is surfaced** at admin sign-in, at every user's sign-in (naming the admins to tell), and on the backup screen.
+**Photos are mirrored locally only**, to one live folder updated in place, rolling to a frozen generation every `keep_days`. Never deleted automatically, so the mirror only grows; a free-space and generation-count alert bounds it and an admin deletes a named generation by hand. This is a deliberate trade: a failed drive loses `uploads/` and its mirror together.
 
-Before go-live, the restore round-trip has to pass: wipe a scratch database, reapply migrations, restore, confirm row counts match the manifest and `assets_asset_tag_seq` resumes where it left off.
+**Nothing fails quietly.** `.last-success.json` per target and a rotating `backup.log` feed `BackupStatus`, and staleness is surfaced on three surfaces: the backup screen, an admin's sign-in, and **every** user's sign-in — naming the admins to tell, by name only, never a student number (§7).
 
----
+**Verified.** A real truncate-and-reload round-trip against the live database, in the Go suite and by hand through the UI: 86 rows across 13 tables restored, a canary asset created after the backup correctly gone, and `assets_asset_tag_seq` resuming at its captured value (267) rather than 1, with no spurious `activity_log` rows.
 
 ## 12. Build timeline (9 weeks)
 
@@ -461,10 +484,22 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **The Postgres probe is bash's own `/dev/tcp`, not `nc -z -G`.** `-G` is a BSD-only connect timeout, so on GNU netcat, on busybox, or on a machine with no `nc` at all the probe fails outright and a healthy database reads as down — which `dev.sh test` then reports as a FAILED pgTAP run rather than a passing one, i.e. the one failure mode the "a skip must never pass for a success" rule exists to prevent, inverted.
 - [x] **Browser tabs open on readiness, not on launch.** `up` opens the web app and Studio once each URL answers, because a tab opened at a port nothing is listening on yet shows a browser error page as the first thing the user sees, which reads exactly like a broken app. `--no-open` skips it. Every URL goes to `open` in **one call**, which is one window with a tab each; a call per URL is a window per URL. Each service also tees to `.run-logs/` (gitignored), so a crash three minutes in leaves something to read instead of scrollback that has gone by.
 
+**Closed (2026-09-17, Phase 7 built: the panel, and four bugs the browser found)**
+- [x] **Backup configuration is a screen, not a file.** Admin → Settings, one card per concern, each saving on its own because `SettingsInput` is a partial update — a page-wide Save would make every half-typed field in an unrelated card a hazard. The two secrets come back **blank with a `_set` boolean**, never masked: a mask round-trips, and the panel would eventually write `••••••••` back as the literal new token. Leaving a secret field empty means "leave it alone"; removing one is its own button.
+- [x] **A number field does not hand back what is in the box.** The settings screen used `<input type="number">`, which Svelte binds through `valueAsNumber`: an emptied field arrives as `null`, `12abc` arrives as `null`, and neither is distinguishable from a field nobody touched. Clearing "Keep backups for" and pressing Save showed the admin `Cannot read properties of null (reading 'trim')` — measured in the browser, not reasoned about. Every one is now `type="text"` with `inputmode="numeric"`, which binds the characters actually on screen, and `whole()` takes `unknown` so the guard survives somebody changing the binding back.
+- [x] **The restore report is a panel, not a dialog, and sign-in stops fighting for focus.** A restore clears every session as its last act, so the report has to outlive the screen that started it — it lives in `stores/restore.svelte.ts` and renders at the app root, above sign-in. As a modal `<Dialog>` that **hung the tab**: the dialog trapped focus, sign-in's refocus-on-blur (which exists so a keyboard-wedge scanner always has somewhere to type, §10) pulled it straight back out, and the two looped until the page stopped responding and had to be closed. Two fixes, because they cover different failures: the report traps nothing, and `refocus` now stands down when `relatedTarget` names a real element or an open dialog is on the page. The dialog check is `:not([data-state='closed'])` rather than a bare role match — a dialog lingers through its close animation, and a guard that counted those would leave the field unfocusable and the scanner silently dead.
+- [x] **A scan while the command palette is open still checks the item in.** `Cmd/Ctrl+K` was the last open Phase 6 item. Its input has focus, so the root `<ScanListener>` is deaf to it by design (§9.3) — which would have made scanning a camera at that screen type a serial into a search box and nothing else, the one thing a barcode must never do (§1.5). The palette carries its own scoped listener: a burst at scanner speed closes it and goes to `POST /scan`; a *typed* burst is left alone, because that is somebody searching for a serial by hand and the list already has the answer.
+- [x] **`shadcn-svelte`'s `command-dialog` put its `sr-only` header outside the content.** So the palette's title and description were in the accessibility tree on **every** page, open or not — verified as a live 1×16px node above the browse screen — and the dialog had nothing to point `aria-labelledby` at once it did open. Moved inside `Dialog.Content`. Recorded here because it is a deliberate divergence from a generated file, and a regenerate would undo it.
+- [x] **`go test ./...` runs packages in parallel against one live Postgres.** Untidy until the restore tests, whose whole job is to truncate every table and load a backup over the top: `internal/stockroom` and `server` ran concurrently and a neighbouring package's rows vanished mid-test, so the failure landed on whichever test happened to be running rather than on the one that caused it (`TestBackupThenRestoreOverHTTP` = 500, green in isolation). `-p 1` in `dev.sh`, `dev.ps1` and CI.
+- [x] **`RestoreResult` gained `by_name`.** `by` is an account id, which is right in a log line and wrong on a screen: the panel was telling the admin who had just pressed Restore that it was performed by `00000000-…-020`. Resolved **before** the tables are replaced, because afterwards that row may belong to somebody else or not exist.
+- [x] **The staleness banner renders the server's sentence and only that.** `BackupWarning.admins` stays on the wire as the structured form, but the student-facing message already names them ("Please tell Admin Admin or Test User."), and printing the list again underneath is the same fact twice in two wordings. Hue sits on the icon, never as a fill: §1.2 reserves the five status hues for asset state, and an amber panel reads as an item that is due soon.
+- [x] **Below 900px is checked, not assumed.** §7.2 calls it a courtesy rather than a target; measured at 860, 700 and 640px across browse, cart and all six admin tabs — no horizontal overflow anywhere, sidebar collapses to the sheet, hamburger appears.
+
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
 - [ ] Scan-vs-typed keystroke threshold. Ships as a named/configurable constant defaulted to 50ms; tune with real hardware in Week 7
-- [ ] Exact `BACKUP_DIR` path, photo-mirror disk and target credentials on the closet PC (blocked on the PC being provisioned). All of it is admin-panel configuration under the Phase 7 design, so none of it blocks writing the code
+- [ ] Exact backup folder, photo-mirror disk and target credentials on the closet PC (blocked on the PC being provisioned). All of it is admin-panel configuration, so none of it blocked the code — `docs/BACKUP-SETUP.md` is the walkthrough for the day the machine exists
+- [ ] Neither off-site target has been exercised against a real account: no Google Drive has been connected and no GitHub repository created, so `rclone` and the REST API paths are unit-tested and hand-read but not yet round-tripped. The local target is fully verified end to end
 - [ ] Whether the photo mirror gets a second physical disk. Photos are local-only by decision, so this is their only redundancy (`docs/design/backup.md` §H)
 
 ---

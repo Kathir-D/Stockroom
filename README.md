@@ -277,8 +277,15 @@ Copy `.env.example` to `.env` at the repository root.
 | `ADMIN_STUDENT_NUMBER` | Failsafe admin account; digits only | *(none)* |
 | `ADMIN_PASSWORD` | Failsafe admin password; 8–72 characters | *(none)* |
 | `UPLOADS_DIR` | Where profile and asset photos are copied | `./uploads` |
-| `BACKUP_DIR` | Local CSV export target | *(none)* |
+| `BACKUP_DIR` | **First-boot seed only** for the backup folder | *(none)* |
+| `PHOTO_BACKUP_DIR` | First-boot seed only for the photo mirror folder | *(none)* |
+| `RCLONE_REMOTE` | First-boot seed only for the Google Drive remote name | *(none)* |
 | `SESSION_IDLE_MINUTES` | Idle timeout, measured from the last interaction | `10` |
+
+**The three backup variables are a seed, not a setting.** They fill the `app_settings` row the
+first time the server starts against a fresh database, and are ignored on every start after that.
+Backup configuration lives in Admin → Settings so nobody has to edit a file; if `.env` won on every
+boot, a value an admin typed would silently revert overnight.
 
 **The failsafe admin is best-effort by design.** If those two values are blank, malformed or
 rejected, the server logs a warning and starts anyway. A typo in `.env` must never take the whole
@@ -481,14 +488,20 @@ one (§7) · **any full** is every signed-in user whose password is set — a li
 | `POST /assets` · `PUT/DELETE /assets/{id}` · `POST /assets/{id}/status` | admin | `serial_number` required; `asset_tag` is generated |
 | `POST /assets/{id}/photo` | admin | Multipart, 10 MB, `.jpg .jpeg .png .gif .webp` |
 | `POST /categories` · `PUT/DELETE /categories/{id}` | admin | Depth capped at 3 |
-| `POST /admin/backup` | admin | CSV export into `BACKUP_DIR` |
+| `POST /admin/backup` | admin | Runs a backup now: CSV per table, sequences, a manifest, then every enabled target |
+| `GET/PUT /admin/settings` · `POST /admin/settings/test` | admin | Backup configuration, and a dry run against one target |
+| `POST /admin/drive/connect` · `POST /admin/drive/finish` | admin | Connects a Google account through `rclone authorize`, no terminal |
+| `GET /admin/backup/status` | admin | Last run per target, staleness, photo-mirror warnings |
+| `GET /admin/backup/versions` | admin | The dated backups available on Drive or GitHub |
+| `POST /admin/restore` · `POST /admin/restore/remote` | admin | Restore from an uploaded archive, or one picked by date |
+| `GET /admin/photos/generations` · `POST /admin/photos/restore` · `DELETE /admin/photos/generations/{name}` | admin | The local photo mirror |
 | `GET /files/...` | anyone | Photos; `<img>` tags cannot send a bearer token |
 
 Error mapping: `404` not found · `400` invalid · `401` unauthorised or bad credentials · `403`
 forbidden · `409` conflict or overdue-blocked · **`503` not configured** (an unset `UPLOADS_DIR` or
-`BACKUP_DIR`, with the message passed through — that is neither the client's fault nor a bug, and
-the admin reading it is the person who edits `.env`) · `500` for everything else, with the detail
-logged rather than sent.
+an unset backup folder, with the message passed through — that is neither the client's fault nor a
+bug, and the admin reading it is the person who fixes it on the Settings screen) · `500` for
+everything else, with the detail logged rather than sent.
 
 Full table with request and response shapes: [`CLAUDE.md`](CLAUDE.md) §8.1.
 
@@ -496,26 +509,60 @@ Full table with request and response shapes: [`CLAUDE.md`](CLAUDE.md) §8.1.
 
 ## Backup and restore
 
-**What works today.** "Backup Now" in the admin panel exports every table to
-`BACKUP_DIR/<yyyy-mm-dd>/<table>.csv` through `COPY … TO STDOUT`, in a single repeatable-read
-snapshot, staged and renamed into place. It is local-only and manual.
+Stockroom backs itself up. A goroutine inside the API server fires at the configured hour, and
+also runs immediately on boot when the last successful run is stale — which is the whole of "back
+up first thing when the machine is available" on a closet PC that gets unplugged. There is no Task
+Scheduler entry and no launchd plist.
 
-> [!WARNING]
-> Those CSVs **cannot be restored yet.** Reloading them as they stand would replay in foreign-key
-> violating alphabetical order, fire the asset status trigger on every row, and lose the asset-tag
-> sequence position. Treat the current export as a data escape hatch, not as disaster recovery.
+**[`docs/BACKUP-SETUP.md`](docs/BACKUP-SETUP.md) is the click-by-click setup**, written for
+whoever is standing at the machine. The short version:
 
-**What is designed and not yet built** ([`docs/design/backup.md`](docs/design/backup.md)): a
-scheduler goroutine inside the API server, nightly CSV plus a restorable zip, two selectable
-off-site targets — Google Drive via `rclone` and GitHub via its REST API, both at once when both
-are configured — a local generational photo mirror, staleness warnings surfaced at sign-in, and a
-restore that is a feature of the admin panel rather than a shell script. A `cmd/restore` CLI is
-specified as the guaranteed floor beneath it, because the panel route depends on an admin account
-existing and the failsafe admin is deliberately optional.
+| Where | What goes there | Needs |
+|---|---|---|
+| This machine | A dated folder plus a restorable zip, pruned after `keep_days` | A folder path |
+| Google Drive | The same folders, pushed with `rclone copy` | `rclone` installed, one Google sign-in |
+| GitHub | One `backup/` path overwritten nightly, so git history *is* the backup list | A private repo and a fine-grained token |
 
-The restore validates before it commits: foreign keys re-checked by anti-join, row counts against
-the manifest, per-file checksums, and every sequence proven to resume above its column's maximum.
-`setval` is not transactional, so sequences are written only after every other check has passed.
+Both off-site targets run when both are configured, and a push that fails never fails the run: the
+restorable archive is already on disk, and one target being blocked says nothing about the other.
+
+**Every setting lives in the database, not in a file.** Admin → Settings covers folders, the
+schedule, retention, both targets and optional archive encryption. `.env` seeds those columns the
+first time the server starts against a fresh database and is ignored afterwards, so a value an
+admin typed is never out-voted by a restart.
+
+**Restoring is a feature, not a script.** Admin → Backup → pick a date from any target, or upload a
+zip, then type `RESTORE`. It validates before it commits — per-file SHA-256 checksums before the
+transaction even opens, then row counts against the manifest, then every foreign key re-checked by
+anti-join, then every sequence proven to resume above its column's maximum. A restore that fails
+leaves the database exactly as it was. `setval` is not transactional, so sequences are written only
+after every other check has passed, and the prior values are replayed if the commit still fails.
+
+`cmd/restore` is the guaranteed floor beneath all of that: same `RestoreFromZip`, no session
+required, for the case the panel cannot cover — a wiped database with no account left to sign in
+as. Every backup zip carries a `RESTORE.md` explaining it.
+
+```
+go run ./cmd/restore --list
+go run ./cmd/restore --yes path/to/backup-2026-09-16.zip
+```
+
+> [!IMPORTANT]
+> Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env`. The failsafe admin is best-effort by
+> design, so without them a restored-from-empty database has nobody to sign in as and the admin
+> panel — the documented restore route — is unreachable exactly when it is needed. The backup
+> screen warns while this is unset.
+
+**Nothing fails quietly.** A backup that has not succeeded in `stale_hours` puts a line on
+everyone's screen at sign-in: admins are told where to go, students are told which admin to
+mention it to, by name only. Admin → Backup carries the same warnings, a per-target table with the
+exact error from the last failed attempt, and the tail of `backup.log`.
+
+**Photos are mirrored locally only** — one live folder updated in place, rolling to a frozen
+generation every `keep_days`, never deleted automatically. That means the mirror only grows, so a
+free-space threshold and a generation count warn on the same surfaces staleness uses, and deleting
+a generation is a button a person presses. The accepted cost is that a dead drive loses `uploads/`
+and its mirror together ([`docs/design/backup.md`](docs/design/backup.md) §H).
 
 ---
 
@@ -591,12 +638,16 @@ Stockroom is coursework built for a real department, on a nine-week schedule, an
 **Done.** The schema and seed. The Go API: authentication, sessions, permissions, the roster
 import, browse and filtering, the full scan/cart/checkout/check-in loop, custody history, overdue
 handling, and the admin endpoints. The entire frontend, as one shared package rendered by both
-hosts. CSV export.
+hosts. The backup system: configuration in the database rather than `.env`, a scheduler inside the
+server, CSV export with a manifest, Google Drive and GitHub as targets, the local photo mirror, and
+a restore that validates every foreign key, row count, checksum and sequence before it commits.
 
-**In progress or specified.** The nightly backup and the restore path are designed in detail and
-not yet implemented. Real inventory entry is under way. The barcode scanner has not been purchased,
-so the scan-vs-typed threshold is an untuned default. Kits — a named bundle checked out as one unit
-— are the lowest priority and may not ship.
+**In progress or specified.** The backup targets have been exercised against fakes and a local
+folder, not yet against a real Google account or a real GitHub repository from the closet PC, and
+the full wipe-and-restore round-trip in §11 is still to be run before go-live. Real inventory entry
+is under way. The barcode scanner has not been purchased, so the scan-vs-typed threshold is an
+untuned default. Kits — a named bundle checked out as one unit — are the lowest priority and may
+not ship.
 
 [`TODO.md`](TODO.md) tracks this phase by phase. [`CLAUDE.md`](CLAUDE.md) §13 records every decision
 that shaped it, including the ones that were reversed.

@@ -16,6 +16,7 @@
   import UsersIcon from "@lucide/svelte/icons/users"
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
   import DatabaseBackupIcon from "@lucide/svelte/icons/database-backup"
+  import SettingsIcon from "@lucide/svelte/icons/settings"
   import { Separator } from "@stockroom/ui/components/ui/separator"
   import { cn } from "@stockroom/ui/utils"
   import type { CategoryNode } from "../../api/types"
@@ -47,6 +48,7 @@
     { tab: "users", label: "Users", icon: UsersIcon },
     { tab: "overdue", label: "Overdue", icon: AlertTriangleIcon },
     { tab: "backup", label: "Backup", icon: DatabaseBackupIcon },
+    { tab: "settings", label: "Settings", icon: SettingsIcon },
   ]
 
   const browsing = $derived(route.name === "browse")
