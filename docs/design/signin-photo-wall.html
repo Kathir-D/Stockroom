@@ -162,17 +162,44 @@ document is the build plan and the visual reference.</p>
 <p class="sub">Stockroom · drafted 2026-09-16 · sits alongside <code>docs/design/design-system.md</code> §8.1</p>
 
 <div class="card">
-  <strong>Status — §0 to §2 are built.</strong> The config block, the cache directory and its boot wipe, and the
+  <strong>Status — §0 to §6 are built.</strong> The config block, the cache directory and its boot wipe, and the
   reel itself — state machine, filler, reaper, <code>TakePhotos</code>, the generation counter — live in
-  <code>internal/stockroom/photowall.go</code> with eleven tests that need no network, no Google account and no
-  Postgres. <code>PhotoSource</code> is the seam §3 and §4 plug into; until they land the reel idles empty, hands
-  out nothing, and the sign-in screen is exactly what it was. §5 onward is unbuilt.
+  <code>internal/stockroom/photowall.go</code>. <code>PhotoSource</code> is now implemented:
+  <code>photowall_drive.go</code> lists a Drive folder through <code>rclone</code> and keeps the manifest
+  current, and <code>photowall_image.go</code> turns one original into one 900×600 tile. Thirty-one tests cover
+  the three files and still need no network, no Google account and no Postgres — rclone sits behind two function
+  fields on the source. §5 and §6 are built too: <code>server/photowall.go</code> holds the batch endpoint
+  and the static mount, both unauthenticated, and <code>photo-wall.svelte</code> renders the columns behind the
+  sign-in card. <strong>Verified in a browser end to end</strong> against a temporary local-folder source —
+  photographs normalized to 900×600, both columns scrolling at their own rate, the mask, the marquee moving at
+  the 13.8 px/s the 110s cycle implies, the columns gone below 1280px, and the input at the same pixel either
+  way. §7 (the admin tab) is what is left, and with it the ability to point the wall at a real Drive folder.
   <br /><br />
-  Two things were decided while building and are written into the sections below rather than left as
-  commentary: the boot wipe <strong>refuses a directory it does not own</strong> (§2), and the reel is
-  <strong>assigned to <code>DB</code> by <code>main</code> rather than built by <code>Open</code></strong> (§2),
-  because <code>Open</code>'s only way to report a problem is to stop the server from starting and §9 forbids
-  that here.
+  Decided while building §0 to §2, and written into the sections below rather than left as commentary: the boot
+  wipe <strong>refuses a directory it does not own</strong> (§2), and the reel is <strong>assigned to
+  <code>DB</code> by <code>main</code> rather than built by <code>Open</code></strong> (§2), because
+  <code>Open</code>'s only way to report a problem is to stop the server from starting and §9 forbids that here.
+  <br /><br />
+  Decided while building §3 and §4, likewise folded in below: the boot wipe <strong>spares
+  <code>manifest.json</code></strong> (§2, §3); the accepted-format list lives <strong>in Go rather than in an
+  rclone <code>--include</code> glob</strong>, and <strong>HEIC left it</strong> (§3); EXIF orientation is
+  applied <strong>to the measurements before the gate and to the pixels after the downscale</strong> (§4); the
+  listing is <strong>streamed rather than buffered</strong>, which is what makes §7's progress count possible
+  (§3); the live folder is read from <strong><code>SIGNIN_PHOTOS_FOLDER_ID</code> until §7 moves it into
+  <code>app_settings</code></strong> (§8); and the manifest refresher is a <strong>second goroutine</strong>
+  beside the reel's (§3).
+  <br /><br />
+  One of those was a hole rather than a preference: <strong>§3's <code>manifest.json</code> and §5's static
+  mount pointed at the same directory</strong>, which would have served the Drive folder's listing to anyone
+  who guessed the filename, on the only unauthenticated screen there is. Tiles moved into a subdirectory; see
+  §2, "The served directory holds tiles and nothing else".
+  <br /><br />
+  Decided while building §5: <code>fileServer</code> <strong>took a prefix parameter</strong> rather than
+  growing a near-copy, and the tiles' <code>Cache-Control</code> <strong>lasts the reel's TTL rather than a
+  year</strong> — see §5. And while building §6: the component keeps a <strong>scoped
+  <code>&lt;style&gt;</code> block</strong>, a short column <strong>repeats itself rather than leaving a
+  gap</strong>, and the two hosts' "makes no network call before sign-in" test became "<strong>makes only the
+  wall's call, and survives it failing</strong>" — see §6.
 </div>
 
 <div class="toc">
@@ -343,20 +370,22 @@ the most core screen there is. A firewall hiccup must produce today's sign-in sc
 <thead><tr><th>Path</th><th></th><th>What</th></tr></thead>
 <tbody>
 <tr><td><code>internal/stockroom/photowall.go</code></td><td><span class="pill new">new</span></td><td>the reel: state machine, topper-upper goroutine, reaper, <code>TakePhotos</code></td></tr>
-<tr><td><code>internal/stockroom/photowall_drive.go</code></td><td><span class="pill new">new</span></td><td>rclone: manifest build/refresh, <code>cat</code> a single file</td></tr>
-<tr><td><code>internal/stockroom/photowall_image.go</code></td><td><span class="pill new">new</span></td><td>decode, EXIF orientation, ratio gate, crop, resize, encode</td></tr>
+<tr><td><code>internal/stockroom/photowall_drive.go</code></td><td><span class="pill new">built</span></td><td>rclone: manifest build/refresh, <code>cat</code> a single file, <code>SetFolder</code>, <code>Status</code></td></tr>
+<tr><td><code>internal/stockroom/photowall_image.go</code></td><td><span class="pill new">built</span></td><td>decode, EXIF orientation, ratio gate, crop, resize, encode</td></tr>
 <tr><td><code>internal/stockroom/photowall_admin.go</code></td><td><span class="pill new">new</span></td><td>link parsing, the Drive probe, <code>SetPhotoWallFolder</code>, the generation counter</td></tr>
 <tr><td><code>internal/stockroom/settings.go</code></td><td><span class="pill new">new</span></td><td>read/write <code>app_settings</code>, <code>.env</code> seeding on first boot, the secret-column list</td></tr>
 <tr><td><code>supabase/migrations/2026…_app_settings.sql</code></td><td><span class="pill new">new</span></td><td>the <code>app_settings</code> table Phase 7 also wants; this feature needs it first</td></tr>
-<tr><td><code>internal/stockroom/photowall_test.go</code></td><td><span class="pill new">new</span></td><td>normalizer + reel lifecycle + link parsing, with rclone stubbed</td></tr>
+<tr><td><code>photowall_test.go</code>, <code>photowall_drive_test.go</code>, <code>photowall_image_test.go</code></td><td><span class="pill new">built</span></td><td>reel lifecycle, manifest and fetch with rclone stubbed, the normalizer end to end. Link parsing joins them with §7</td></tr>
 <tr><td><code>internal/stockroom/backup.go</code></td><td><span class="pill edit">edit</span></td><td>redact the folder ID from the CSV export</td></tr>
-<tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>five new <code>Config</code> fields — the reel's block from §8. The folder ID and the manifest interval
-  arrive with §3 and §7, when something reads them</td></tr>
+<tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>the seven <code>Config</code> fields from §8. The folder ID and the manifest interval arrived with §3, which
+  is the first code to read them</td></tr>
 <tr><td><code>internal/stockroom/db.go</code></td><td><span class="pill edit">edit</span></td><td><code>DB.PhotoWall</code>. The reel hangs off <code>DB</code> the way <code>Sessions</code> does, but is
   <em>assigned</em> rather than built by <code>Open</code> — see §2, "Who builds the reel"</td></tr>
-<tr><td><code>server/photowall.go</code></td><td><span class="pill new">new</span></td><td><code>GET /signin/photos</code> plus the four admin handlers</td></tr>
+<tr><td><code>server/photowall.go</code></td><td><span class="pill new">built</span></td><td><code>GET /signin/photos</code> and <code>photoTileServer</code>. §7's four admin handlers join them here</td></tr>
+<tr><td><code>server/files.go</code></td><td><span class="pill edit">edit</span></td><td><code>fileServer</code> takes the prefix as a parameter, so both static mounts are one function</td></tr>
 <tr><td><code>server/router.go</code></td><td><span class="pill edit">edit</span></td><td>two unauthenticated routes + four admin routes</td></tr>
-<tr><td><code>server/main.go</code></td><td><span class="pill edit">edit</span></td><td>build the reel when the remote is set, warn and carry on when that fails, run it on the signal context</td></tr>
+<tr><td><code>server/main.go</code></td><td><span class="pill edit">edit</span></td><td>build the source and the reel when the remote is set, warn and carry on when either fails, run both on the
+  signal context</td></tr>
 <tr><td><code>packages/ui/src/lib/components/app/photo-wall.svelte</code></td><td><span class="pill new">new</span></td><td>the two columns</td></tr>
 <tr><td><code>packages/ui/src/lib/api/index.ts</code></td><td><span class="pill edit">edit</span></td><td><code>signInPhotos()</code></td></tr>
 <tr><td><code>packages/ui/src/lib/screens/sign-in.svelte</code></td><td><span class="pill edit">edit</span></td><td>render <code>&lt;PhotoWall /&gt;</code> behind the card</td></tr>
@@ -423,7 +452,29 @@ and deleted once shown. Nothing accumulates on disk, which bounds both storage a
   <br /><br />
   The marker is a file rather than, say, requiring the path to end in a known name, because the check has to
   survive an admin choosing their own path on the closet PC — which the config table invites them to do.
+  <br /><br />
+  <strong>Two files survive the wipe: the marker, and §3's <code>manifest.json</code>.</strong> "Wipe the
+  directory" and "build the manifest once per folder, refresh it weekly" were written in different sections and
+  collide in the one directory they share. Taken literally the wipe wins and the manifest is rebuilt on every
+  start — which on a closet PC that gets switched off at night means re-listing tens of thousands of Drive files
+  every morning, for a file whose whole design is that it costs minutes and changes about never. The wipe is
+  about <em>tiles</em>, which are single-use and re-derivable in a second; the manifest is neither, so it is
+  skipped by name. The ownership guard above is unchanged and still refuses a directory holding anything else.
 </div>
+
+<h3>The served directory holds tiles and nothing else</h3>
+<p>The cache directory ends up holding three kinds of thing: the tiles, the ownership marker above, and §3's
+<code>manifest.json</code>. §5 mounts that directory on an unauthenticated route. Those two facts were written
+four sections apart and, put together, are a hole: <code>http.FileServer</code> refuses to <em>enumerate</em> a
+directory — which is the property §0's third barrier leans on — but it serves any file in one quite happily by
+name, and the manifest is a listing of every photograph's path inside the Drive folder. §0's second barrier says
+in as many words that the frontend never receives a folder listing. A flat layout put it one guessed URL away
+from anyone standing at the machine.</p>
+<p>So the tiles live in <code>&lt;dir&gt;/tiles/</code> and that subdirectory is what §5 mounts
+(<code>PhotoWall.TileDir()</code>); the marker and the manifest stay in the root, which is served nowhere. The
+property then holds by construction rather than because §5's handler remembered to exclude a filename — the same
+reasoning as "every exported method is nil-receiver safe" below, and for the same reason: a rule a handler has
+to remember is a rule one of them will eventually forget.</p>
 
 <h3>Who builds the reel</h3>
 <p>The reel hangs off <code>DB</code> beside <code>Sessions</code>, but unlike <code>Sessions</code> it is
@@ -478,8 +529,7 @@ read but never modify or delete anything in the Drive. §0's fourth barrier reco
 <p>The source folder is large — tens of thousands of files is the assumed scale. The way to stop that from
 mattering is to <strong>separate listing from fetching</strong>:</p>
 <pre><code><span class="c"># Built once per folder, then refreshed weekly in the background.</span>
-rclone lsjson <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:'</span> -R --files-only --fast-list --no-modtime \
-  --include "*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,heic,HEIC}"</code></pre>
+rclone lsjson <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:'</span> -R --files-only --fast-list --no-modtime</code></pre>
 <ul>
   <li>Result is written to <code>&lt;dir&gt;/manifest.json</code> — <strong>paths and sizes only</strong>, no image
     data. Even tens of thousands of entries is a few MB of text.</li>
@@ -487,14 +537,59 @@ rclone lsjson <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:'</span> -R --fi
     completes the endpoint returns <code>[]</code> and the sign-in screen is exactly what it is today.</li>
   <li>A refresh writes to a temp file and renames, so a failed or half-finished listing never replaces a
     working manifest — the same staged-write discipline <code>photos.go</code> and <code>backup.go</code> already use.</li>
+  <li><strong>It survives a restart.</strong> The manifest is read back on boot (the wipe spares it, §2) and is
+    only discarded when it names a folder that is no longer the live one — which is the same stale-folder
+    property §7's generation counter gives at runtime, applied to a server that was stopped when the folder
+    changed.</li>
   <li>Random selection is a random index into the manifest. No API call to choose, and uniform across the folder.</li>
 </ul>
+
+<div class="note flag">
+  <strong>Two changes to the command, both made while building it.</strong>
+  <br /><br />
+  <strong>The <code>--include</code> glob is gone; the accepted-format list lives in Go.</strong> It was going to
+  be spelled twice — once as an rclone pattern and once as whatever the decoder actually supports — and two lists
+  that can disagree is one more thing to keep in step than this needs. Filtering in
+  <code>photowall_drive.go</code> also puts the list in the same file as the code that has to honour it, so
+  adding a format is one edit rather than two, and it removes a dependency on rclone's filter syntax whose
+  failure mode is an empty manifest and no error. The cost is a slightly larger listing to parse, which is text
+  that is streamed and discarded either way.
+  <br /><br />
+  <strong>HEIC left the list.</strong> Go has no HEIC decoder — not in the standard library, not in
+  <code>golang.org/x/image</code> — so every <code>.heic</code> in the folder would be a multi-megabyte download
+  that can only ever be thrown away, burning a filler slot and a slice of the same Drive quota the nightly
+  backup draws on. Rejecting it from the listing costs a string comparison. JPEG, PNG and WebP are what is left,
+  and WebP comes from <code>golang.org/x/image/webp</code>, which is the module already pulled in for the
+  resampler rather than a second dependency.
+</div>
+
+<h3>Listing is streamed, and that is what §7 reads</h3>
+<p>The listing is decoded from rclone's stdout as it arrives rather than buffered and parsed at the end. The
+memory saving is real but minor; the reason is §7. A large folder takes minutes, the wall is empty for all of
+them, and an empty wall with no explanation is indistinguishable from a broken feature — so the admin screen has
+to be able to say <code>rebuilding — 12,400 files listed so far</code>. A running count only exists if something
+is counting while the process runs, and retrofitting that into a buffered parse would mean writing the listing
+twice.</p>
+
+<h3>Two goroutines, not one</h3>
+<p>§2 says one goroutine does both of the reel's jobs, so the filler and the reaper never argue over a file being
+written as it is deleted. The manifest refresher is a <em>second</em> goroutine, on the source, and the rule is
+intact: it is the only writer of a different file, on a timescale of weeks rather than seconds, and it touches no
+tile. <code>server/main.go</code> starts the reel first — <code>NewPhotoWall</code> is what creates and adopts
+the directory the source then reads its manifest out of.</p>
 
 <h3>Fetching one photo</h3>
 <pre><code>rclone cat <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:&lt;path&gt;'</span> | <span class="c">→ stdin → normalizer → tile</span></code></pre>
 <p><code>cat</code> streams to stdout, so the original is piped straight into the decoder and
 <strong>the full-resolution file never touches the disk</strong>. Guard it with a size ceiling from the manifest
-(skip anything over ~40 MB) and a context timeout, so one pathological RAW doesn't stall the filler.</p>
+(skip anything over ~40 MB) and a context timeout, so one pathological RAW doesn't stall the filler. The ceiling
+is applied when the manifest is <em>built</em>, against the size rclone already reported, so an oversized
+original costs a line of JSON rather than a download that is then thrown away.</p>
+<p>One call to <code>NextPhoto</code> tries up to four photographs before giving up. §2's <code>PhotoSource</code>
+contract already put "reject the unusable ones and retry past them" on this side of the seam, and a real folder
+legitimately holds portraits, panoramas and video that §4's gate turns away; an error out of <code>NextPhoto</code>
+therefore means "nothing usable right now", which the reel answers by backing off rather than by diagnosing.
+Bounded at four so a folder of nothing but <code>.mov</code> files returns instead of downloading itself.</p>
 
 <hr />
 
@@ -516,6 +611,19 @@ JPEG scaled down in CSS is still decoded at full size into memory, sixteen times
   6 decodes as landscape and must be rotated to portrait. Get the order wrong and a portrait shot passes the
   3:2 landscape gate and then renders sideways. Read the orientation tag, apply the rotation, <em>then</em>
   measure the ratio.</p>
+  <p class="sub"><strong>As built, the tag is split across the pipeline: the measurements are oriented here,
+  the pixels at the end.</strong> Taken literally, "apply the rotation, then measure" means turning a
+  twelve-megapixel image — a full second pass and about 48 MB — before knowing whether the file will be used at
+  all, and most of the ones needing a rotation are exactly the ones step 3 is about to reject. So step 2 swaps
+  width and height for orientations 5–8 and step 3 gates on those; the actual rotation happens after the
+  downscale, on the finished 900×600 tile, where it costs half a megabyte. The property the step exists to
+  protect is untouched — the gate never sees a stored shape — and the regression test asserts it from the
+  outside: the same bytes are accepted untagged and rejected tagged 6.</p>
+  <p class="sub">The tag is read by about a hundred lines of hand-rolled EXIF in
+  <code>photowall_image.go</code> rather than a library, because step 4 names <code>golang.org/x/image/draw</code>
+  as this feature's only new dependency and all it needs from EXIF is one 16-bit number. It fails <em>soft</em>
+  at every step: anything it cannot parse reads as "upright". A camera whose EXIF writer it does not understand
+  should cost one sideways tile in forty, never a wall that quietly stays empty.</p>
 </li>
 <li>
   <h3>Gate on aspect ratio</h3>
@@ -527,6 +635,9 @@ JPEG scaled down in CSS is still decoded at full size into memory, sixteen times
   <h3>Centre-crop to exactly 3:2, then downscale to 900×600</h3>
   <p>Go's stdlib has no resampler; <code>golang.org/x/image/draw</code> with <code>CatmullRom</code> does it and
   is the only new dependency. Crop before scaling, so the resample runs over the smallest possible pixel count.</p>
+  <p class="sub">The crop is taken in <em>stored</em> coordinates, which is what lets the rotation wait until the
+  end: a centre crop is centred under all eight EXIF transforms, so the rectangle is the displayed crop's, with
+  its sides swapped back when the orientation swaps axes.</p>
 </li>
 <li>
   <h3>Re-encode as JPEG, quality ~82, and strip metadata</h3>
@@ -539,6 +650,10 @@ JPEG scaled down in CSS is still decoded at full size into memory, sixteen times
   <p>A truncated download, a HEIC that Go can't decode, a CMYK JPEG — log at debug, discard, pick another
   manifest entry. A cap on consecutive failures (say 25) backs the filler off so a folder full of
   <code>.mov</code> files doesn't spin the CPU.</p>
+  <p class="sub">A rejection is a routine answer, not a fault, so it is a distinguishable one: everything this
+  step turns away is wrapped in one sentinel, which is how the source tells "this file is wrong, try another"
+  apart from "the download broke". HEIC specifically is now kept out of the manifest rather than discarded here
+  (§3), since it can never decode and is never small.</p>
 </li>
 </ol>
 
@@ -550,7 +665,15 @@ sign-in screen exists precisely because nobody is signed in yet.</p>
 <pre><code><span class="c">// Sign-in photo wall. No session: this is what the sign-in screen renders</span>
 <span class="c">// behind the card, and there is no session to require yet.</span>
 mux.HandleFunc(<span class="k">"GET /signin/photos"</span>, d.handleSignInPhotos)
-mux.Handle(<span class="k">"GET /signin-photos/"</span>, http.StripPrefix(<span class="k">"/signin-photos/"</span>, fileServer(dir)))</code></pre>
+<span class="c">// TileDir() inside, not the cache directory: the marker and §3's manifest</span>
+<span class="c">// live in the root and must never be served. Nil-safe, so "the wall is off"</span>
+<span class="c">// -- the common case -- needs no branch here.</span>
+mux.Handle(<span class="k">"GET "</span>+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))</code></pre>
+<p class="sub"><code>fileServer</code> hardcoded <code>http.StripPrefix("/files/")</code> inside itself, so it
+<strong>took a prefix parameter</strong> rather than being copied. The alternative was a near-duplicate of the
+one function in this server that knows "serve a directory, never enumerate it" — and the enumeration guard is
+load-bearing for both callers (<code>/files/</code> must not list the roster, <code>/signin-photos/</code> must
+not list the wall), so two copies of it is two places for it to quietly stop being true.</p>
 
 <div class="note good">
   <strong>A separate directory, not <code>uploads/</code>.</strong> The Phase 7 design mirrors <code>uploads/</code> as a growing, never-purged photo backup (CLAUDE.md
@@ -573,11 +696,28 @@ mux.Handle(<span class="k">"GET /signin-photos/"</span>, http.StripPrefix(<span 
     <code>served</code> with <code>expiresAt = now + ttl</code>, return the URLs. Two simultaneous requests can
     never be handed the same tile.</li>
   <li><code>Cache-Control: no-store</code> on the JSON — a cached list points at files that are already gone.</li>
-  <li>The tiles themselves get a long <code>max-age</code>: names are random and single-use, so a tile URL is
-    immutable for its whole life.</li>
+  <li>The tiles themselves are <code>immutable</code> — names are random and single-use, so the bytes at a tile
+    URL can never change. <strong>As built the <code>max-age</code> is the reel's TTL, not a year.</strong> The
+    server <em>deletes</em> the file at the end of that window, and a cache entry outliving it would leave the
+    photograph in the browser's disk cache long after "delete after use" (§2) had supposedly taken effect — for
+    no gain, since the component fetches each URL exactly once and is handed a fresh batch on the next mount.
+    <code>private</code>, because the machine is shared and there is no intermediary cache on loopback for
+    <code>public</code> to be about.</li>
   <li>CORS needs nothing new. <code>withCORS</code> wraps the whole mux, so the Vite and Wails origins are
     already covered.</li>
+  <li><code>photos</code> is always an array, never <code>null</code>. Go marshals a nil slice as
+    <code>null</code>, which would make the component guard against a shape that means exactly what
+    <code>[]</code> means.</li>
 </ul>
+
+<div class="note good">
+  <strong>The test that matters here is the round trip, not either half.</strong> The endpoint and the mount can
+  each be correct while disagreeing about what a tile URL looks like, and that failure is invisible until the
+  wall is silently empty in a browser. So the suite asks the endpoint for a batch and then fetches every URL it
+  named. The other one worth having is the negative: <code>manifest.json</code>, the marker, an escaped
+  <code>..%2F</code> and the bare directory are all asserted unreachable through the mount — verified to fail if
+  the cache root is served instead.
+</div>
 
 <hr />
 
@@ -621,6 +761,38 @@ It is the preview at the top of this page. The non-negotiables, each tied to som
 <p>Layout note: the card stays in exactly the position it occupies today. The columns are absolutely positioned
 against the screen, so adding or removing them does not move the input by a pixel — which matters, because
 someone scans at that box a hundred times a week and muscle memory is real.</p>
+<p class="sub">Measured rather than assumed: the input sits at the same offset and the same width at 1512px with
+the wall up and at 1200px with it shed. The only change the screen asked for is <code>relative</code> on its
+<code>&lt;main&gt;</code>, which moves nothing.</p>
+
+<h3>Three things settled while building it</h3>
+
+<p><strong>A scoped <code>&lt;style&gt;</code> block, not utilities.</strong> Three of the rules above have no
+good Tailwind spelling — two <code>@keyframes</code>, the edge mask, and the reduced-motion override — and none
+of them belongs in <code>tokens.css</code>, which owns colours, radii, shadows and durations and is worth
+keeping to that list. A marquee is not a design token. Svelte scopes the block to the component, and it is the
+first one in the package, so it is recorded here rather than left to look like an oversight.</p>
+
+<p><strong>A short column repeats itself rather than leaving a gap.</strong> §2's burst protection says the
+endpoint returns however many tiles are ready, possibly zero, and the frontend "repeats a short list to fill the
+column". So a column pads itself to six tiles before the list is doubled for the loop. This is not a theoretical
+path — it fired on the very first browser run: a <code>curl</code> had taken sixteen tiles seconds earlier, the
+page was handed the twelve left over, and both columns filled anyway.</p>
+
+<p><strong>A tile that 404s is hidden with <code>visibility</code>, not <code>display</code>.</strong> §9 asks
+only that a broken tile never shows a broken-image icon. Which property does the hiding turns out to matter: the
+marquee loops by translating exactly −50% of the strip's height, so a tile removed from the flow would shorten
+the strip and put the loop point out of register, producing a visible jump once a cycle. Keeping the slot keeps
+the geometry true regardless.</p>
+
+<div class="note flag">
+  <strong>This changes a property the two hosts had a test for.</strong> Phase 6 left each host asserting that
+  the app "does not reach the network before anyone signs in", and the wall's fetch breaks that by design. The
+  assertion was rewritten rather than deleted, because what it was protecting is still worth protecting — it now
+  reads <em>the only call the sign-in screen makes is the photo wall's, and the field still renders when that
+  call fails</em>, which is a stricter statement of §6's "never block first paint" than the original was. In the
+  test the fetch rejects, exactly as it does on a machine with no server.
+</div>
 
 <hr />
 
@@ -735,12 +907,15 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <thead><tr><th>Var</th><th>Purpose</th><th>Default</th></tr></thead>
 <tbody>
 <tr><td><code>SIGNIN_PHOTOS_REMOTE</code></td><td>rclone remote for the photo folder. Blank disables the wall entirely.</td><td>(none)</td></tr>
-<tr><td><code>SIGNIN_PHOTOS_FOLDER_ID</code></td><td>first-boot default for the live folder; ignored once <code>app_settings</code> holds one. <strong>Redacted from the backup export</strong> (§7)</td><td>(none)</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_FOLDER_ID</code></td><td>first-boot default for the live folder; ignored once <code>app_settings</code> holds one. <strong>Redacted from the backup export</strong> (§7).
+  <em>Until §7's column exists this is simply where the folder comes from</em> — unset, the wall is configured and stays
+  empty, which is a normal state and not an error</td><td>(none)</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot, so it must be a directory of its own — one holding files the server did not write is refused and the feature stays off (§2)</td><td><code>./.cache/signin-photos</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_COUNT</code></td><td>ready tiles to keep buffered</td><td><code>48</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_BATCH</code></td><td>tiles handed out per request</td><td><code>16</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_TTL_MINUTES</code></td><td>how long a served tile survives before deletion</td><td><code>15</code></td></tr>
-<tr><td><code>SIGNIN_PHOTOS_MANIFEST_HOURS</code></td><td>manifest refresh interval</td><td><code>168</code> (weekly)</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_MANIFEST_HOURS</code></td><td>manifest refresh interval. A <em>failed</em> listing is retried in five minutes instead, so a folder that was
+  unreachable at boot because the uplink was not up yet does not wait a week</td><td><code>168</code> (weekly)</td></tr>
 </tbody>
 </table>
 <p class="sub">Add <code>.cache/</code> to <code>.gitignore</code> alongside <code>uploads/</code>.</p>
@@ -755,7 +930,8 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <tr><td><code>SIGNIN_PHOTOS_REMOTE</code> unset</td><td>No goroutine starts. Endpoint returns <code>[]</code>. Today's sign-in screen.</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_DIR</code> names a directory holding files the server did not write</td><td>Refused at startup, nothing deleted, one warning naming the variable, feature off. The server starts normally (§2).</td></tr>
 <tr><td>Cache directory unwritable (permissions, missing parent, full disk at boot)</td><td>Same: warning, feature off, API up. Nothing about the wall is ever fatal to startup.</td></tr>
-<tr><td><code>rclone</code> not installed</td><td>Logged once at startup as a warning, feature disabled. Never fatal — same posture as the failsafe admin (CLAUDE.md §7).</td></tr>
+<tr><td><code>rclone</code> not installed</td><td>Logged once at startup as a warning; the reel starts with no source, so it idles empty and hands out nothing. Never fatal — same posture as the failsafe admin (CLAUDE.md §7).</td></tr>
+<tr><td>No Drive folder chosen yet</td><td>Normal, not an error: nothing is listed, the endpoint returns <code>[]</code>, and one line at startup says the wall will stay empty.</td></tr>
 <tr><td>No internet</td><td>Manifest refresh and fetches fail, logged at debug with backoff. The reel drains, the endpoint returns <code>[]</code>, the wall disappears.</td></tr>
 <tr><td>Manifest still building</td><td><code>[]</code> until the first listing completes.</td></tr>
 <tr><td>Folder empty / all files rejected</td><td>Filler backs off after 25 consecutive rejections and logs a single explanatory line.</td></tr>
@@ -779,6 +955,14 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <h2 id="testing"><span class="num">10</span>Testing</h2>
 <p>Consistent with the suite's "one happy path and one gate per module" shape (CLAUDE.md §13). rclone is stubbed
 behind a small interface so none of this needs a network or a Google account.</p>
+<p class="sub">Everything down to "backoff" is written and passing, in <code>photowall_test.go</code>,
+<code>photowall_drive_test.go</code> and <code>photowall_image_test.go</code> — thirty-one tests, none of which
+touch a network, rclone or Postgres. The endpoint's five live in <code>server/photowall_test.go</code>: the
+empty answer with no wall, reachability with no session or cookie, the batch-then-fetch round trip, the manifest
+and the marker unreachable through the mount, and <code>/files/</code> still working after
+<code>fileServer</code> grew its prefix. What is left belongs to sections that are not built — link parsing, the
+probe, the ID never leaving the server, switch-invalidates and preview-does-not-consume are §7's, and the manual
+pass on the real Drive waits on the folder existing.</p>
 <ul>
   <li><strong>Normalizer, happy path</strong> — a 3000×2000 JPEG comes out exactly 900×600.</li>
   <li><strong>Ratio gate</strong> — a 1:1 and a 21:9 are rejected; a 4:3 is accepted and cropped.</li>
@@ -832,17 +1016,25 @@ returns real URLs.</p>
   <code>root_folder_id</code> left blank (§3); confirm <code>rclone lsjson 'gdrive,root_folder_id=&lt;ID&gt;:' -R
   --files-only</code> lists the intended folder. The folder's sharing setting is not checked here or anywhere
   else — §0 closed that question.</p></li>
-<li><h3>Manifest build + refresh</h3><p>Background, staged write, weekly timer. Verify: <code>manifest.json</code>
-  appears with a plausible entry count; time the first run.</p></li>
-<li><h3>Normalizer</h3><p>Pure function, <code>io.Reader</code> in, <code>[]byte</code> out. All six image tests
-  land here. Easiest piece to get right in isolation and the easiest to get subtly wrong in situ.</p></li>
+<li><h3>Manifest build + refresh <span class="pill new">built</span></h3><p>Background, staged write, weekly timer,
+  streamed listing with a running count, reload after a restart, and <code>SetFolder</code> so §7's switch has
+  something to call. rclone sits behind two function fields, so the tests need neither the binary nor an account.
+  Still waiting on a real Drive folder: <code>manifest.json</code> appearing with a plausible entry count, and the
+  time of the first run, are step 2's verification and cannot be faked.</p></li>
+<li><h3>Normalizer <span class="pill new">built</span></h3><p>Pure function, <code>io.Reader</code> in,
+  <code>[]byte</code> out. All the image tests land here, including the one that matters — the same bytes accepted
+  untagged and rejected tagged orientation 6. Easiest piece to get right in isolation and the easiest to get subtly
+  wrong in situ.</p></li>
 <li><h3>The reel <span class="pill new">built</span></h3><p>State machine, topper-upper, reaper,
   <code>TakePhotos</code>, and the generation counter — brought forward from §7 because the property it protects
   (a photograph from a replaced folder surfacing minutes later) cannot be retrofitted into the fill path and is
   unreproducible once it ships. Covered by the reel tests; watching the directory fill to 48 and hold steady
   waits on a real source in step 4.</p></li>
-<li><h3>Endpoint + static mount</h3><p>Two router lines and a handler. Verify with
-  <code>curl 127.0.0.1:8080/signin/photos</code> — no token — then <code>curl -O</code> a returned URL and open it.</p></li>
+<li><h3>Endpoint + static mount <span class="pill new">built</span></h3><p>Two router lines and a handler, in
+  <code>server/photowall.go</code>. Verified with <code>curl 127.0.0.1:8080/signin/photos</code> — no token —
+  which answers <code>{"photos":[],"ttl_seconds":900}</code> and <code>Cache-Control: no-store</code> with the
+  wall off, and by the round trip in the suite with it on. Opening a returned URL by hand waits on a real Drive
+  folder.</p></li>
 <li><h3><code>app_settings</code> + settings reader + redaction</h3><p>Migration, <code>settings.go</code>,
   <code>.env</code> seeding on first boot, and the folder ID added to the export's secret list <em>in the same
   commit</em>. Verify: change the row in Studio, restart, confirm the new value is live and <code>.env</code> is
@@ -850,8 +1042,11 @@ returns real URLs.</p>
 <li><h3>Admin endpoints</h3><p>Link parsing, the Drive probe, the switch, the generation counter, the four routes
   in §7. Verify with <code>curl</code> and an admin token: paste a good link and watch the cache directory empty
   and refill from the new folder; paste a bad one and confirm nothing changed.</p></li>
-<li><h3>The Svelte component</h3><p><code>photo-wall.svelte</code> + <code>signInPhotos()</code> + three lines in
-  <code>sign-in.svelte</code>. Check the input hasn't moved and still holds focus after a click anywhere on a photo.</p></li>
+<li><h3>The Svelte component <span class="pill new">built</span></h3><p><code>photo-wall.svelte</code> +
+  <code>signInPhotos()</code> + two lines in <code>sign-in.svelte</code>. Verified in a browser: the input is at
+  the same offset with the wall up and shed, it still holds focus with the columns running, and the wall's
+  container is <code>pointer-events: none</code> so there is nothing on a photo to click. It contributes no node
+  to the accessibility tree at all.</p></li>
 <li><h3>The admin tab</h3><p><code>admin/google-drive.svelte</code>, the sixth sidebar item, the paste field,
   the status block and the preview strip. Check the field never arrives pre-filled and that a failed probe leaves
   the previous folder running.</p></li>

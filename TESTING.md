@@ -36,7 +36,7 @@ Go's database-backed tests skip themselves when Postgres is unreachable, so `go 
 
 The rule for the Go suites is one happy path per module plus, where the module has one, the admin-only or forbidden gate. The gate tests exist because every permission rule is enforced inside `internal/stockroom`, not the router, and a refactor there is the most likely way to open one without noticing.
 
-### `internal/stockroom` (65 tests)
+### `internal/stockroom` (85 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -53,6 +53,8 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `backup_status_test.go` | 4 | staleness is computed over the targets that are supposed to be running; the no-failsafe-admin warning fires; the state file and log are written; dated folders are pruned |
 | `photos_backup_test.go` | 4 | the mirror copies only what changed; a missing `uploads/` is a no-op rather than an error; a generation rolls over at the retention boundary; the live generation cannot be deleted |
 | `photowall_test.go` | 11 | the wall is wiped at boot and adopts only a directory it owns, refusing a foreign one; the fill/take/invalidate lifecycle; a take is atomic and answers when empty; filling backs off; a stale generation is discarded; tile names give nothing away; the run loop stops with its context |
+| `photowall_image_test.go` | 7 | a 3000×2000 JPEG comes out exactly 900×600; the ratio gate accepts 4:3 and 16:9 and turns away squares, panoramas and portraits; **EXIF orientation is applied before the gate**, so the same bytes are accepted untagged and rejected tagged orientation 6, and a stored portrait tagged 6 comes out actually turned; GPS and every other tag are gone from the tile; rubbish is rejected as unusable rather than as a fault; an unreadable orientation tag reads as upright rather than failing |
+| `photowall_drive_test.go` | 13 | the manifest keeps only what the wall can show, at the size ceiling, and is written through; a failed listing leaves the working manifest alone and backs off; the manifest survives a restart and is dropped when it names a folder that is no longer live; `NextPhoto` retries past unusable files, gives up after four, and says *why* it has nothing; `SetFolder` discards the manifest and asks for a rebuild; a listing that lands after a folder switch is thrown away; an empty folder is reported as a sentence; every rclone command names its folder; the refresher stops with its context; the listing counts as it streams; **the manifest is not in the directory the tile route serves**, because it is a listing of the Drive folder and `http.FileServer` serves any file in a directory by name |
 | `failsafe_test.go` | 1 | the failsafe admin is created, then updated in place |
 | `sessions_test.go` | 1 | create and get |
 | `config_test.go` | 3 | defaults, including the 10-minute idle timeout; the photo-wall defaults; a bad photo-wall number is refused rather than silently defaulted |
@@ -63,7 +65,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 `main_test.go` lowers the bcrypt cost for the whole package. `testdb_test.go` holds the fixtures: a test profile, a test asset, an open custody row, all deleted at cleanup.
 
-### `server` (11 tests)
+### `server` (16 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -73,6 +75,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `custody_test.go` | 1 | `POST /checkout` round trip |
 | `admin_test.go` | 2 | the asset admin routes over HTTP; every admin route answers 403 to a student |
 | `backup_test.go` | 3 | every backup, settings, restore and photo route answers 403 to a student; the settings and status routes over HTTP; **back up and then restore over HTTP**, the same path the admin panel takes |
+| `photowall_test.go` | 5 | the sign-in photo wall's two routes: `GET /signin/photos` answers **200 with `[]`** when no wall was built, which is the common case and not an error; it is reachable with no session and no cookie, the only route on the server that is; the batch-then-fetch round trip, so the endpoint's URLs and the static mount's paths cannot disagree unnoticed; **`manifest.json`, the marker, an escaped `..%2F` and the bare directory are all unreachable** through the tile route, because the manifest is a listing of the Drive folder and `http.FileServer` serves any named file in a directory; `/files/` still works after `fileServer` took a prefix parameter |
 
 ### Database (4 pgTAP files)
 
@@ -88,7 +91,14 @@ The rule for the Go suites is one happy path per module plus, where the module h
 Replaced wholesale in Phase 6, as planned: `db.ts` and the supabase-js admin screen it covered are
 deleted, and the 92 Vitest cases over them went with the code. What is left is two smoke tests per host
 (4 total), each proving that `@stockroom/ui` resolves and compiles under *that* app's Vite config and
-reaches the sign-in screen without touching the network.
+reaches the sign-in screen.
+
+The second of each pair used to assert the app **made no request at all** before anyone signed in. The
+sign-in photo wall makes one by design (`docs/design/signin-photo-wall.html` §6), so the assertion was
+rewritten rather than dropped: the only call the sign-in screen makes is the wall's batch, *and* the field
+still renders when that call fails — which it does in the test, exactly as it does on a machine with no
+server. That is a stricter reading of §6's "never block first paint" than the original was, and it keeps
+the property the original was protecting.
 
 That is deliberately thin, and the reason is the same one that put every screen in one package: the two
 hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
@@ -134,6 +144,15 @@ Everything below existed on 2026-09-12 and was deleted, not disabled. `git log -
 **Edge and refusal cases, per module.** Unknown student number, bad credentials, blank hash, resolve reflecting a profile change, `Me` reporting overdue. User conflicts, update, delete refusals, sessions dropped on reset and delete. Roster: malformed file, blank photo keeps the old one, photo extensions, absolute paths, per-line parse errors, missing `UPLOADS_DIR`, a photo path escaping the uploads dir. Assets: create rejects, update leaves custody alone, delete and status refusals, photo upload and replacement. Categories: update (rename, move, renumber, depth and cycle refusals), delete refusals, edits showing up in the tree. Custody: cart deduplication, admin choosing a custodian, unknown custodian, due-date bounds, the overdue block and its admin override, the whole cart failing together, unknown asset, limited session refusals, check-in without a note, twice, on an unknown asset, check-in and scan following the open row rather than the status column, scan opening detail, unknown serial, the list contents, both history reads. Backup without a `BACKUP_DIR`. Failsafe rejecting bad config and running without any. Config: env overrides, `.env` discovery, precedence, bad idle minutes. `Open` rejecting a bad URL or an unreachable database.
 
 **Race tests.** `sessions_concurrent_test.go` (concurrent create, mixed operations, one-way upgrade) and the photo lock test that ran two uploads of the same photo together. CI ran the Go suite under `-race` for these and no longer does, so the run is cheaper. The bcrypt cost knob in `main_test.go` still applies and still matters. Nothing now exercises the `SessionStore` mutex or the `photoStore` lock under contention, so a data race there would reach a release; bring `-race` back with these tests.
+
+**The photo wall's component.** `photo-wall.svelte` has no test of its own. Its rules were checked in a
+browser — the columns absent below 1280px, the input at the same pixel either way, `pointer-events: none`, no
+node in the accessibility tree, the marquee moving at the 13.8 px/s its 110s cycle implies — and the host
+smoke tests cover the one thing that could break silently in CI, which is the fetch. What is genuinely
+untested is the strip builder: it pads a short column and then doubles it, and the doubling is what makes the
+marquee seam invisible, so an off-by-one there is a visible jump once a cycle that nothing would catch. It is
+a pure function and wants four cases; that needs `@testing-library/svelte` in `packages/ui`, which has only
+logic tests today, or the function lifted out of the component.
 
 **Sessions.** The non-race `sessions_test.go` cases: idle timeout, zero idle never expiring, `Get` returning a copy, unique tokens, the sweep on create, upgrade then delete, `DeleteForProfile`. Also `TestSetUserPassword` and the sessions it drops.
 
