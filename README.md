@@ -277,8 +277,15 @@ Copy `.env.example` to `.env` at the repository root.
 | `ADMIN_STUDENT_NUMBER` | Failsafe admin account; digits only | *(none)* |
 | `ADMIN_PASSWORD` | Failsafe admin password; 8–72 characters | *(none)* |
 | `UPLOADS_DIR` | Where profile and asset photos are copied | `./uploads` |
-| `BACKUP_DIR` | Local CSV export target | *(none)* |
+| `BACKUP_DIR` | **First-boot seed only** for the backup folder | *(none)* |
+| `PHOTO_BACKUP_DIR` | First-boot seed only for the photo mirror folder | *(none)* |
+| `RCLONE_REMOTE` | First-boot seed only for the Google Drive remote name | *(none)* |
 | `SESSION_IDLE_MINUTES` | Idle timeout, measured from the last interaction | `10` |
+
+**The three backup variables are a seed, not a setting.** They fill the `app_settings` row the
+first time the server starts against a fresh database, and are ignored on every start after that.
+Backup configuration lives in Admin → Settings so nobody has to edit a file; if `.env` won on every
+boot, a value an admin typed would silently revert overnight.
 
 **The failsafe admin is best-effort by design.** If those two values are blank, malformed or
 rejected, the server logs a warning and starts anyway. A typo in `.env` must never take the whole
@@ -496,26 +503,60 @@ Full table with request and response shapes: [`CLAUDE.md`](CLAUDE.md) §8.1.
 
 ## Backup and restore
 
-**What works today.** "Backup Now" in the admin panel exports every table to
-`BACKUP_DIR/<yyyy-mm-dd>/<table>.csv` through `COPY … TO STDOUT`, in a single repeatable-read
-snapshot, staged and renamed into place. It is local-only and manual.
+Stockroom backs itself up. A goroutine inside the API server fires at the configured hour, and
+also runs immediately on boot when the last successful run is stale — which is the whole of "back
+up first thing when the machine is available" on a closet PC that gets unplugged. There is no Task
+Scheduler entry and no launchd plist.
 
-> [!WARNING]
-> Those CSVs **cannot be restored yet.** Reloading them as they stand would replay in foreign-key
-> violating alphabetical order, fire the asset status trigger on every row, and lose the asset-tag
-> sequence position. Treat the current export as a data escape hatch, not as disaster recovery.
+**[`docs/BACKUP-SETUP.md`](docs/BACKUP-SETUP.md) is the click-by-click setup**, written for
+whoever is standing at the machine. The short version:
 
-**What is designed and not yet built** ([`docs/design/backup.md`](docs/design/backup.md)): a
-scheduler goroutine inside the API server, nightly CSV plus a restorable zip, two selectable
-off-site targets — Google Drive via `rclone` and GitHub via its REST API, both at once when both
-are configured — a local generational photo mirror, staleness warnings surfaced at sign-in, and a
-restore that is a feature of the admin panel rather than a shell script. A `cmd/restore` CLI is
-specified as the guaranteed floor beneath it, because the panel route depends on an admin account
-existing and the failsafe admin is deliberately optional.
+| Where | What goes there | Needs |
+|---|---|---|
+| This machine | A dated folder plus a restorable zip, pruned after `keep_days` | A folder path |
+| Google Drive | The same folders, pushed with `rclone copy` | `rclone` installed, one Google sign-in |
+| GitHub | One `backup/` path overwritten nightly, so git history *is* the backup list | A private repo and a fine-grained token |
 
-The restore validates before it commits: foreign keys re-checked by anti-join, row counts against
-the manifest, per-file checksums, and every sequence proven to resume above its column's maximum.
-`setval` is not transactional, so sequences are written only after every other check has passed.
+Both off-site targets run when both are configured, and a push that fails never fails the run: the
+restorable archive is already on disk, and one target being blocked says nothing about the other.
+
+**Every setting lives in the database, not in a file.** Admin → Settings covers folders, the
+schedule, retention, both targets and optional archive encryption. `.env` seeds those columns the
+first time the server starts against a fresh database and is ignored afterwards, so a value an
+admin typed is never out-voted by a restart.
+
+**Restoring is a feature, not a script.** Admin → Backup → pick a date from any target, or upload a
+zip, then type `RESTORE`. It validates before it commits — per-file SHA-256 checksums before the
+transaction even opens, then row counts against the manifest, then every foreign key re-checked by
+anti-join, then every sequence proven to resume above its column's maximum. A restore that fails
+leaves the database exactly as it was. `setval` is not transactional, so sequences are written only
+after every other check has passed, and the prior values are replayed if the commit still fails.
+
+`cmd/restore` is the guaranteed floor beneath all of that: same `RestoreFromZip`, no session
+required, for the case the panel cannot cover — a wiped database with no account left to sign in
+as. Every backup zip carries a `RESTORE.md` explaining it.
+
+```
+go run ./cmd/restore --list
+go run ./cmd/restore --yes path/to/backup-2026-09-16.zip
+```
+
+> [!IMPORTANT]
+> Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env`. The failsafe admin is best-effort by
+> design, so without them a restored-from-empty database has nobody to sign in as and the admin
+> panel — the documented restore route — is unreachable exactly when it is needed. The backup
+> screen warns while this is unset.
+
+**Nothing fails quietly.** A backup that has not succeeded in `stale_hours` puts a line on
+everyone's screen at sign-in: admins are told where to go, students are told which admin to
+mention it to, by name only. Admin → Backup carries the same warnings, a per-target table with the
+exact error from the last failed attempt, and the tail of `backup.log`.
+
+**Photos are mirrored locally only** — one live folder updated in place, rolling to a frozen
+generation every `keep_days`, never deleted automatically. That means the mirror only grows, so a
+free-space threshold and a generation count warn on the same surfaces staleness uses, and deleting
+a generation is a button a person presses. The accepted cost is that a dead drive loses `uploads/`
+and its mirror together ([`docs/design/backup.md`](docs/design/backup.md) §H).
 
 ---
 

@@ -30,11 +30,13 @@ directory, and the failure mode is silent — components render but their state 
 
 Go's database-backed tests skip themselves when Postgres is unreachable, so `go test ./...` still runs on a machine without Docker. `scripts/dev.sh test` and CI set `STOCKROOM_REQUIRE_DB=1` so a skip can never pass for a success.
 
+**`-p 1` is not optional.** `go test ./...` runs packages concurrently, and `internal/stockroom` and `server` talk to the same live Postgres. That was merely untidy until the restore tests, whose whole job is to truncate every table and load a backup over the top: run alongside anything else, a neighbouring package's rows disappear mid-test and the failure surfaces on whichever test happened to be running rather than on the one that caused it. `dev.sh test`, `dev.ps1` and CI all pass it; a bare `go test ./...` is the flaky way to run this suite.
+
 ## What runs
 
 The rule for the Go suites is one happy path per module plus, where the module has one, the admin-only or forbidden gate. The gate tests exist because every permission rule is enforced inside `internal/stockroom`, not the router, and a refactor there is the most likely way to open one without noticing.
 
-### `internal/stockroom` (24 tests)
+### `internal/stockroom` (65 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -44,7 +46,12 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `assets_admin_test.go` | 2 | every asset write refuses a student; `CreateAsset` |
 | `categories_admin_test.go` | 2 | every category write refuses a student; `CreateCategory` |
 | `custody_test.go` | 4 | checkout to self; a student cannot check out to someone else; scanning a checked-out item returns it; the custody lists refuse a student |
-| `backup_test.go` | 2 | backup refuses a student; the export writes every table with a header and a second run replaces the day's folder |
+| `backup_test.go` | 5 | backup refuses a student; a run writes a restorable archive; `github_token` is redacted out of the export; a second concurrent run is a **skip**, not an error; no folder configured is `ErrNotConfigured` |
+| `archive_test.go` | 3 | the encryption round-trip; a wrong passphrase is refused; an encrypted archive asks for one |
+| `restore_test.go` | 8 | restore refuses a student; refuses without the typed confirmation; **a real truncate-and-reload round-trip against the live database**; a damaged archive is caught by its checksum; an archive whose rows point at absent parents is caught by the FK anti-join; `LocalCLIActor` satisfies `RequireAdmin` and `Resolve` never sets `trustedCLI`; `last_value`/`is_called` survive a round-trip (including the never-read, `is_called = false` case, where replaying with `setval`'s default would burn the first value); a descending or cycling sequence is refused outright rather than checked by a rule never designed for one |
+| `settings_test.go` | 5 | settings are admin-only; a secret never comes back over the API; each bound is a readable message rather than a Postgres constraint name; a target cannot be enabled half-configured; `EnsureSettings` seeds **only** null columns, so `.env` cannot out-vote the panel on a restart |
+| `backup_status_test.go` | 4 | staleness is computed over the targets that are supposed to be running; the no-failsafe-admin warning fires; the state file and log are written; dated folders are pruned |
+| `photos_backup_test.go` | 4 | the mirror copies only what changed; a missing `uploads/` is a no-op rather than an error; a generation rolls over at the retention boundary; the live generation cannot be deleted |
 | `failsafe_test.go` | 1 | the failsafe admin is created, then updated in place |
 | `sessions_test.go` | 1 | create and get |
 | `config_test.go` | 1 | defaults, including the 10-minute idle timeout |
@@ -55,7 +62,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 `main_test.go` lowers the bcrypt cost for the whole package. `testdb_test.go` holds the fixtures: a test profile, a test asset, an open custody row, all deleted at cleanup.
 
-### `server` (6 tests)
+### `server` (11 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -64,14 +71,16 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `auth_test.go` | 1 | scan in with no password, be refused on a full-only route, set a password, be a normal session |
 | `custody_test.go` | 1 | `POST /checkout` round trip |
 | `admin_test.go` | 2 | the asset admin routes over HTTP; every admin route answers 403 to a student |
+| `backup_test.go` | 3 | every backup, settings, restore and photo route answers 403 to a student; the settings and status routes over HTTP; **back up and then restore over HTTP**, the same path the admin panel takes |
 
-### Database (3 pgTAP files)
+### Database (4 pgTAP files)
 
 | File | Covers |
 |---|---|
 | `010_structure` | every table, view, enum, index and trigger the Go row structs scan against |
 | `050_views` | `active_custody` and `overdue_custody`, which the sign-in warning and the checkout block both read |
 | `080_seed` | `seed.sql` loads: the category tree from `Catagories.md`, the two accounts, an open custody row behind every checked-out asset |
+| `090_app_settings` | the single-row constraint, every default, and the three bounds the settings endpoint repeats in words (`keep_days >= 1`, `stale_hours >= 1`, `schedule_hour` 0–23) |
 
 ### Frontends
 
@@ -84,9 +93,13 @@ That is deliberately thin, and the reason is the same one that put every screen 
 hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
 tests belong in `packages/ui`.
 
-### `packages/ui` (17 tests)
+### `packages/ui` (28 tests)
 
-`keep-alive.test.ts`, covering `attachKeepAlive`: it pings when someone has interacted and the connection
+`status.test.ts` (11) covers the five-status resolution and the viewer-aware custodian line.
+
+`scanner.test.ts` (11) covers scan-vs-typed and the editing gestures that must never sign somebody in as a deleted number: a backspaced burst is typed, a chord or a caret key discards the pending burst, and a Backspace that empties the buffer resets rather than demoting the next card scan.
+
+`keep-alive.test.ts` (6), covering `attachKeepAlive`: it pings when someone has interacted and the connection
 has gone quiet, and stays silent when nobody has, when requests are already flowing, when nobody is signed
 in, while a ping is in flight, and after teardown.
 
