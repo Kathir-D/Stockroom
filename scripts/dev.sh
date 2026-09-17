@@ -205,7 +205,13 @@ cmd_test() {
   fi
 
   run_suite "go vet" go vet ./...
-  run_suite "go" go test ./... -count=1
+  # -p 1 runs one package at a time. Without it `go test ./...` runs
+  # internal/stockroom and server concurrently, and both talk to the same
+  # live Postgres -- which was merely untidy until the restore tests, whose
+  # whole job is to truncate every table and load a backup over the top. A
+  # neighbouring package's rows vanish mid-test and the failure lands on
+  # whichever test happened to be running, never on the one that caused it.
+  run_suite "go" go test ./... -count=1 -p 1
 
   if db_up; then
     run_suite "pgtap" supabase test db

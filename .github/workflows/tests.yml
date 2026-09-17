@@ -91,9 +91,14 @@ jobs:
 
       # STOCKROOM_REQUIRE_DB=1 turns "skip because Postgres is down" into a
       # failure, so a broken database can never look like a green run.
+      #
+      # -p 1 runs one package at a time. internal/stockroom and server share
+      # the same live Postgres, and the restore tests truncate every table in
+      # it -- run concurrently, a neighbouring package's rows disappear
+      # mid-test and the failure surfaces somewhere unrelated.
       - name: Go tests
         if: steps.changes.outputs.code == 'true'
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -p 1
         env:
           STOCKROOM_REQUIRE_DB: "1"
 

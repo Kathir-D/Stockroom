@@ -243,7 +243,10 @@ function Invoke-Test {
     }
 
     Invoke-Suite "go vet" { go vet ./... }
-    Invoke-Suite "go"     { go test ./... -count=1 }
+    # -p 1 runs one package at a time; see the same line in dev.sh for why.
+    # internal/stockroom and server share one live Postgres, and the restore
+    # tests truncate every table in it.
+    Invoke-Suite "go"     { go test ./... -count=1 -p 1 }
 
     if ($dbUp) {
         Invoke-Suite "pgtap" { supabase test db }

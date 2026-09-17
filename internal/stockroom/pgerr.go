@@ -33,6 +33,8 @@ func mapPgError(op string, err error) error {
 			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
 		case "22003": // numeric_value_out_of_range
 			return fmt.Errorf("%w: %s", ErrInvalid, pgErr.Message)
+		case "23514": // check_violation -- a bounded setting written past its bound
+			return fmt.Errorf("%w: %s", ErrInvalid, constraintMessage(pgErr))
 		}
 	}
 	return fmt.Errorf("%s: %w", op, err)

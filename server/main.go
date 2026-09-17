@@ -31,10 +31,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// BackupDir and PhotoBackupDir are deliberately *not* passed here. They
+	// live in app_settings now (docs/design/backup.md §C.2), seeded from .env
+	// below on first boot only; passing the environment through as an override
+	// would mean every restart quietly out-voting the settings screen.
 	db, err := stockroom.Open(ctx, cfg.DatabaseURL, stockroom.Options{
 		SessionIdle: time.Duration(cfg.SessionIdleMinutes) * time.Minute,
 		UploadsDir:  cfg.UploadsDir,
-		BackupDir:   cfg.BackupDir,
 	})
 	if err != nil {
 		log.Fatalf("database: %v", err)
@@ -46,12 +49,35 @@ func main() {
 	// panel. Nothing here is fatal. The failsafe exists to prevent a lockout,
 	// so a missing or malformed .env value must not take the whole API down
 	// with it -- log it and serve without one.
+	//
+	// Whether it worked is recorded rather than only logged, because the
+	// consequence of it not working is invisible until the morning the
+	// database is lost: with no failsafe admin, a restored-from-empty database
+	// has nobody to sign in as and the admin panel -- the whole documented
+	// restore route -- is unreachable. The backup screen says so while there
+	// is still somebody signed in to read it (docs/design/backup.md §C.1).
 	switch err := db.EnsureFailsafeAdmin(ctx, cfg.AdminStudentNumber, cfg.AdminPassword); {
 	case errors.Is(err, stockroom.ErrFailsafeNotConfigured):
 		log.Println("warning: ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD not set; no failsafe admin")
 	case err != nil:
 		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
+	default:
+		stockroom.SetFailsafeAdminConfigured(true)
 	}
+
+	// Backup settings live in the database; .env seeds them the first time
+	// this runs against a fresh one. A failure here is logged and not fatal,
+	// for the same reason the failsafe admin is not: a backup that cannot be
+	// configured must not stop students borrowing cameras.
+	if _, err := db.EnsureSettings(ctx, cfg); err != nil {
+		log.Printf("warning: could not load backup settings: %v", err)
+	}
+
+	// The nightly backup, scheduled in-process rather than by the operating
+	// system (docs/design/backup.md §E.6). It also runs immediately on boot
+	// when the last successful run is stale, which is how "back up first thing
+	// when the machine is available" is met on a closet PC that gets unplugged.
+	db.StartBackupScheduler(ctx)
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html). The remote
 	// is the switch: with SIGNIN_PHOTOS_REMOTE unset no reel is built and no

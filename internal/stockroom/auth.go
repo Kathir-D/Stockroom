@@ -19,6 +19,41 @@ type Actor struct {
 	// See Session.Limited.
 	Limited bool
 	Token   string
+
+	// trustedCLI marks a process that already has shell access to this
+	// machine and the database URL -- cmd/restore, and the export's own
+	// reads. It is unexported, so an Actor literal naming it does not compile
+	// outside this package and no HTTP handler, JSON body or session lookup
+	// can set it. Resolve never sets it, so no request can reach this state
+	// whatever it sends.
+	//
+	// It is not a permission: the actor is already an admin. It exists so a
+	// restore can record in the log whether it came from the command line or
+	// from a named admin, which is the first question anybody asks afterwards.
+	trustedCLI bool
+}
+
+// LocalCLIActor is the actor for a process that already has shell access to
+// the machine and the database URL -- strictly more access than any account
+// grants, so there is nothing left for an authorization check to protect.
+//
+// cmd/restore needs it because the case it exists for is a database with no
+// accounts in it (docs/design/backup.md §C.1): there is nobody to sign in as,
+// and the restore is what creates the accounts. Making the CLI *satisfy*
+// RequireAdmin rather than skip it is what keeps there being one restore
+// implementation -- dropping the gate would open the HTTP path, and a second
+// CLI-only restore would be emergency code first run during an emergency.
+//
+// This function is exported and any package may call it. What no other package
+// can do is produce a trustedCLI Actor any other way: the field is unexported,
+// so this line does not compile outside internal/stockroom --
+//
+//	stockroom.Actor{ID: "x", IsAdmin: true, trustedCLI: true} // unknown field
+//
+// -- and that is a compile-time fact, which is why it is recorded here as a
+// comment rather than as a test pretending to check it at runtime.
+func LocalCLIActor() Actor {
+	return Actor{ID: "cli", IsAdmin: true, trustedCLI: true}
 }
 
 // RequireAdmin is the single gate in front of every admin-only operation
@@ -51,6 +86,11 @@ type LoginResult struct {
 	NeedsPassword bool    `json:"needs_password"`
 	HasOverdue    bool    `json:"has_overdue"`
 	Profile       Profile `json:"profile"`
+	// BackupWarning rides here beside HasOverdue because it is the same shape
+	// of fact -- something the person signing in should be told before they
+	// start -- and because sign-in is the only moment everybody passes
+	// through. See backup_status.go.
+	BackupWarning *BackupWarning `json:"backup_warning"`
 }
 
 // LoginByScan signs in from an ID-card scan: student number only, no
@@ -107,7 +147,13 @@ func (db *DB) openSession(ctx context.Context, p Profile, limited bool) (LoginRe
 		db.Sessions.Delete(sess.Token)
 		return LoginResult{}, err
 	}
-	return LoginResult{Token: sess.Token, NeedsPassword: limited, HasOverdue: overdue, Profile: p}, nil
+	out := LoginResult{Token: sess.Token, NeedsPassword: limited, HasOverdue: overdue, Profile: p}
+	// A limited session is mid-way through setting a password and can act on
+	// nothing; a warning there is noise in front of a form.
+	if !limited {
+		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
+	}
+	return out, nil
 }
 
 // SetInitialPassword stores the first password for the actor's account and
@@ -169,8 +215,9 @@ func (db *DB) Resolve(ctx context.Context, token string) (Actor, error) {
 // MeResult is the signed-in account plus the overdue flag that drives the
 // warning shown at sign-in (CLAUDE.md §7).
 type MeResult struct {
-	Profile    Profile `json:"profile"`
-	HasOverdue bool    `json:"has_overdue"`
+	Profile       Profile        `json:"profile"`
+	HasOverdue    bool           `json:"has_overdue"`
+	BackupWarning *BackupWarning `json:"backup_warning"`
 }
 
 // Me returns the actor's own profile. Any session, including a limited one,
@@ -184,7 +231,11 @@ func (db *DB) Me(ctx context.Context, actor Actor) (MeResult, error) {
 	if err != nil {
 		return MeResult{}, err
 	}
-	return MeResult{Profile: p, HasOverdue: overdue}, nil
+	out := MeResult{Profile: p, HasOverdue: overdue}
+	if !actor.Limited {
+		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
+	}
+	return out, nil
 }
 
 // hasOverdue reports whether profileID holds anything past its due date.
