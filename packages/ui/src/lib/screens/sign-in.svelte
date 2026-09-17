@@ -23,6 +23,7 @@
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
   import PasswordInput from "../components/app/password-input.svelte"
+  import PhotoWall from "../components/app/photo-wall.svelte"
   import * as api from "../api/index"
   import { attachScanner, looksLikeStudentNumber } from "../scanner"
   import { session } from "../stores/session.svelte"
@@ -282,9 +283,15 @@
 
 <main
   data-density="kiosk"
-  class="flex min-h-full flex-col items-center justify-center bg-ground p-(--gutter)"
+  class="relative flex min-h-full flex-col items-center justify-center bg-ground p-(--gutter)"
 >
-  <div class="w-full max-w-[420px]">
+  <!-- Behind the card, and positioned against this <main> rather than in the
+       flow, so the input sits in exactly the same place whether the wall is
+       there or not. `relative` above is the only change it asks of this screen;
+       it moves nothing. -->
+  <PhotoWall />
+
+  <div class="relative w-full max-w-[420px]">
     <!-- Wordmark. Left-aligned like the rest of the app; the input below it is
          what the eye needs to land on. -->
     <p class="text-2xl font-semibold tracking-tight text-fg">Stockroom</p>

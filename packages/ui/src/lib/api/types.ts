@@ -444,3 +444,19 @@ export interface HealthResult {
   db: string;
   time: string;
 }
+
+/**
+ * The sign-in photo wall's batch (docs/design/signin-photo-wall.html §5).
+ *
+ * `photos` is always an array and is often empty -- the wall is off, the
+ * manifest is still building, Drive is unreachable, or a burst of sign-ins
+ * drained the reel. All of those mean the same thing to the only caller: draw
+ * no columns. There is no error shape here because the endpoint never returns
+ * one.
+ */
+export interface SignInPhotos {
+  /** Server-relative tile paths, e.g. `/signin-photos/9f2c….jpg`. */
+  photos: string[];
+  /** How long those URLs stay fetchable before the server deletes the files. */
+  ttl_seconds: number;
+}

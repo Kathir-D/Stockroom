@@ -126,7 +126,14 @@ export function setToken(next: string | null) {
   else store.setItem(TOKEN_KEY, next);
 }
 
-/** Turn a stored `photo_url` (`/files/...`) into something an `<img>` can load. */
+/**
+ * Turn a server-relative path into something an `<img>` can load.
+ *
+ * Two callers: a stored `photo_url` under `/files/`, and a sign-in photo wall
+ * tile under `/signin-photos/`. Both are served by the Go server off disk, and
+ * both frontends run on a different origin from it, so the base URL has to be
+ * put back on. An absolute URL is passed through untouched.
+ */
 export function fileUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   if (/^https?:\/\//.test(path)) return path;

@@ -27,9 +27,20 @@ describe('desktop host', () => {
     expect(await screen.findByText('Scan your student ID.')).toBeInTheDocument()
   })
 
-  it('does not reach the network before anyone signs in', async () => {
+  it('reaches the network only for the decorative photo wall, and survives it failing', async () => {
     render(App)
     await screen.findByText('Scan your student ID.')
-    expect(fetch).not.toHaveBeenCalled()
+
+    // Signing in must not depend on a request. The only call the sign-in
+    // screen is allowed to make is the photo wall's batch, which is decoration
+    // (docs/design/signin-photo-wall.html §6) -- and here it rejects, exactly
+    // as it does on a machine with no server, while the field still renders.
+    const calls = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+    // Both halves matter: that the wall did ask, and that nothing else did.
+    // Without the first, `every` passes vacuously on an empty list and the
+    // assertion stops meaning anything the day the wall stops fetching.
+    expect(calls).toContainEqual(expect.stringContaining('/signin/photos'))
+    expect(calls.every((url) => url.endsWith('/signin/photos'))).toBe(true)
+    expect(await screen.findByPlaceholderText(/student number/i)).toBeInTheDocument()
   })
 })
