@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign-in photo wall — build plan</title>
+<style>
+/* Tokens lifted verbatim from packages/ui/src/lib/styles/tokens.css so the
+   preview below is the real palette, not an approximation. */
+:root{
+  --ground:#2e3033; --surface:#35383b; --raised:#3d4144; --overlay:#424649;
+  --fg:#e9e9e7; --fg-muted:#a8adac; --fg-faint:#949998;
+  --line:#464b4e; --line-control:#7b8283; --line-strong:#585e61;
+  --primary:#e9e9e7; --primary-fg:#17191a;
+  --status-available:#4ade80; --status-out:#7db3ff; --status-due-soon:#fbbf24; --status-overdue:#ff7a70;
+  --radius-sm:4px; --radius:6px; --radius-lg:10px;
+  --elev-1:0 0 0 1px var(--line-strong);
+  --elev-2:0 0 0 1px var(--line-strong),0 4px 12px rgb(0 0 0/.45);
+  --font-sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --ease:cubic-bezier(.2,0,0,1); --dur-fast:120ms; --dur-normal:200ms;
+  --control-h:32px; --gutter:16px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--ground); color:var(--fg);
+  font-family:var(--font-sans); font-size:15px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:56px 32px 120px}
+h1{font-size:30px; line-height:1.2; letter-spacing:-.02em; margin:0 0 6px; font-weight:650}
+h2{font-size:21px; letter-spacing:-.01em; margin:56px 0 4px; font-weight:620; scroll-margin-top:24px}
+h3{font-size:16px; margin:28px 0 4px; font-weight:600}
+h2 .num{color:var(--fg-faint); font-variant-numeric:tabular-nums; font-weight:500; margin-right:10px}
+p{margin:10px 0}
+.lede{color:var(--fg-muted); font-size:16px; max-width:76ch}
+.sub{color:var(--fg-faint); font-size:13.5px; margin-top:2px}
+a{color:var(--fg); text-underline-offset:3px; text-decoration-color:var(--line-control)}
+hr{border:0; border-top:1px solid var(--line); margin:0}
+code{font-family:var(--font-mono); font-size:.87em; background:var(--raised);
+  border:1px solid var(--line); border-radius:var(--radius-sm); padding:1px 5px}
+pre{background:var(--surface); border:1px solid var(--line-strong); border-radius:var(--radius);
+  padding:14px 16px; overflow-x:auto; font-family:var(--font-mono); font-size:12.5px; line-height:1.65;
+  color:var(--fg-muted); margin:12px 0}
+pre code{background:none; border:0; padding:0; font-size:inherit; color:inherit}
+pre .c{color:var(--fg-faint)}
+pre .k{color:var(--fg)}
+ul,ol{margin:10px 0; padding-left:22px}
+li{margin:5px 0}
+li::marker{color:var(--fg-faint)}
+strong{font-weight:620; color:var(--fg)}
+table{border-collapse:collapse; width:100%; margin:14px 0; font-size:13.5px}
+th,td{text-align:left; padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+th{color:var(--fg-muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em}
+td code{white-space:nowrap}
+.card{background:var(--surface); border-radius:var(--radius-lg); box-shadow:var(--elev-1);
+  padding:20px 24px; margin:18px 0}
+.note{border-left:2px solid var(--line-control); padding:2px 0 2px 16px; margin:16px 0; color:var(--fg-muted)}
+.note strong{color:var(--fg)}
+.flag{border-left-color:var(--status-due-soon)}
+.good{border-left-color:var(--status-available)}
+.bad{border-left-color:var(--status-overdue)}
+.pill{display:inline-block; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+  padding:2px 8px; border-radius:999px; vertical-align:2px; margin-left:8px}
+.pill.new{background:#0e2b1c; color:var(--status-available)}
+.pill.edit{background:#12233d; color:var(--status-out)}
+.toc{columns:2; column-gap:40px; font-size:14px; margin:20px 0 8px}
+.toc a{display:block; padding:3px 0; color:var(--fg-muted); text-decoration:none}
+.toc a:hover{color:var(--fg)}
+.kbd{font-family:var(--font-mono); font-size:11px; border:1px solid var(--line-control);
+  border-radius:var(--radius-sm); padding:1px 5px; color:var(--fg-muted)}
+
+/* ---------------- preview ---------------- */
+.stage{margin:20px 0 8px}
+.controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
+.btn{font:inherit; font-size:13px; height:var(--control-h); padding:0 12px; cursor:pointer;
+  background:var(--raised); color:var(--fg); border:1px solid var(--line-control);
+  border-radius:var(--radius); transition:background var(--dur-fast) var(--ease)}
+.btn:hover{background:var(--overlay)}
+.btn[aria-pressed="true"]{background:var(--primary); color:var(--primary-fg); border-color:var(--primary)}
+.btn:focus-visible{outline:2px solid var(--fg); outline-offset:2px}
+.ctl-label{font-size:12px; color:var(--fg-faint); margin-right:2px}
+
+.frame{position:relative; width:100%; aspect-ratio:16/9; min-height:440px; overflow:hidden;
+  background:var(--ground); border-radius:var(--radius-lg); box-shadow:var(--elev-2)}
+.chrome{position:absolute; top:0; left:0; right:0; height:28px; background:var(--surface);
+  border-bottom:1px solid var(--line); display:flex; align-items:center; gap:6px; padding:0 10px; z-index:5}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--line-control)}
+.chrome span{font-size:11px; color:var(--fg-faint); margin-left:6px}
+.screen{position:absolute; top:28px; left:0; right:0; bottom:0; overflow:hidden}
+
+/* the wall */
+.wall{position:absolute; top:0; bottom:0; width:27%; pointer-events:none; overflow:hidden;
+  /* A mask, not a decorative gradient: without it the columns hard-clip a photo
+     in half at the top and bottom edges and read as a rendering bug. */
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 12%,#000 88%,transparent 100%);
+          mask-image:linear-gradient(to bottom,transparent 0,#000 12%,#000 88%,transparent 100%);
+  opacity:.5; filter:saturate(.72)}
+.wall.left{left:0} .wall.right{right:0}
+.strip{position:absolute; top:0; left:0; right:0; display:flex; flex-direction:column; gap:14px;
+  padding:0 14px; will-change:transform}
+.wall.left .strip{animation:up 110s linear infinite}
+.wall.right .strip{animation:down 134s linear infinite}
+@keyframes up{from{transform:translate3d(0,0,0)} to{transform:translate3d(0,-50%,0)}}
+@keyframes down{from{transform:translate3d(0,-50%,0)} to{transform:translate3d(0,0,0)}}
+.tile{width:100%; aspect-ratio:3/2; border-radius:var(--radius-sm); display:block;
+  background:var(--raised); box-shadow:0 0 0 1px rgb(0 0 0/.25); object-fit:cover; flex:none}
+
+.frame.paused .strip{animation-play-state:paused}
+.frame.reduced .strip{animation:none; transform:translate3d(0,-14%,0)}
+.frame.narrow .wall{display:none}
+.frame.narrow .screen::after{content:"window < 1280px — columns withdrawn (§7.2)";
+  position:absolute; left:50%; transform:translateX(-50%); bottom:14px;
+  font-size:11px; color:var(--fg-faint)}
+@media (prefers-reduced-motion:reduce){.strip{animation:none !important; transform:translate3d(0,-14%,0)}}
+
+/* the real sign-in card, mirrored from packages/ui/src/lib/screens/sign-in.svelte */
+.signin{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  padding:var(--gutter); z-index:2}
+.signin-inner{width:100%; max-width:420px}
+.wordmark{font-size:24px; font-weight:640; letter-spacing:-.02em; margin:0}
+.tagline{color:var(--fg-muted); margin:4px 0 0; font-size:14px}
+.field-label{display:flex; align-items:center; gap:8px; margin:32px 0 8px; font-size:14px}
+.field-label svg{width:16px; height:16px; color:var(--fg-muted)}
+.field{width:100%; height:44px; background:var(--raised); color:var(--fg);
+  border:1px solid var(--line-control); border-radius:var(--radius); padding:0 12px;
+  font:inherit; font-size:17px; outline:2px solid var(--fg); outline-offset:2px}
+.field::placeholder{color:var(--fg-faint); font-size:14px}
+.helper{color:var(--fg-faint); font-size:13px; margin:8px 0 0}
+.caret{display:inline-block; width:1.5px; height:19px; background:var(--fg); vertical-align:-4px;
+  animation:blink 1.06s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.frame.reduced .caret{animation:none}
+
+.legend{display:flex; gap:20px; flex-wrap:wrap; font-size:12px; color:var(--fg-faint); margin-top:10px}
+.legend b{color:var(--fg-muted); font-weight:600}
+
+.flow{font-family:var(--font-mono); font-size:12.5px; line-height:1.9; color:var(--fg-muted);
+  background:var(--surface); border:1px solid var(--line-strong); border-radius:var(--radius);
+  padding:18px 20px; overflow-x:auto; margin:16px 0}
+.flow b{color:var(--fg); font-weight:500}
+.flow .dim{color:var(--fg-faint)}
+
+.steps{counter-reset:s; list-style:none; padding:0; margin:16px 0}
+.steps>li{counter-increment:s; position:relative; padding:0 0 0 42px; margin:20px 0}
+.steps>li::before{content:counter(s); position:absolute; left:0; top:0; width:26px; height:26px;
+  border-radius:50%; background:var(--raised); box-shadow:var(--elev-1); color:var(--fg-muted);
+  font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:center;
+  font-variant-numeric:tabular-nums}
+.steps>li>h3{margin-top:2px}
+@media (max-width:820px){.wrap{padding:32px 18px 80px} .toc{columns:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Sign-in photo wall</h1>
+<p class="lede">Two slowly scrolling columns of department photography flanking the sign-in card, sourced
+from a Google Drive folder, normalized to one size, cached briefly on disk and discarded after use. This
+document is the build plan and the visual reference.</p>
+<p class="sub">Stockroom · drafted 2026-09-16 · sits alongside <code>docs/design/design-system.md</code> §8.1</p>
+
+<div class="toc">
+  <a href="#preview">Preview — the frontend</a>
+  <a href="#privacy">0 · Security and privacy posture</a>
+  <a href="#shape">1 · Shape of the thing</a>
+  <a href="#reel">2 · The reel: prefetch and discard</a>
+  <a href="#drive">3 · Drive access via rclone</a>
+  <a href="#normalize">4 · Normalization</a>
+  <a href="#serving">5 · Serving and the endpoint</a>
+  <a href="#frontend">6 · The frontend component</a>
+  <a href="#admin">7 · Admin control: the Google Drive tab</a>
+  <a href="#config">8 · Configuration</a>
+  <a href="#failure">9 · Failure modes</a>
+  <a href="#testing">10 · Testing</a>
+  <a href="#order">11 · Build order</a>
+</div>
+
+<h2 id="preview">Preview — the frontend</h2>
+<p>The real palette, the real card, the real motion timing. Tiles are generated placeholders standing in
+for Drive photos; everything else is what ships.</p>
+
+<div class="stage">
+  <div class="controls">
+    <span class="ctl-label">Simulate:</span>
+    <button class="btn" id="b-pause" aria-pressed="false">Pause motion</button>
+    <button class="btn" id="b-reduced" aria-pressed="false">prefers-reduced-motion</button>
+    <button class="btn" id="b-narrow" aria-pressed="false">Window &lt; 1280px</button>
+    <button class="btn" id="b-empty" aria-pressed="false">Drive unreachable</button>
+    <button class="btn" id="b-shuffle">Reshuffle</button>
+  </div>
+
+  <div class="frame" id="frame">
+    <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>Stockroom — closet PC</span></div>
+    <div class="screen">
+      <div class="wall left" aria-hidden="true"><div class="strip" id="strip-l"></div></div>
+      <div class="wall right" aria-hidden="true"><div class="strip" id="strip-r"></div></div>
+
+      <main class="signin">
+        <div class="signin-inner">
+          <p class="wordmark">Stockroom</p>
+          <p class="tagline">Media department equipment checkout</p>
+          <label class="field-label" for="preview-number">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+              <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>
+            </svg>
+            Scan your student ID.
+          </label>
+          <input class="field" id="preview-number" readonly
+                 placeholder="or type your student number and press Enter" />
+          <p class="helper">A scanned ID signs you in straight away. Typing the number asks for your password.</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><b>Columns</b> 27% width each · opacity .5 · saturate .72</span>
+    <span><b>Cycle</b> 110s left ↑ / 134s right ↓ — deliberately coprime so they never lock in step</span>
+    <span><b>Tiles</b> 900×600 (3:2), <code>object-fit:cover</code></span>
+    <span><b>Hit-testing</b> <code>pointer-events:none</code> · <code>aria-hidden</code></span>
+  </div>
+</div>
+
+<div class="note good">
+  <strong>Why the columns are dimmed and slow.</strong> <code>design-system.md</code> §13 bans decorative
+  colour and anything that reads as marketing. A photo wall <em>is</em> decoration, so it earns its place by
+  staying subordinate: the input is the only thing at full contrast, the motion is slow enough that peripheral
+  vision stops tracking it, and there is no gradient fill, no glow and no parallax. The one gradient present is
+  a <code>mask-image</code> fading the columns into <code>--ground</code>, which is structural — without it a
+  photo clips in half at the viewport edge and reads as a rendering bug.
+</div>
+
+<hr />
+
+<h2 id="privacy">0 · Security and privacy posture</h2>
+<p>The wall renders on the only unauthenticated screen in the application, sourced from a Drive folder that
+may contain photographs of identifiable students. What follows are requirements, not observations.</p>
+
+<h3>Requirement: no client may reach the Drive folder</h3>
+<p>Enforced by four independent barriers, none of which depends on anyone remembering a rule:</p>
+<ul>
+  <li>The frontend <strong>never receives a Drive credential</strong>. <code>rclone</code> holds the OAuth token
+    on the Go side; no token is ever serialized into a response. This is CLAUDE.md §4's existing rule, not a new one.</li>
+  <li>The frontend <strong>never receives a Drive file ID or a folder listing</strong>. It gets opaque local
+    URLs of the form <code>/signin-photos/a4f2…c9.jpg</code> — random tile names with no relationship to Drive.</li>
+  <li>The cache directory <strong>cannot be enumerated</strong>. <code>fileServer</code> already answers 404 to
+    any request that resolves to a directory, specifically so <code>/files/</code> cannot be walked as a roster.
+    The same handler is reused here, so the property comes for free.</li>
+  <li><strong>The credential is read-only, and the folder is admin-controlled rather than structural.</strong>
+    The remote is configured <code>drive.readonly</code>, so the credential on the machine can read but never
+    modify or delete. It is deliberately <em>not</em> pinned to a single folder with <code>root_folder_id</code>:
+    the admin panel (§7) sets the live folder from a pasted link, so the folder is a runtime value. What bounds
+    it is that only an admin can change it, every change is written to <code>activity_log</code>, and the result
+    is visible in that screen's preview strip before anyone else sees it. The realistic failure here is a wrong
+    link pasted by mistake, not a hostile one — an admin who wanted the roster already has the roster.</li>
+</ul>
+<p>There is no code path from the UI back to Google. The wall is a directory of a few dozen JPEGs that exist
+for about fifteen minutes.</p>
+
+<h3>The existing baseline this sits on</h3>
+<ul>
+  <li><code>server/files.go</code> already serves <em>student profile photos</em> over HTTP with no session at
+    all, by design — an <code>&lt;img&gt;</code> tag cannot carry a bearer token. Departmental photography is
+    strictly less sensitive than the roster headshots already served, so this adds no new class of exposure.</li>
+  <li>The server binds <code>127.0.0.1</code> (CLAUDE.md §3). The audience is exactly "whoever can stand in
+    front of the machine" — physical access is the access control.</li>
+</ul>
+
+<div class="note flag">
+  <strong>Prerequisite: verify the source folder's Drive sharing setting before configuring the remote.</strong>
+  A folder set to <em>"Anyone with the link"</em> is readable by anyone who has ever been forwarded that URL —
+  a far wider exposure than a single machine, and one that exists independently of this feature. Confirm the
+  setting is restricted, or accept it knowingly.<br /><br />
+  It also determines setup: a link-public folder can be read by rclone with no OAuth at all
+  (<code>--drive-root-folder-id</code> against an unauthenticated remote); a restricted folder requires the
+  normal <code>rclone config</code> OAuth flow.
+</div>
+
+<h3>Residual risks, accepted</h3>
+<ul>
+  <li>Normalized tiles sit unencrypted on the machine's disk for minutes at a time. Bounded by the reel design:
+    originals never land on disk, only 900×600 crops, and each is deleted after it is shown.</li>
+  <li>If the machine is screen-mirrored or projected, the wall is on screen. Not a new risk — so is every
+    student name in the browse list.</li>
+  <li>Photos are drawn at random from whatever folder is live, and an admin may replace that folder at any
+    time by pasting a link (§7). Nothing curates the contents, so everything in the live folder will eventually
+    appear on the unauthenticated screen — and the sharing-setting caution above applies to <strong>every folder
+    ever pasted</strong>, not only the one configured at install. The admin performing the paste owns that
+    decision; the preview strip is what makes it checkable before it ships.</li>
+</ul>
+
+<hr />
+
+<h2 id="shape"><span class="num">1</span>Shape of the thing</h2>
+<p>One rule drives the whole design: <strong>the browser never talks to Google, and the network is never in the
+render path.</strong> CLAUDE.md §2 promises zero internet dependency for core daily operation, and sign-in is
+the most core screen there is. A firewall hiccup must produce today's sign-in screen, not a spinner.</p>
+
+<div class="flow">
+<b>Google Drive</b> <span class="dim">folder 1N5pUYCM…0w7qm</span>
+   <span class="dim">│</span>
+   <span class="dim">│</span>  rclone lsjson -R          <span class="dim">— weekly, builds a manifest of paths only</span>
+   <span class="dim">▼</span>
+<b>manifest.json</b> <span class="dim">on disk — paths + sizes, no image data</span>
+   <span class="dim">│</span>
+   <span class="dim">│</span>  pick a random entry
+   <span class="dim">▼</span>
+<b>rclone cat</b> <span class="dim">→ stdout →</span> <b>normalizer</b> <span class="dim">(decode, EXIF, crop, resize, re-encode)</span>
+   <span class="dim">│                              ▲ the full-res original is never written to disk</span>
+   <span class="dim">▼</span>
+<b>the reel</b> <span class="dim">— SIGNIN_PHOTOS_DIR, ~48 tiles of 900×600 JPEG, ≈6 MB total</span>
+   <span class="dim">│</span>
+   <span class="dim">│</span>  GET /signin/photos  <span class="dim">→ 16 opaque URLs, tiles flip to "served"</span>
+   <span class="dim">▼</span>
+<b>GET /signin-photos/&lt;id&gt;.jpg</b> <span class="dim">→ the browser, off local disk</span>
+   <span class="dim">│</span>
+   <span class="dim">▼</span>  after TTL
+<b>deleted</b> <span class="dim">— topper-upper pulls a replacement</span>
+</div>
+
+<h3>Files touched</h3>
+<table>
+<thead><tr><th>Path</th><th></th><th>What</th></tr></thead>
+<tbody>
+<tr><td><code>internal/stockroom/photowall.go</code></td><td><span class="pill new">new</span></td><td>the reel: state machine, topper-upper goroutine, reaper, <code>TakePhotos</code></td></tr>
+<tr><td><code>internal/stockroom/photowall_drive.go</code></td><td><span class="pill new">new</span></td><td>rclone: manifest build/refresh, <code>cat</code> a single file</td></tr>
+<tr><td><code>internal/stockroom/photowall_image.go</code></td><td><span class="pill new">new</span></td><td>decode, EXIF orientation, ratio gate, crop, resize, encode</td></tr>
+<tr><td><code>internal/stockroom/photowall_admin.go</code></td><td><span class="pill new">new</span></td><td>link parsing, the Drive probe, <code>SetPhotoWallFolder</code>, the generation counter</td></tr>
+<tr><td><code>internal/stockroom/settings.go</code></td><td><span class="pill new">new</span></td><td>read/write <code>app_settings</code>, <code>.env</code> seeding on first boot, the secret-column list</td></tr>
+<tr><td><code>supabase/migrations/2026…_app_settings.sql</code></td><td><span class="pill new">new</span></td><td>the <code>app_settings</code> table Phase 7 also wants; this feature needs it first</td></tr>
+<tr><td><code>internal/stockroom/photowall_test.go</code></td><td><span class="pill new">new</span></td><td>normalizer + reel lifecycle + link parsing, with rclone stubbed</td></tr>
+<tr><td><code>internal/stockroom/backup.go</code></td><td><span class="pill edit">edit</span></td><td>redact the folder ID from the CSV export</td></tr>
+<tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>four new <code>Config</code> fields</td></tr>
+<tr><td><code>internal/stockroom/db.go</code></td><td><span class="pill edit">edit</span></td><td><code>Options.PhotoWall</code>; the reel hangs off <code>DB</code> like <code>Sessions</code> does</td></tr>
+<tr><td><code>server/photowall.go</code></td><td><span class="pill new">new</span></td><td><code>GET /signin/photos</code> plus the four admin handlers</td></tr>
+<tr><td><code>server/router.go</code></td><td><span class="pill edit">edit</span></td><td>two unauthenticated routes + four admin routes</td></tr>
+<tr><td><code>packages/ui/src/lib/components/app/photo-wall.svelte</code></td><td><span class="pill new">new</span></td><td>the two columns</td></tr>
+<tr><td><code>packages/ui/src/lib/api/index.ts</code></td><td><span class="pill edit">edit</span></td><td><code>signInPhotos()</code></td></tr>
+<tr><td><code>packages/ui/src/lib/screens/sign-in.svelte</code></td><td><span class="pill edit">edit</span></td><td>render <code>&lt;PhotoWall /&gt;</code> behind the card</td></tr>
+<tr><td><code>packages/ui/src/lib/screens/admin/google-drive.svelte</code></td><td><span class="pill new">new</span></td><td>the admin tab (§7)</td></tr>
+<tr><td>admin sidebar nav</td><td><span class="pill edit">edit</span></td><td>a sixth item, below Backup</td></tr>
+<tr><td><code>.env.example</code>, <code>CLAUDE.md</code>, <code>design-system.md</code></td><td><span class="pill edit">edit</span></td><td>config table, §8.1, a decisions-log entry</td></tr>
+</tbody>
+</table>
+
+<hr />
+
+<h2 id="reel"><span class="num">2</span>The reel: prefetch and discard</h2>
+<p>The reel is a prefetch buffer with single-use contents: a fixed number of tiles are kept ready in advance
+and deleted once shown. Nothing accumulates on disk, which bounds both storage and the privacy exposure in
+§0. Here is the state machine.</p>
+
+<table>
+<thead><tr><th>State</th><th>Meaning</th><th>Leaves when</th></tr></thead>
+<tbody>
+<tr><td><code>ready</code></td><td>normalized tile on disk, never shown</td><td>handed out by the endpoint</td></tr>
+<tr><td><code>served</code></td><td>in a batch the browser was told about; carries <code>expiresAt</code></td><td><code>expiresAt</code> passes</td></tr>
+<tr><td><em>(gone)</em></td><td>file deleted, slot freed</td><td>topper-upper fetches a replacement</td></tr>
+</tbody>
+</table>
+
+<div class="note bad">
+  <strong>The trap worth naming: don't delete on hand-out.</strong> When <code>GET /signin/photos</code> returns,
+  the browser has a <em>list of URLs</em> and has not fetched a single image yet. Deleting immediately gives you
+  sixteen 404s and an empty wall. Deletion has to be deferred behind a TTL (default 15 minutes, comfortably
+  longer than the page takes to load and longer than the 10-minute session idle). "Delete after use" means
+  "delete after the batch expires," not "delete after the JSON response."
+</div>
+
+<h3>Mechanics</h3>
+<ul>
+  <li><strong>On boot, wipe the directory.</strong> Every tile is single-use and re-derivable; a leftover from
+    last run is just a photo we already showed. Wiping also means a crash can't strand files forever.</li>
+  <li><strong>One goroutine does both jobs</strong>, on a short tick (~10s): reap anything expired, then top up
+    while <code>ready &lt; target</code>. One goroutine means no lock dance between the filler and the reaper.</li>
+  <li><strong>Fetches are serialized and rate-limited</strong> — one photo at a time, with a small delay. There
+    is no deadline here; the reel refills over minutes and nobody is waiting. Hammering the Drive API to fill a
+    decorative buffer is how a 403 rate-limit gets earned — one that also breaks the nightly backup, since both
+    go through the same rclone remote and the same Google quota.</li>
+  <li><strong>Burst protection.</strong> If sign-ins drain the reel faster than it refills, the endpoint returns
+    however many are ready — possibly zero. The frontend repeats a short list to fill the column rather than
+    rendering a gappy one. Reel exhaustion degrades density, never correctness.</li>
+  <li><strong>Sizing.</strong> 48 ready tiles at ~120 KB each is about 6 MB of disk, and at 16 per batch that's
+    three sign-ins of runway — far more than the refill rate needs on a machine that sees a sign-in every few
+    minutes.</li>
+</ul>
+
+<h3>Tile identity</h3>
+<p>The filename is random (crypto/rand hex), not derived from the Drive path or a content hash. A content hash
+would be stable across runs, which quietly defeats "delete after use": the same photo would resolve to the same
+URL and could be re-requested later from a cached page. Random names make every tile a one-time object.</p>
+
+<hr />
+
+<h2 id="drive"><span class="num">3</span>Drive access via rclone</h2>
+<p>rclone is already the decided Drive mechanism for backups (CLAUDE.md §11), so this reuses one token store and
+one consent flow instead of adding a second. No Google API client code, no OAuth handling in Go.</p>
+
+<h3>One-time setup</h3>
+<pre><code>rclone config
+  <span class="c"># n) new remote → name: gdrive → storage: drive</span>
+  <span class="c"># scope: drive.readonly     ← read-only. The app never writes to this Drive.</span>
+  <span class="c"># root_folder_id: leave BLANK — see below.</span>
+
+<span class="c"># verify the credential works at all</span>
+rclone lsd gdrive:</code></pre>
+
+<p><strong><code>root_folder_id</code> is deliberately left unset on the remote.</strong> Pinning it would root
+<code>gdrive:</code> at one folder, and a remote rooted at one folder cannot read a different pasted one — which
+is the whole of §7. The live folder is instead a per-invocation parameter, supplied as an rclone connection
+string so that no command can act on a folder the caller did not name:</p>
+<pre><code>rclone lsjson <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:'</span> -R --files-only …</code></pre>
+<p>What is left doing the containing work is <code>drive.readonly</code>: the credential the machine holds can
+read but never modify or delete anything in the Drive. §0's fourth barrier records that trade honestly.</p>
+
+<h3>The manifest</h3>
+<p>The source folder is large — tens of thousands of files is the assumed scale. The way to stop that from
+mattering is to <strong>separate listing from fetching</strong>:</p>
+<pre><code><span class="c"># Built once per folder, then refreshed weekly in the background.</span>
+rclone lsjson <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:'</span> -R --files-only --fast-list --no-modtime \
+  --include "*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,heic,HEIC}"</code></pre>
+<ul>
+  <li>Result is written to <code>&lt;dir&gt;/manifest.json</code> — <strong>paths and sizes only</strong>, no image
+    data. Even tens of thousands of entries is a few MB of text.</li>
+  <li>The first listing of a big folder can take minutes. It runs in the background at startup; until it
+    completes the endpoint returns <code>[]</code> and the sign-in screen is exactly what it is today.</li>
+  <li>A refresh writes to a temp file and renames, so a failed or half-finished listing never replaces a
+    working manifest — the same staged-write discipline <code>photos.go</code> and <code>backup.go</code> already use.</li>
+  <li>Random selection is a random index into the manifest. No API call to choose, and uniform across the folder.</li>
+</ul>
+
+<h3>Fetching one photo</h3>
+<pre><code>rclone cat <span class="k">'gdrive,root_folder_id=&lt;ID&gt;:&lt;path&gt;'</span> | <span class="c">→ stdin → normalizer → tile</span></code></pre>
+<p><code>cat</code> streams to stdout, so the original is piped straight into the decoder and
+<strong>the full-resolution file never touches the disk</strong>. Guard it with a size ceiling from the manifest
+(skip anything over ~40 MB) and a context timeout, so one pathological RAW doesn't stall the filler.</p>
+
+<hr />
+
+<h2 id="normalize"><span class="num">4</span>Normalization</h2>
+<p>Every tile leaves this step as the same 900×600 JPEG, which is what lets the marquee do no layout work and
+the webview do no scaling work. §12 of the design doc notes the closet PC's webview is not fast; a 12-megapixel
+JPEG scaled down in CSS is still decoded at full size into memory, sixteen times over.</p>
+
+<ol class="steps">
+<li>
+  <h3>Read the header only, first</h3>
+  <p><code>image.DecodeConfig</code> gives width and height without decoding pixels. Anything failing this is
+  not an image we can use — skip it and move on. <code>rclone lsjson</code> does not expose image dimensions,
+  so this is where the ratio gate has to live.</p>
+</li>
+<li>
+  <h3>Honour EXIF orientation — before the ratio test</h3>
+  <p>This is the step that, skipped, makes the whole feature look broken. A phone photo with EXIF orientation
+  6 decodes as landscape and must be rotated to portrait. Get the order wrong and a portrait shot passes the
+  3:2 landscape gate and then renders sideways. Read the orientation tag, apply the rotation, <em>then</em>
+  measure the ratio.</p>
+</li>
+<li>
+  <h3>Gate on aspect ratio</h3>
+  <p>3:2 is 1.5. Accept <strong>1.20 – 1.90</strong>; reject everything else outright. That admits 3:2 and 16:9
+  and most 4:3, and rejects panoramas, screenshots, square crops and portrait shots — all of which would either
+  crop to nonsense or force the wall to handle two orientations.</p>
+</li>
+<li>
+  <h3>Centre-crop to exactly 3:2, then downscale to 900×600</h3>
+  <p>Go's stdlib has no resampler; <code>golang.org/x/image/draw</code> with <code>CatmullRom</code> does it and
+  is the only new dependency. Crop before scaling, so the resample runs over the smallest possible pixel count.</p>
+</li>
+<li>
+  <h3>Re-encode as JPEG, quality ~82, and strip metadata</h3>
+  <p>Re-encoding drops EXIF as a side effect, which is worth having deliberately: original photos carry GPS
+  coordinates, camera serials and timestamps, and none of that should end up in a file served unauthenticated
+  over HTTP. ~120 KB per tile.</p>
+</li>
+<li>
+  <h3>Never let one bad file stop the filler</h3>
+  <p>A truncated download, a HEIC that Go can't decode, a CMYK JPEG — log at debug, discard, pick another
+  manifest entry. A cap on consecutive failures (say 25) backs the filler off so a folder full of
+  <code>.mov</code> files doesn't spin the CPU.</p>
+</li>
+</ol>
+
+<hr />
+
+<h2 id="serving"><span class="num">5</span>Serving and the endpoint</h2>
+<p>Two router lines, both in the unauthenticated block beside <code>/health</code> and the login routes — the
+sign-in screen exists precisely because nobody is signed in yet.</p>
+<pre><code><span class="c">// Sign-in photo wall. No session: this is what the sign-in screen renders</span>
+<span class="c">// behind the card, and there is no session to require yet.</span>
+mux.HandleFunc(<span class="k">"GET /signin/photos"</span>, d.handleSignInPhotos)
+mux.Handle(<span class="k">"GET /signin-photos/"</span>, http.StripPrefix(<span class="k">"/signin-photos/"</span>, fileServer(dir)))</code></pre>
+
+<div class="note good">
+  <strong>A separate directory, not <code>uploads/</code>.</strong> The Phase 7 design mirrors <code>uploads/</code> as a growing, never-purged photo backup (CLAUDE.md
+  §11). Tiles are 100% re-derivable from Drive and live for minutes — mirroring them would inflate the backup
+  for nothing and worsen the disk-exhaustion failure mode that design already warns about. The cache is
+  <code>.gitignore</code>d and outside every backup path.
+</div>
+
+<h3>Response</h3>
+<pre><code>GET /signin/photos
+
+200 <span class="k">{ "photos": [ "/signin-photos/9f2c…1a.jpg", … ], "ttl_seconds": 900 }</span>
+200 <span class="k">{ "photos": [], "ttl_seconds": 900 }</span>   <span class="c">← not configured, manifest still building,</span>
+                                       <span class="c">  Drive unreachable, or reel momentarily drained.</span>
+                                       <span class="c">  Always 200. The wall is decoration; an error</span>
+                                       <span class="c">  status here would be a red herring in the log</span>
+                                       <span class="c">  on the one screen that must never look broken.</span></code></pre>
+<ul>
+  <li>Hand-out is atomic under the reel's mutex: take up to <em>n</em> <code>ready</code> tiles, flip them to
+    <code>served</code> with <code>expiresAt = now + ttl</code>, return the URLs. Two simultaneous requests can
+    never be handed the same tile.</li>
+  <li><code>Cache-Control: no-store</code> on the JSON — a cached list points at files that are already gone.</li>
+  <li>The tiles themselves get a long <code>max-age</code>: names are random and single-use, so a tile URL is
+    immutable for its whole life.</li>
+  <li>CORS needs nothing new. <code>withCORS</code> wraps the whole mux, so the Vite and Wails origins are
+    already covered.</li>
+</ul>
+
+<hr />
+
+<h2 id="frontend"><span class="num">6</span>The frontend component</h2>
+<p><code>photo-wall.svelte</code>, rendered inside the sign-in screen's <code>&lt;main&gt;</code> behind the card.
+It is the preview at the top of this page. The non-negotiables, each tied to something already decided:</p>
+
+<table>
+<thead><tr><th>Rule</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>pointer-events: none</code> + <code>aria-hidden="true"</code></td>
+    <td>The sign-in input refocuses on blur, because a keyboard-wedge scanner types into whatever has focus. A
+    clickable photo starts a blur/refocus fight with the one input in the app that must never lose focus.</td></tr>
+<tr><td>Animate <code>transform</code> only</td>
+    <td>design-system.md §11 bans animating <code>height</code>, <code>width</code> and <code>box-shadow</code>
+    outright. A <code>translate3d</code> marquee over a doubled tile list loops seamlessly at 0 → −50%.</td></tr>
+<tr><td><code>prefers-reduced-motion</code> → static</td>
+    <td>§10, non-negotiable. Replace the animation with a fixed offset; the wall becomes a still collage.</td></tr>
+<tr><td>Hidden below 1280px</td>
+    <td>§7.2. The columns are the first thing to go when someone resizes the Wails window.</td></tr>
+<tr><td>Slow, coprime cycles (110s / 134s)</td>
+    <td>Slow enough that peripheral vision stops tracking it. Coprime so the two columns never fall into step
+    and start reading as a single moving object.</td></tr>
+<tr><td>Fetch once on mount, never poll</td>
+    <td>One request per sign-in screen mount. If it fails or returns <code>[]</code>, render nothing and never
+    retry — the wall must not generate traffic or log noise on a machine with no internet.</td></tr>
+<tr><td><strong>Never block first paint</strong></td>
+    <td>The card, the label and the input render before the fetch is issued, and the columns populate when (or
+    if) it resolves. No <code>await</code> may sit between mount and the input being focusable. This is the
+    mechanism by which CLAUDE.md §2 survives: the sign-in screen's time-to-interactive does not depend on a
+    network call, so a hung or absent server for this endpoint costs nothing.</td></tr>
+<tr><td>Shuffle client-side</td>
+    <td>The server hands out a batch; the component shuffles and splits it between the two columns, so even the
+    same batch reads differently.</td></tr>
+<tr><td><code>alt=""</code>, deliberately</td>
+    <td>§10 requires real alt text for photos that carry meaning. These carry none — they're decorative, and an
+    empty alt on an <code>aria-hidden</code> container is the correct way to tell a screen reader to skip them.</td></tr>
+</tbody>
+</table>
+
+<p>Layout note: the card stays in exactly the position it occupies today. The columns are absolutely positioned
+against the screen, so adding or removing them does not move the input by a pixel — which matters, because
+someone scans at that box a hundred times a week and muscle memory is real.</p>
+
+<hr />
+
+<h2 id="admin"><span class="num">7</span>Admin control: the Google Drive tab</h2>
+<p>A sixth item in the admin sidebar, below <strong>Backup</strong>. One field: paste a Google Drive folder link,
+press <strong>Replace folder</strong>. The field is write-only — the link currently in use is never sent to a
+client, never rendered, never pre-filled.</p>
+
+<h3>Why the link is never shown back</h3>
+<p>A Drive folder link is not a label, it is a capability. A folder shared "anyone with the link" is readable by
+whoever holds the URL, so echoing it into the admin panel puts the entire folder one copy-paste away from anyone
+who reaches that screen — including anyone standing at a machine left open on it. The project already holds this
+rule: <code>app_settings.github_token</code> is redacted from the backup export for exactly this reason
+(CLAUDE.md §11), and password fields are never populated with the existing value. This is that rule reaching one
+more value, not a new policy.</p>
+<div class="note bad">
+  <strong>The folder ID is therefore a secret column.</strong> It must be added to the export's redaction list in
+  the same commit that creates it. Missed, the first nightly backup pushes the key to the folder into a GitHub
+  repository — the precise failure §11 already anticipated for <code>github_token</code>.
+</div>
+
+<h3>What the screen shows instead</h3>
+<p>An admin still needs to know whether the right folder is live. Three things give that without handing back the
+capability:</p>
+<ul>
+  <li><strong>The folder's name</strong>, not its ID and not its URL. A name is a label: it can be read, but a
+    folder cannot be opened by knowing what it is called.</li>
+  <li><strong>A live preview strip</strong> — six tiles currently in the reel, at the same 3:2 the wall uses.
+    This is the real confirmation, because the question an admin actually has is "are the right photographs
+    showing," and it reveals nothing the sign-in screen does not already show to everyone who walks up.</li>
+  <li><strong>Status</strong>: configured or not, when the folder last changed and which admin changed it,
+    manifest file count and build time, reel ready/served counts, whether <code>rclone</code> is on
+    <code>PATH</code>, and the last error.</li>
+</ul>
+
+<h3>Accepted input</h3>
+<p>The field takes whatever Drive's Share button put on the clipboard:</p>
+<pre><code>https://drive.google.com/drive/folders/<span class="k">&lt;ID&gt;</span>?usp=sharing
+https://drive.google.com/drive/folders/<span class="k">&lt;ID&gt;</span>
+https://drive.google.com/drive/u/0/folders/<span class="k">&lt;ID&gt;</span>
+https://drive.google.com/open?id=<span class="k">&lt;ID&gt;</span>
+<span class="k">&lt;ID&gt;</span>                                   <span class="c">← a bare ID, pasted from elsewhere</span></code></pre>
+<p>Anything else is refused with a message naming the forms above, not a generic failure. Requiring a
+hand-extracted ID would be the kind of demand that gets a folder misconfigured once and then avoided forever.</p>
+
+<h3>Probe before commit</h3>
+<p>The paste is validated against Drive <strong>before</strong> anything is written:</p>
+<ol>
+  <li>Parse the URL to an ID, or refuse.</li>
+  <li>Run a bounded listing against that ID with the configured credential.</li>
+  <li>Refuse on failure, naming what actually went wrong — <em>that folder isn't reachable with the configured
+    Drive account: check it's shared with that account, or set to anyone-with-the-link</em>.</li>
+</ol>
+<p>Without this check a typo or an unshared folder returns a success message and the wall silently empties ten
+minutes later, with nothing on any screen connecting the two events. The probe is the most valuable part of the
+feature.</p>
+
+<h3>Switching invalidates the reel</h3>
+<p>A switch is a config write <em>plus</em> a teardown. Doing only the first leaves the wall showing photographs
+from the folder that was just replaced — the exact outcome this screen exists to prevent. Under the reel's mutex:</p>
+<ol>
+  <li>Write the new ID to <code>app_settings</code> and <strong>increment a generation counter</strong> held
+    beside the reel.</li>
+  <li>Discard the manifest.</li>
+  <li>Delete every <code>ready</code> tile. Tiles already <code>served</code> are left to expire on their TTL —
+    their URLs sit in a browser that has already rendered them, and 404ing a live page to save fifteen minutes
+    is the worse trade.</li>
+  <li>Kick a manifest rebuild in the background.</li>
+</ol>
+<p>The generation counter is what makes this safe under concurrency. A fetch can be in flight when the switch
+lands; it carries the generation it began under, and a tile whose generation no longer matches is written nowhere
+and deleted. Without it, a slow <code>rclone cat</code> deposits a photograph from the replaced folder into the
+new reel minutes later, unreproducibly.</p>
+<div class="note flag">
+  <strong>The rebuild is not instant and the screen must say so.</strong> A large folder takes minutes to list
+  (§3). Until it finishes the wall is empty and the endpoint returns <code>[]</code> — correct, but
+  indistinguishable from a broken feature unless the screen reports
+  <code>rebuilding — 12,400 files listed so far</code>.
+</div>
+
+<h3>Endpoints</h3>
+<p>Admin-only, enforced by <code>RequireAdmin</code> inside <code>internal/stockroom</code>, not by the router.</p>
+<table>
+<thead><tr><th>Route</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>GET /admin/photo-wall</code></td><td>status only. <strong>Never</strong> includes the folder ID or a URL. Carries the folder name, counts, timestamps, last error</td></tr>
+<tr><td><code>PUT /admin/photo-wall</code></td><td><code>{link}</code>; parse → probe → switch → invalidate. The response is the same status shape, still without the ID</td></tr>
+<tr><td><code>POST /admin/photo-wall/rebuild</code></td><td>force a manifest refresh against the current folder</td></tr>
+<tr><td><code>GET /admin/photo-wall/preview</code></td><td>up to six tile URLs <strong>without</strong> marking them served — a preview must not consume the buffer the sign-in screen is about to draw from</td></tr>
+</tbody>
+</table>
+<p><code>ErrNotConfigured</code> (503) when no remote is set, consistent with <code>UPLOADS_DIR</code> and
+<code>BACKUP_DIR</code>.</p>
+
+<h3>A switch is an audited event</h3>
+<p>The change writes an <code>activity_log</code> row naming the admin and the timestamp. It records
+<strong>the folder name, never the ID</strong>: the log is itself exported in backups, and not echoing the link
+to the screen buys nothing if it is sitting in <code>activity_log.csv</code>. The accepted cost is that the log
+can say a folder was replaced, by whom and when, but cannot be used to recover the link that was replaced — that
+has to come from Drive again.</p>
+
+<hr />
+
+<h2 id="config"><span class="num">8</span>Configuration</h2>
+<p><code>SIGNIN_PHOTOS_REMOTE</code> is an install-time value and stays in <code>.env</code>.
+<strong>The folder is seeded from <code>.env</code> on first boot and then owned by <code>app_settings</code></strong>,
+because the admin panel (§7) is the interface for changing it and a value living in two places drifts. This is the
+Phase 7 decision (CLAUDE.md §11) applied to the first feature that needs it, rather than a second mechanism
+invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cleanly.</p>
+
+<table>
+<thead><tr><th>Var</th><th>Purpose</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>SIGNIN_PHOTOS_REMOTE</code></td><td>rclone remote for the photo folder. Blank disables the wall entirely.</td><td>(none)</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_FOLDER_ID</code></td><td>first-boot default for the live folder; ignored once <code>app_settings</code> holds one. <strong>Redacted from the backup export</strong> (§7)</td><td>(none)</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot.</td><td><code>./.cache/signin-photos</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_COUNT</code></td><td>ready tiles to keep buffered</td><td><code>48</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_BATCH</code></td><td>tiles handed out per request</td><td><code>16</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_TTL_MINUTES</code></td><td>how long a served tile survives before deletion</td><td><code>15</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_MANIFEST_HOURS</code></td><td>manifest refresh interval</td><td><code>168</code> (weekly)</td></tr>
+</tbody>
+</table>
+<p class="sub">Add <code>.cache/</code> to <code>.gitignore</code> alongside <code>uploads/</code>.</p>
+
+<hr />
+
+<h2 id="failure"><span class="num">9</span>Failure modes</h2>
+<p>Every row resolves to the same place, and that is the point. Try "Drive unreachable" in the preview above.</p>
+<table>
+<thead><tr><th>Condition</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td><code>SIGNIN_PHOTOS_REMOTE</code> unset</td><td>No goroutine starts. Endpoint returns <code>[]</code>. Today's sign-in screen.</td></tr>
+<tr><td><code>rclone</code> not installed</td><td>Logged once at startup as a warning, feature disabled. Never fatal — same posture as the failsafe admin (CLAUDE.md §7).</td></tr>
+<tr><td>No internet</td><td>Manifest refresh and fetches fail, logged at debug with backoff. The reel drains, the endpoint returns <code>[]</code>, the wall disappears.</td></tr>
+<tr><td>Manifest still building</td><td><code>[]</code> until the first listing completes.</td></tr>
+<tr><td>Folder empty / all files rejected</td><td>Filler backs off after 25 consecutive rejections and logs a single explanatory line.</td></tr>
+<tr><td>OAuth token expired</td><td>rclone refreshes it. If refresh fails, one clear warning naming <code>rclone config reconnect</code>.</td></tr>
+<tr><td>Reel drained by a sign-in burst</td><td>Fewer tiles returned; the component repeats what it has to fill the column.</td></tr>
+<tr><td>Tile 404s (raced the reaper)</td><td><code>onerror</code> hides that <code>&lt;img&gt;</code>. Never a broken-image icon.</td></tr>
+<tr><td>Pasted text isn't a Drive folder link</td><td><code>400</code> naming the accepted forms (§7). Nothing is written.</td></tr>
+<tr><td>Pasted folder not reachable with the credential</td><td><code>400</code> naming the likely cause — not shared, or wrong account. Nothing is written; the previous folder stays live.</td></tr>
+<tr><td>Folder replaced, manifest rebuilding</td><td>Wall empty; the admin screen reports listing progress. Sign-in unaffected.</td></tr>
+<tr><td>New folder holds no usable photos</td><td>Permitted — it may be mid-upload. The filler backs off after 25 rejections and the admin screen reports <code>no usable photos found</code>, naming the 3:2 gate.</td></tr>
+<tr><td>Disk full</td><td>Writes fail, logged, reel stays at whatever size it reached. Bounded at ~6 MB, so this is not the thing that fills the disk.</td></tr>
+</tbody>
+</table>
+<div class="note">
+  <strong>The invariant:</strong> no failure in this subsystem may delay, block or visibly break sign-in. The
+  wall is the first thing to go and the last thing to complain.
+</div>
+
+<hr />
+
+<h2 id="testing"><span class="num">10</span>Testing</h2>
+<p>Consistent with the suite's "one happy path and one gate per module" shape (CLAUDE.md §13). rclone is stubbed
+behind a small interface so none of this needs a network or a Google account.</p>
+<ul>
+  <li><strong>Normalizer, happy path</strong> — a 3000×2000 JPEG comes out exactly 900×600.</li>
+  <li><strong>Ratio gate</strong> — a 1:1 and a 21:9 are rejected; a 4:3 is accepted and cropped.</li>
+  <li><strong>EXIF orientation</strong> — a portrait tagged orientation 6 comes out upright, and is then
+    <em>rejected</em> by the ratio gate rather than emerging sideways. This is the regression that matters most.</li>
+  <li><strong>Metadata stripped</strong> — an input with a GPS tag produces an output with none.</li>
+  <li><strong>Reel lifecycle</strong> — fill to target, take a batch, assert the files still exist immediately
+    after (the delete-on-hand-out bug), advance the clock past the TTL, assert they're gone and the reel refilled.</li>
+  <li><strong>Concurrent take</strong> — two goroutines taking batches never receive the same tile ID.</li>
+  <li><strong>Boot wipe</strong> — a directory seeded with junk is empty after startup.</li>
+  <li><strong>Endpoint</strong> — 200 with <code>[]</code> when unconfigured, and reachable with no session or cookie.</li>
+  <li><strong>Link parsing</strong> — every accepted form in §7 yields the same ID; a Docs URL, a file URL and
+    free text are refused.</li>
+  <li><strong>Probe gates the write</strong> — an unreachable folder leaves <code>app_settings</code> unchanged
+    and the previous folder live.</li>
+  <li><strong>The ID never leaves the server</strong> — assert the <code>GET</code> and <code>PUT</code> response
+    bodies contain neither the folder ID nor any <code>drive.google.com</code> string. This is the test that keeps
+    the privacy property from quietly regressing when someone later adds a debug field.</li>
+  <li><strong>Switch invalidates</strong> — fill the reel, switch, assert every <code>ready</code> tile is gone,
+    <code>served</code> tiles survive, the manifest is discarded and the generation advanced.</li>
+  <li><strong>Preview does not consume</strong> — two preview calls leave the tiles <code>ready</code> and still
+    available to <code>/signin/photos</code>.</li>
+  <li><strong>Manual, on the real Drive</strong> — run the manifest build against the actual folder and time it;
+    confirm the reel fills; pull the network cable and confirm sign-in is untouched; watch the wall in the Wails
+    window for a full cycle on the slowest machine available.</li>
+</ul>
+
+<hr />
+
+<h2 id="order"><span class="num">11</span>Build order</h2>
+<p>Backend first. Each step is independently verifiable, and the frontend is an afternoon once the endpoint
+returns real URLs.</p>
+<ol class="steps">
+<li><h3>Config + directory + boot wipe</h3><p>Four <code>Config</code> fields, <code>Options.PhotoWall</code>, the
+  cache dir created and cleared at startup. Verify: server starts, directory appears, junk in it disappears.</p></li>
+<li><h3>rclone remote, by hand</h3><p><code>rclone config</code> with <code>drive.readonly</code> and
+  <code>root_folder_id</code> left blank (§3); confirm <code>rclone lsjson 'gdrive,root_folder_id=&lt;ID&gt;:' -R
+  --files-only</code> lists the intended folder. Verify that folder's Drive sharing setting in the same pass (§0).</p></li>
+<li><h3>Manifest build + refresh</h3><p>Background, staged write, weekly timer. Verify: <code>manifest.json</code>
+  appears with a plausible entry count; time the first run.</p></li>
+<li><h3>Normalizer</h3><p>Pure function, <code>io.Reader</code> in, <code>[]byte</code> out. All six image tests
+  land here. Easiest piece to get right in isolation and the easiest to get subtly wrong in situ.</p></li>
+<li><h3>The reel</h3><p>State machine, topper-upper, reaper, <code>TakePhotos</code>. Verify by watching the
+  directory fill to 48 and hold steady.</p></li>
+<li><h3>Endpoint + static mount</h3><p>Two router lines and a handler. Verify with
+  <code>curl 127.0.0.1:8080/signin/photos</code> — no token — then <code>curl -O</code> a returned URL and open it.</p></li>
+<li><h3><code>app_settings</code> + settings reader + redaction</h3><p>Migration, <code>settings.go</code>,
+  <code>.env</code> seeding on first boot, and the folder ID added to the export's secret list <em>in the same
+  commit</em>. Verify: change the row in Studio, restart, confirm the new value is live and <code>.env</code> is
+  ignored; run a backup and confirm <code>app_settings.csv</code> shows the ID redacted.</p></li>
+<li><h3>Admin endpoints</h3><p>Link parsing, the Drive probe, the switch, the generation counter, the four routes
+  in §7. Verify with <code>curl</code> and an admin token: paste a good link and watch the cache directory empty
+  and refill from the new folder; paste a bad one and confirm nothing changed.</p></li>
+<li><h3>The Svelte component</h3><p><code>photo-wall.svelte</code> + <code>signInPhotos()</code> + three lines in
+  <code>sign-in.svelte</code>. Check the input hasn't moved and still holds focus after a click anywhere on a photo.</p></li>
+<li><h3>The admin tab</h3><p><code>admin/google-drive.svelte</code>, the sixth sidebar item, the paste field,
+  the status block and the preview strip. Check the field never arrives pre-filled and that a failed probe leaves
+  the previous folder running.</p></li>
+<li><h3>Docs</h3><p><code>.env.example</code>, CLAUDE.md §8.1's endpoint table, §9's config table and a §13
+  decisions-log entry, design-system.md §8.1 and §8.7 and a §16 entry. Two decisions to record: a decorative wall
+  on the only unauthenticated screen, accepted because the exposure is physical and the source folder is curated;
+  and a Drive folder link treated as a credential — write-only in the UI, redacted from the export, and named by
+  folder rather than ID in <code>activity_log</code>.</p></li>
+</ol>
+
+<hr />
+<p class="sub" style="margin-top:40px">Preview tiles are generated placeholders. Palette, typography, spacing,
+motion timing and the sign-in card are the shipping values, read from
+<code>packages/ui/src/lib/styles/tokens.css</code> and <code>screens/sign-in.svelte</code>.</p>
+
+</div>
+
+<script>
+// Placeholder "photographs" — generated SVG, so this file stays self-contained
+// and works with no network, which is also the rule the app itself lives by.
+const PALETTES = [
+  ['#2f4048','#5b7d88','#8aa6ad'], ['#42382c','#7d6a4f','#a8926c'],
+  ['#31384a','#5f6f90','#93a3c0'], ['#43343a','#7a5f68','#a68b93'],
+  ['#2f4239','#5a7a66','#8ba895'], ['#3c3745','#6b6280','#9a91ab'],
+  ['#4a3c30','#8a6b4e','#b89a76'], ['#2d3f42','#547378','#87a5a8']
+];
+let seed = 20260916;
+function rnd(){ seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+
+function tile(i){
+  const p = PALETTES[Math.floor(rnd() * PALETTES.length)];
+  const horizon = 34 + rnd() * 32;
+  const sunX = 12 + rnd() * 76, sunY = 12 + rnd() * (horizon - 14), sunR = 4 + rnd() * 6;
+  let shapes = '';
+  const n = 2 + Math.floor(rnd() * 4);
+  for (let k = 0; k < n; k++) {
+    const w = 8 + rnd() * 26, x = rnd() * 100, h = 8 + rnd() * 34;
+    shapes += `<rect x="${x.toFixed(1)}" y="${(horizon - h).toFixed(1)}" width="${w.toFixed(1)}" height="${(h + 4).toFixed(1)}" fill="${p[0]}" opacity="${(0.45 + rnd() * 0.4).toFixed(2)}"/>`;
+  }
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 66.67" preserveAspectRatio="none">` +
+    `<rect width="100" height="66.67" fill="${p[1]}"/>` +
+    `<rect width="100" height="${horizon.toFixed(1)}" fill="${p[2]}"/>` +
+    `<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="${sunR.toFixed(1)}" fill="#e9e9e7" opacity="0.5"/>` +
+    shapes +
+    `<rect y="${horizon.toFixed(1)}" width="100" height="${(66.67 - horizon).toFixed(1)}" fill="${p[0]}" opacity="0.85"/>` +
+    `</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+const stripL = document.getElementById('strip-l');
+const stripR = document.getElementById('strip-r');
+const frame  = document.getElementById('frame');
+
+function fill(){
+  // Twelve distinct tiles per column, then the list is doubled so the marquee
+  // loops seamlessly at translateY(-50%) — the same trick the real component uses.
+  [stripL, stripR].forEach(strip => {
+    const set = Array.from({length: 12}, (_, i) => tile(i));
+    strip.innerHTML = set.concat(set)
+      .map(src => `<img class="tile" src="${src}" alt="" />`).join('');
+  });
+}
+fill();
+
+function toggle(id, cls){
+  const b = document.getElementById(id);
+  b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    frame.classList.toggle(cls, on);
+    if (cls === 'empty') {
+      document.querySelectorAll('.wall').forEach(w => w.style.display = on ? 'none' : '');
+    }
+  });
+}
+toggle('b-pause',   'paused');
+toggle('b-reduced', 'reduced');
+toggle('b-narrow',  'narrow');
+toggle('b-empty',   'empty');
+document.getElementById('b-shuffle').addEventListener('click', fill);
+</script>
+</body>
+</html>
