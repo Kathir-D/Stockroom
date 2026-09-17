@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -19,6 +20,17 @@ type Config struct {
 	UploadsDir         string
 	BackupDir          string
 	SessionIdleMinutes int
+
+	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). The
+	// remote is the switch: blank disables the feature entirely and no
+	// goroutine starts, which is the state every existing .env is in. The
+	// live folder is not here -- §7 makes it an admin-panel value seeded
+	// from app_settings, and a setting that lives in two places drifts.
+	SignInPhotosRemote     string
+	SignInPhotosDir        string
+	SignInPhotosCount      int
+	SignInPhotosBatch      int
+	SignInPhotosTTLMinutes int
 }
 
 // LoadConfig reads .env (searching the current directory and its parents, so
@@ -40,6 +52,9 @@ func LoadConfig() (Config, error) {
 		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
 		UploadsDir:         getenv("UPLOADS_DIR", "./uploads"),
 		BackupDir:          os.Getenv("BACKUP_DIR"),
+
+		SignInPhotosRemote: os.Getenv("SIGNIN_PHOTOS_REMOTE"),
+		SignInPhotosDir:    getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
 	}
 
 	// The idle timeout is the one value that must parse; a bad number is a
@@ -51,7 +66,41 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.SessionIdleMinutes = n
 
+	// The photo wall's three numbers follow the same rule as the idle
+	// timeout: a value that does not parse is a typo in .env, and a typo that
+	// silently falls back to the default is one nobody ever finds.
+	for _, v := range []struct {
+		key string
+		def int
+		out *int
+	}{
+		{"SIGNIN_PHOTOS_COUNT", DefaultPhotoWallCount, &cfg.SignInPhotosCount},
+		{"SIGNIN_PHOTOS_BATCH", DefaultPhotoWallBatch, &cfg.SignInPhotosBatch},
+		{"SIGNIN_PHOTOS_TTL_MINUTES", int(DefaultPhotoWallTTL / time.Minute), &cfg.SignInPhotosTTLMinutes},
+	} {
+		n, err := positiveInt(v.key, v.def)
+		if err != nil {
+			return Config{}, err
+		}
+		*v.out = n
+	}
+
 	return cfg, nil
+}
+
+// positiveInt reads key as a positive integer, falling back to def when it is
+// unset or empty. Anything else -- a word, a zero, a negative -- is a config
+// error naming the variable.
+func positiveInt(key string, def int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", key, raw)
+	}
+	return n, nil
 }
 
 // getenv returns the environment value for key, or def when it is unset or

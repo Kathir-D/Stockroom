@@ -53,6 +53,33 @@ func main() {
 		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
 	}
 
+	// The sign-in photo wall (docs/design/signin-photo-wall.html). The remote
+	// is the switch: with SIGNIN_PHOTOS_REMOTE unset no reel is built and no
+	// goroutine starts, which is every existing .env. Nothing here is fatal,
+	// for the same reason the failsafe admin is not: §9's invariant is that no
+	// failure in this subsystem may delay, block or visibly break sign-in, and
+	// a server that refuses to start over a decorative wall breaks it hardest.
+	//
+	// The reel has no source of photographs yet -- rclone (§3) and the
+	// normalizer (§4) are not built -- so with the remote set it creates and
+	// wipes its cache directory, idles empty, and hands out nothing.
+	if cfg.SignInPhotosRemote != "" {
+		wall, err := stockroom.NewPhotoWall(stockroom.PhotoWallOptions{
+			Dir:   cfg.SignInPhotosDir,
+			Count: cfg.SignInPhotosCount,
+			Batch: cfg.SignInPhotosBatch,
+			TTL:   time.Duration(cfg.SignInPhotosTTLMinutes) * time.Minute,
+		})
+		if err != nil {
+			log.Printf("warning: sign-in photo wall disabled, check SIGNIN_PHOTOS_DIR: %v", err)
+		} else {
+			db.PhotoWall = wall
+			// Stops with ctx, so Ctrl+C ends the reel with everything else.
+			go wall.Run(ctx)
+			log.Printf("sign-in photo wall caching in %s", cfg.SignInPhotosDir)
+		}
+	}
+
 	// ReadTimeout bounds the body as well as the headers. Without it a photo
 	// upload that trickles in a byte at a time holds a connection and its
 	// goroutine open forever, and ReadHeaderTimeout alone does not touch that

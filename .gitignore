@@ -28,6 +28,11 @@ supabase/.DS_Store
 
 # uploaded photos (served by the Go server)
 uploads/
+
+# Sign-in photo wall tile cache (SIGNIN_PHOTOS_DIR). Every file in it is a
+# re-derivable 900x600 crop that the server deletes minutes after showing it
+# and wipes wholesale on boot, so there is never anything here worth a commit.
+.cache/
 .claude/launch.json
 
 # Vitest coverage output
