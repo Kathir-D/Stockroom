@@ -161,6 +161,20 @@ from a Google Drive folder, normalized to one size, cached briefly on disk and d
 document is the build plan and the visual reference.</p>
 <p class="sub">Stockroom · drafted 2026-09-16 · sits alongside <code>docs/design/design-system.md</code> §8.1</p>
 
+<div class="card">
+  <strong>Status — §0 to §2 are built.</strong> The config block, the cache directory and its boot wipe, and the
+  reel itself — state machine, filler, reaper, <code>TakePhotos</code>, the generation counter — live in
+  <code>internal/stockroom/photowall.go</code> with eleven tests that need no network, no Google account and no
+  Postgres. <code>PhotoSource</code> is the seam §3 and §4 plug into; until they land the reel idles empty, hands
+  out nothing, and the sign-in screen is exactly what it was. §5 onward is unbuilt.
+  <br /><br />
+  Two things were decided while building and are written into the sections below rather than left as
+  commentary: the boot wipe <strong>refuses a directory it does not own</strong> (§2), and the reel is
+  <strong>assigned to <code>DB</code> by <code>main</code> rather than built by <code>Open</code></strong> (§2),
+  because <code>Open</code>'s only way to report a problem is to stop the server from starting and §9 forbids
+  that here.
+</div>
+
 <div class="toc">
   <a href="#preview">Preview — the frontend</a>
   <a href="#privacy">0 · Security and privacy posture</a>
@@ -270,14 +284,17 @@ for about fifteen minutes.</p>
     front of the machine" — physical access is the access control.</li>
 </ul>
 
-<div class="note flag">
-  <strong>Prerequisite: verify the source folder's Drive sharing setting before configuring the remote.</strong>
-  A folder set to <em>"Anyone with the link"</em> is readable by anyone who has ever been forwarded that URL —
-  a far wider exposure than a single machine, and one that exists independently of this feature. Confirm the
-  setting is restricted, or accept it knowingly.<br /><br />
-  It also determines setup: a link-public folder can be read by rclone with no OAuth at all
-  (<code>--drive-root-folder-id</code> against an unauthenticated remote); a restricted folder requires the
-  normal <code>rclone config</code> OAuth flow.
+<div class="note good">
+  <strong>Settled: the source folder may be shared "anyone with the link", and that is accepted.</strong>
+  Such a folder is readable by whoever has been forwarded the URL, which is wider than this machine. The owner
+  weighed that and took it: the folder holds department photography the school already circulates, and the
+  exposure exists whether or not this feature is built. It is recorded here as a <em>closed decision</em>
+  rather than a caution on purpose — nothing in this document, in the build order, or in the admin panel asks
+  anyone to go and check the sharing setting, and nobody should add such a prompt later.<br /><br />
+  What is still worth knowing is that it changes setup, not risk: a link-public folder can be read by rclone
+  with no OAuth at all (<code>--drive-root-folder-id</code> against an unauthenticated remote), where a
+  restricted folder needs the normal <code>rclone config</code> sign-in. §3 describes the sign-in flow and
+  works either way.
 </div>
 
 <h3>Residual risks, accepted</h3>
@@ -288,9 +305,8 @@ for about fifteen minutes.</p>
     student name in the browse list.</li>
   <li>Photos are drawn at random from whatever folder is live, and an admin may replace that folder at any
     time by pasting a link (§7). Nothing curates the contents, so everything in the live folder will eventually
-    appear on the unauthenticated screen — and the sharing-setting caution above applies to <strong>every folder
-    ever pasted</strong>, not only the one configured at install. The admin performing the paste owns that
-    decision; the preview strip is what makes it checkable before it ships.</li>
+    appear on the unauthenticated screen. The admin performing the paste owns that decision, and the preview
+    strip is what makes it checkable before anyone else sees it.</li>
 </ul>
 
 <hr />
@@ -334,10 +350,13 @@ the most core screen there is. A firewall hiccup must produce today's sign-in sc
 <tr><td><code>supabase/migrations/2026…_app_settings.sql</code></td><td><span class="pill new">new</span></td><td>the <code>app_settings</code> table Phase 7 also wants; this feature needs it first</td></tr>
 <tr><td><code>internal/stockroom/photowall_test.go</code></td><td><span class="pill new">new</span></td><td>normalizer + reel lifecycle + link parsing, with rclone stubbed</td></tr>
 <tr><td><code>internal/stockroom/backup.go</code></td><td><span class="pill edit">edit</span></td><td>redact the folder ID from the CSV export</td></tr>
-<tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>four new <code>Config</code> fields</td></tr>
-<tr><td><code>internal/stockroom/db.go</code></td><td><span class="pill edit">edit</span></td><td><code>Options.PhotoWall</code>; the reel hangs off <code>DB</code> like <code>Sessions</code> does</td></tr>
+<tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>five new <code>Config</code> fields — the reel's block from §8. The folder ID and the manifest interval
+  arrive with §3 and §7, when something reads them</td></tr>
+<tr><td><code>internal/stockroom/db.go</code></td><td><span class="pill edit">edit</span></td><td><code>DB.PhotoWall</code>. The reel hangs off <code>DB</code> the way <code>Sessions</code> does, but is
+  <em>assigned</em> rather than built by <code>Open</code> — see §2, "Who builds the reel"</td></tr>
 <tr><td><code>server/photowall.go</code></td><td><span class="pill new">new</span></td><td><code>GET /signin/photos</code> plus the four admin handlers</td></tr>
 <tr><td><code>server/router.go</code></td><td><span class="pill edit">edit</span></td><td>two unauthenticated routes + four admin routes</td></tr>
+<tr><td><code>server/main.go</code></td><td><span class="pill edit">edit</span></td><td>build the reel when the remote is set, warn and carry on when that fails, run it on the signal context</td></tr>
 <tr><td><code>packages/ui/src/lib/components/app/photo-wall.svelte</code></td><td><span class="pill new">new</span></td><td>the two columns</td></tr>
 <tr><td><code>packages/ui/src/lib/api/index.ts</code></td><td><span class="pill edit">edit</span></td><td><code>signInPhotos()</code></td></tr>
 <tr><td><code>packages/ui/src/lib/screens/sign-in.svelte</code></td><td><span class="pill edit">edit</span></td><td>render <code>&lt;PhotoWall /&gt;</code> behind the card</td></tr>
@@ -373,8 +392,9 @@ and deleted once shown. Nothing accumulates on disk, which bounds both storage a
 
 <h3>Mechanics</h3>
 <ul>
-  <li><strong>On boot, wipe the directory.</strong> Every tile is single-use and re-derivable; a leftover from
-    last run is just a photo we already showed. Wiping also means a crash can't strand files forever.</li>
+  <li><strong>On boot, wipe the directory — but only one the server owns.</strong> Every tile is single-use and
+    re-derivable; a leftover from last run is just a photo we already showed, and wiping is also what stops a
+    crash from stranding files forever. The wipe needs a guard, though: see the note below.</li>
   <li><strong>One goroutine does both jobs</strong>, on a short tick (~10s): reap anything expired, then top up
     while <code>ready &lt; target</code>. One goroutine means no lock dance between the filler and the reaper.</li>
   <li><strong>Fetches are serialized and rate-limited</strong> — one photo at a time, with a small delay. There
@@ -387,6 +407,43 @@ and deleted once shown. Nothing accumulates on disk, which bounds both storage a
   <li><strong>Sizing.</strong> 48 ready tiles at ~120 KB each is about 6 MB of disk, and at 16 per batch that's
     three sign-ins of runway — far more than the refill rate needs on a machine that sees a sign-in every few
     minutes.</li>
+</ul>
+
+<div class="note bad">
+  <strong>The wipe deletes everything in a path a human typed.</strong> <code>SIGNIN_PHOTOS_DIR</code> is an
+  <code>.env</code> value, and "emptied on every start" applied to a mistyped path is a data-loss bug, not a
+  cache policy: pointed at <code>./uploads</code> by one slip of the finger it would destroy every profile and
+  asset photo on the machine at the next restart, quietly, on a machine whose whole job is to be left running.
+  <br /><br />
+  So the reel <strong>marks the directory it owns</strong>. The first time it adopts one it writes a
+  <code>.stockroom-signin-photos</code> file there, and on every later boot it only empties a directory carrying
+  that marker. A directory with contents and no marker is refused: nothing is deleted, the feature turns itself
+  off, and the server logs one line naming the variable to fix. An <em>empty</em> directory is adopted without
+  ceremony, because that is what a fresh install and a fresh <code>t.TempDir()</code> both look like.
+  <br /><br />
+  The marker is a file rather than, say, requiring the path to end in a known name, because the check has to
+  survive an admin choosing their own path on the closet PC — which the config table invites them to do.
+</div>
+
+<h3>Who builds the reel</h3>
+<p>The reel hangs off <code>DB</code> beside <code>Sessions</code>, but unlike <code>Sessions</code> it is
+<strong>assigned by <code>server/main.go</code> rather than built inside <code>Open</code></strong>, and that is
+a deliberate departure from the file table in §1.</p>
+<p><code>Open</code>'s only way to report a problem is to return an error, and <code>main</code>'s only response
+to one is <code>log.Fatalf</code> — a database it cannot reach is a server that should not start. Routing the
+photo wall through the same door would make an unwritable cache directory, or a mistyped
+<code>SIGNIN_PHOTOS_DIR</code>, fatal to the whole API. That directly contradicts §9's invariant: a server that
+refuses to boot has not merely broken the wall, it has broken sign-in in the most complete way available.</p>
+<p>So <code>main</code> calls <code>NewPhotoWall</code> itself, logs a warning on failure and serves without one
+— the same shape <code>EnsureFailsafeAdmin</code> already has (CLAUDE.md §7), so this is an existing pattern
+reaching one more feature rather than a new one. Two consequences worth stating:</p>
+<ul>
+  <li><code>DB.PhotoWall</code> is <code>nil</code> whenever the feature is off, which is the common case and
+    not an error. <strong>Every exported method on the reel is nil-receiver safe</strong> — <code>TakePhotos</code>
+    on a nil reel returns no URLs and a usable TTL — so §5's handler and §7's screen never branch on it. A nil
+    check that handlers have to remember is a nil check one of them will eventually forget, on the one screen
+    that must never break.</li>
+  <li>The goroutine's lifetime is the signal context, so Ctrl+C stops the reel with everything else.</li>
 </ul>
 
 <h3>Tile identity</h3>
@@ -679,7 +736,7 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <tbody>
 <tr><td><code>SIGNIN_PHOTOS_REMOTE</code></td><td>rclone remote for the photo folder. Blank disables the wall entirely.</td><td>(none)</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_FOLDER_ID</code></td><td>first-boot default for the live folder; ignored once <code>app_settings</code> holds one. <strong>Redacted from the backup export</strong> (§7)</td><td>(none)</td></tr>
-<tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot.</td><td><code>./.cache/signin-photos</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot, so it must be a directory of its own — one holding files the server did not write is refused and the feature stays off (§2)</td><td><code>./.cache/signin-photos</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_COUNT</code></td><td>ready tiles to keep buffered</td><td><code>48</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_BATCH</code></td><td>tiles handed out per request</td><td><code>16</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_TTL_MINUTES</code></td><td>how long a served tile survives before deletion</td><td><code>15</code></td></tr>
@@ -696,6 +753,8 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <thead><tr><th>Condition</th><th>Behaviour</th></tr></thead>
 <tbody>
 <tr><td><code>SIGNIN_PHOTOS_REMOTE</code> unset</td><td>No goroutine starts. Endpoint returns <code>[]</code>. Today's sign-in screen.</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_DIR</code> names a directory holding files the server did not write</td><td>Refused at startup, nothing deleted, one warning naming the variable, feature off. The server starts normally (§2).</td></tr>
+<tr><td>Cache directory unwritable (permissions, missing parent, full disk at boot)</td><td>Same: warning, feature off, API up. Nothing about the wall is ever fatal to startup.</td></tr>
 <tr><td><code>rclone</code> not installed</td><td>Logged once at startup as a warning, feature disabled. Never fatal — same posture as the failsafe admin (CLAUDE.md §7).</td></tr>
 <tr><td>No internet</td><td>Manifest refresh and fetches fail, logged at debug with backoff. The reel drains, the endpoint returns <code>[]</code>, the wall disappears.</td></tr>
 <tr><td>Manifest still building</td><td><code>[]</code> until the first listing completes.</td></tr>
@@ -729,8 +788,20 @@ behind a small interface so none of this needs a network or a Google account.</p
   <li><strong>Reel lifecycle</strong> — fill to target, take a batch, assert the files still exist immediately
     after (the delete-on-hand-out bug), advance the clock past the TTL, assert they're gone and the reel refilled.</li>
   <li><strong>Concurrent take</strong> — two goroutines taking batches never receive the same tile ID.</li>
-  <li><strong>Boot wipe</strong> — a directory seeded with junk is empty after startup.</li>
+  <li><strong>Boot wipe</strong> — a marked directory seeded with junk, including a subdirectory, is empty
+    after startup, and the marker survives.</li>
+  <li><strong>The wipe refuses a directory it does not own</strong> — a folder holding a profile photo and no
+    marker returns <code>ErrInvalid</code>, names <code>SIGNIN_PHOTOS_DIR</code>, and leaves the photo on disk.
+    An empty directory, and a path that does not exist yet, are both adopted. This is the test standing between
+    a typo and every photo on the machine.</li>
   <li><strong>Endpoint</strong> — 200 with <code>[]</code> when unconfigured, and reachable with no session or cookie.</li>
+  <li><strong>A nil reel is not a crash</strong> — <code>TakePhotos</code> and <code>Invalidate</code> on the
+    off state return empty and do nothing, because that is the state most of this code runs in.</li>
+  <li><strong>Config refuses a typo</strong> — <code>SIGNIN_PHOTOS_COUNT=none</code>, <code>=0</code> and
+    <code>=-4</code> each stop startup with the variable named, rather than falling back to the default where
+    nobody would ever notice.</li>
+  <li><strong>Backoff</strong> — the filler rests after 25 consecutive failures and one success clears the
+    record, so a transient outage does not leave the reel idle for five minutes after the network returns.</li>
   <li><strong>Link parsing</strong> — every accepted form in §7 yields the same ID; a Docs URL, a file URL and
     free text are refused.</li>
   <li><strong>Probe gates the write</strong> — an unreachable folder leaves <code>app_settings</code> unchanged
@@ -753,17 +824,23 @@ behind a small interface so none of this needs a network or a Google account.</p
 <p>Backend first. Each step is independently verifiable, and the frontend is an afternoon once the endpoint
 returns real URLs.</p>
 <ol class="steps">
-<li><h3>Config + directory + boot wipe</h3><p>Four <code>Config</code> fields, <code>Options.PhotoWall</code>, the
-  cache dir created and cleared at startup. Verify: server starts, directory appears, junk in it disappears.</p></li>
+<li><h3>Config + directory + boot wipe <span class="pill new">built</span></h3><p>Five <code>Config</code> fields,
+  <code>NewPhotoWall</code> called from <code>server/main.go</code>, the cache dir created, marked and cleared at
+  startup. Verified: the server starts, the directory appears, junk in it disappears, and a directory holding
+  anything the server did not write is refused with the files intact and the API up.</p></li>
 <li><h3>rclone remote, by hand</h3><p><code>rclone config</code> with <code>drive.readonly</code> and
   <code>root_folder_id</code> left blank (§3); confirm <code>rclone lsjson 'gdrive,root_folder_id=&lt;ID&gt;:' -R
-  --files-only</code> lists the intended folder. Verify that folder's Drive sharing setting in the same pass (§0).</p></li>
+  --files-only</code> lists the intended folder. The folder's sharing setting is not checked here or anywhere
+  else — §0 closed that question.</p></li>
 <li><h3>Manifest build + refresh</h3><p>Background, staged write, weekly timer. Verify: <code>manifest.json</code>
   appears with a plausible entry count; time the first run.</p></li>
 <li><h3>Normalizer</h3><p>Pure function, <code>io.Reader</code> in, <code>[]byte</code> out. All six image tests
   land here. Easiest piece to get right in isolation and the easiest to get subtly wrong in situ.</p></li>
-<li><h3>The reel</h3><p>State machine, topper-upper, reaper, <code>TakePhotos</code>. Verify by watching the
-  directory fill to 48 and hold steady.</p></li>
+<li><h3>The reel <span class="pill new">built</span></h3><p>State machine, topper-upper, reaper,
+  <code>TakePhotos</code>, and the generation counter — brought forward from §7 because the property it protects
+  (a photograph from a replaced folder surfacing minutes later) cannot be retrofitted into the fill path and is
+  unreproducible once it ships. Covered by the reel tests; watching the directory fill to 48 and hold steady
+  waits on a real source in step 4.</p></li>
 <li><h3>Endpoint + static mount</h3><p>Two router lines and a handler. Verify with
   <code>curl 127.0.0.1:8080/signin/photos</code> — no token — then <code>curl -O</code> a returned URL and open it.</p></li>
 <li><h3><code>app_settings</code> + settings reader + redaction</h3><p>Migration, <code>settings.go</code>,
@@ -779,10 +856,11 @@ returns real URLs.</p>
   the status block and the preview strip. Check the field never arrives pre-filled and that a failed probe leaves
   the previous folder running.</p></li>
 <li><h3>Docs</h3><p><code>.env.example</code>, CLAUDE.md §8.1's endpoint table, §9's config table and a §13
-  decisions-log entry, design-system.md §8.1 and §8.7 and a §16 entry. Two decisions to record: a decorative wall
-  on the only unauthenticated screen, accepted because the exposure is physical and the source folder is curated;
-  and a Drive folder link treated as a credential — write-only in the UI, redacted from the export, and named by
-  folder rather than ID in <code>activity_log</code>.</p></li>
+  decisions-log entry, design-system.md §8.1 and §8.7 and a §16 entry. Three decisions to record: a decorative
+  wall on the only unauthenticated screen, accepted because the exposure is physical and the folder's sharing
+  setting was weighed and accepted (§0); a Drive folder link treated as a credential — write-only in the UI,
+  redacted from the export, and named by folder rather than ID in <code>activity_log</code>; and a boot wipe
+  that refuses a directory it does not own (§2).</p></li>
 </ol>
 
 <hr />

@@ -44,6 +44,18 @@ type DB struct {
 	// a test may point them at a temp dir after Open.
 	UploadsDir string
 	BackupDir  string
+
+	// PhotoWall is the sign-in photo wall's reel
+	// (docs/design/signin-photo-wall.html §2), or nil when the feature is
+	// off. Every method on it is nil-safe, so callers do not branch on this.
+	//
+	// It is assigned by the caller rather than built by Open, unlike
+	// Sessions. Open reports its errors by refusing to start, and the wall's
+	// §9 invariant is that no failure in this subsystem may break sign-in --
+	// a bad SIGNIN_PHOTOS_DIR must cost the decoration and nothing else. So
+	// server/main.go calls NewPhotoWall, logs a warning on failure and serves
+	// without one, which is exactly how it already treats the failsafe admin.
+	PhotoWall *PhotoWall
 }
 
 // Open connects to Postgres at databaseURL and verifies the connection with a
