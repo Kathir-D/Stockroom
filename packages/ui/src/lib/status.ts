@@ -1,18 +1,30 @@
 /**
- * The status system (design-system.md §6): five states, three of them on the
- * asset and two derived here.
+ * The status system (design-system.md §6): six states, three of them on the
+ * asset and three derived here.
  *
- * Hue means state and nothing else in this app — green, blue, amber, red and
- * grey are reserved for exactly these five, and nothing decorative is ever
+ * Hue means state and nothing else in this app — green, blue, orange, amber, red
+ * and grey are reserved for exactly these six, and nothing decorative is ever
  * coloured (§1.2). That rule only holds if there is one place that decides which
  * state an asset is in, which is this file. Colour is also never the only signal
  * (§1.3): every state carries its word, and `<StatusDot>` never renders the dot
  * without the label.
+ *
+ * Two of the six are about the *viewer*, not the asset: an item that is out
+ * reads blue when the person looking at it is the one holding it and orange when
+ * somebody else is. Which is why `resolveStatus` takes a viewer id — the same
+ * row is honestly two different things to two different people, and on a shared
+ * closet machine "is that mine?" is the question the browse list is scanned for.
  */
 
 import type { AssetCustody, AssetListItem, AssetStatus } from "./api/types"
 
-export type StatusState = "available" | "out" | "due-soon" | "overdue" | "unavailable"
+export type StatusState =
+  | "available"
+  | "out"
+  | "out-other"
+  | "due-soon"
+  | "overdue"
+  | "unavailable"
 
 /**
  * How close to its due date a checked-out item has to be to read "due soon".
@@ -36,6 +48,7 @@ export interface ResolvedStatus {
 const PRESENTATION: Record<StatusState, Pick<ResolvedStatus, "fg" | "bg">> = {
   available: { fg: "text-status-available", bg: "bg-status-available-bg" },
   out: { fg: "text-status-out", bg: "bg-status-out-bg" },
+  "out-other": { fg: "text-status-out-other", bg: "bg-status-out-other-bg" },
   "due-soon": { fg: "text-status-due-soon", bg: "bg-status-due-soon-bg" },
   overdue: { fg: "text-status-overdue", bg: "bg-status-overdue-bg" },
   unavailable: { fg: "text-status-unavailable", bg: "bg-status-unavailable-bg" },
@@ -85,24 +98,68 @@ function plural(n: number, word: string) {
 }
 
 /**
- * Decide the state and the label for one unit.
+ * A person as a row label: `Jordan Smith` becomes `Jordan S`
+ *
+ * The status line sits in a fixed-width column beside a name, a serial and a
+ * date, so a full name is the one thing in it that can be arbitrarily long. The
+ * surname is reduced to an initial rather than truncated, because a clipped
+ * `Jordan Smithers…` is both longer and less certain than `Jordan S` — and the
+ * full name is still one hover away in the tooltip (`custodianLine`).
+ *
+ * **No trailing period** (2026-09-16, by preference). The row already uses `·`
+ * as its separator, so a period beside it was a second punctuation mark doing no
+ * work.
+ *
+ * Left alone when there is no surname to abbreviate: a mononym, and the
+ * student-number fallback `displayName` produces for a profile with no name at
+ * all (internal/stockroom/assets.go), are returned as they arrived. A middle
+ * name survives too (`Mary Jane Watson` → `Mary Jane W`); the initial is always
+ * taken from the last token, which is the part that identifies a family.
+ */
+export function abbreviateName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return name.trim()
+  // A surname already entered as an initial ("Jordan S." on a roster row) loses
+  // its period here too, so one name renders one way whatever the source.
+  const last = parts[parts.length - 1].replace(/\.+$/, "")
+  return [...parts.slice(0, -1), last.charAt(0).toUpperCase()].join(" ")
+}
+
+/**
+ * Decide the state and the label for one unit, as seen by one viewer.
  *
  * `custody` is the open custody event, which is what actually says whether an
  * item is out: the server reads the row rather than trusting `assets.status`, so
  * a drifted status still reports the real holder (CLAUDE.md §13). This follows
  * the same order for the same reason.
+ *
+ * `viewerId` splits "out" in two (see the file comment). It is optional and
+ * defaults to null, which reads *every* checked-out item as somebody else's —
+ * the safe default for the one caller that has no viewer in scope, since the
+ * only thing it can get wrong is showing an unfamiliar name that is your own.
+ *
+ * Overdue and due-soon stay red and amber for everyone, holder or not: they are
+ * statements about a deadline, and a late item is late no matter who has it.
+ * They name the holder in their label so the ownership question is still
+ * answered, just not by hue.
  */
 export function resolveStatus(
-  asset: Pick<AssetListItem, "status"> & { custody?: AssetCustody | null }
+  asset: Pick<AssetListItem, "status"> & { custody?: AssetCustody | null },
+  viewerId: string | null = null
 ): ResolvedStatus {
   const custody = asset.custody ?? null
 
   if (custody) {
+    const mine = viewerId !== null && custody.custodian_id === viewerId
+    /** ` by Jordan S`, or nothing at all when the viewer is the holder. */
+    const by = mine ? "" : ` by ${abbreviateName(custody.custodian_name)}`
+
     if (custody.overdue) {
       const late = custody.due_at ? Math.abs(daysUntil(custody.due_at)) : 0
+      const how = late > 0 ? `Overdue ${plural(late, "day")}` : "Overdue"
       return {
         state: "overdue",
-        label: late > 0 ? `Overdue ${plural(late, "day")}` : "Overdue",
+        label: mine ? how : `${how} · ${abbreviateName(custody.custodian_name)}`,
         ...PRESENTATION.overdue,
       }
     }
@@ -110,19 +167,24 @@ export function resolveStatus(
       const remaining = new Date(custody.due_at).getTime() - Date.now()
       if (remaining <= DUE_SOON_WINDOW_MS) {
         const days = calendarDaysUntil(new Date(custody.due_at))
+        const when = days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : "Due soon"
         return {
           state: "due-soon",
-          label: days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : "Due soon",
+          label: mine ? when : `${when} · ${abbreviateName(custody.custodian_name)}`,
           ...PRESENTATION["due-soon"],
         }
       }
       return {
-        state: "out",
-        label: `Checked out · due ${shortDate(custody.due_at)}`,
-        ...PRESENTATION.out,
+        state: mine ? "out" : "out-other",
+        label: `Checked out${by} · due ${shortDate(custody.due_at)}`,
+        ...(mine ? PRESENTATION.out : PRESENTATION["out-other"]),
       }
     }
-    return { state: "out", label: "Checked out", ...PRESENTATION.out }
+    return {
+      state: mine ? "out" : "out-other",
+      label: `Checked out${by}`,
+      ...(mine ? PRESENTATION.out : PRESENTATION["out-other"]),
+    }
   }
 
   if (asset.status === "unavailable") {
@@ -169,7 +231,7 @@ export function groupStatus(availableCount: number, total: number): ResolvedStat
 /**
  * What a unit row says about who holds it.
  *
- * `You · Sep 12` for the viewer's own item, `Jordan S. · Sep 15` for anyone
+ * `You · Sep 12` for the viewer's own item, `Jordan Smith · Sep 15` for anyone
  * else's. The current holder's *name* is open to every signed-in user; their
  * student number is not, and is null in the payload for a non-admin (§8.3,
  * CLAUDE.md §13, 2026-09-13).
