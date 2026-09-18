@@ -191,7 +191,15 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: 0 14px;
+    /*
+      The bottom padding is the gap again, and it is load-bearing rather than
+      spacing. `gap` sits *between* items, so a doubled list of 2N tiles is
+      2N*tile + (2N-1)*14 tall while one cycle of the marquee is N*tile +
+      N*14 -- the -50% the animation translates by lands 7px short, and the
+      loop visibly jolts once every couple of minutes. The trailing padding
+      restores the missing gap so half the strip is exactly one cycle.
+    */
+    padding: 0 14px 14px;
     will-change: transform;
   }
 
