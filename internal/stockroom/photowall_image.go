@@ -58,6 +58,16 @@ const (
 	// backstop for a file that grew since the listing: one pathological RAW
 	// must not stall the filler or the machine.
 	photoMaxSourceBytes = 40 << 20
+
+	// photoMaxPixels is the same ceiling counted in pixels, because the byte
+	// ceiling above does not bound one. Compression is the gap: a few hundred
+	// kilobytes of PNG can describe 30000x20000, which sails through the size
+	// check and the 1.5:1 ratio gate and then asks image.Decode for gigabytes
+	// in one allocation. On the closet PC that is the sign-in screen dying to
+	// a file somebody dropped in a Drive folder. 64 megapixels is far above
+	// anything the department's cameras produce and still caps a decode at a
+	// few hundred megabytes.
+	photoMaxPixels = 64 << 20
 )
 
 // errPhotoUnusable means "this file is not something the wall can show". It is
@@ -94,6 +104,10 @@ func normalizePhoto(r io.Reader) ([]byte, error) {
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return nil, fmt.Errorf("%w: reports a zero dimension", errPhotoUnusable)
+	}
+	if px := int64(cfg.Width) * int64(cfg.Height); px > photoMaxPixels {
+		return nil, fmt.Errorf("%w: %dx%d is %d megapixels, over the %d ceiling",
+			errPhotoUnusable, cfg.Width, cfg.Height, px>>20, photoMaxPixels>>20)
 	}
 
 	// Step 2: EXIF orientation, applied to the measurements *before* the gate.

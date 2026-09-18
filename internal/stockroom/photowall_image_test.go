@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +227,39 @@ func TestNormalizeRejectsRubbish(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNormalizeRejectsPixelBomb: the 40 MB source ceiling bounds the bytes
+// that arrive, not the pixels they describe. A few hundred bytes of PNG header
+// can claim 30000x20000, which is a legal 1.5:1 landscape as far as the ratio
+// gate is concerned, and decoding it would ask for gigabytes in one
+// allocation. The rejection has to happen off the header, before image.Decode.
+func TestNormalizeRejectsPixelBomb(t *testing.T) {
+	_, err := normalizePhoto(bytes.NewReader(pngHeader(30000, 20000)))
+	if !errors.Is(err, errPhotoUnusable) {
+		t.Fatalf("want errPhotoUnusable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "megapixels") {
+		t.Errorf("the pixel ceiling should be what rejected it, got %v", err)
+	}
+}
+
+// pngHeader is a PNG signature and an IHDR chunk and nothing else: enough for
+// DecodeConfig to report the dimensions, far too little to decode. That is the
+// shape of the file this guards against.
+func pngHeader(w, h int) []byte {
+	var ihdr bytes.Buffer
+	ihdr.WriteString("IHDR")
+	binary.Write(&ihdr, binary.BigEndian, uint32(w))
+	binary.Write(&ihdr, binary.BigEndian, uint32(h))
+	ihdr.Write([]byte{8, 2, 0, 0, 0}) // 8-bit truecolour, no interlace
+
+	var out bytes.Buffer
+	out.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	binary.Write(&out, binary.BigEndian, uint32(ihdr.Len()-4))
+	out.Write(ihdr.Bytes())
+	binary.Write(&out, binary.BigEndian, crc32.ChecksumIEEE(ihdr.Bytes()))
+	return out.Bytes()
 }
 
 // TestEXIFOrientationFailsSoft: an unreadable tag has to read as "upright"
