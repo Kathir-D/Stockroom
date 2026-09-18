@@ -109,3 +109,57 @@ func TestImportRosterCreatesUpdatesAndReportsRows(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenForAllowsOnlyPhotoExtensions: the copy openFor opens ends up under
+// the uploads directory, which /files/ serves to anyone with no session, and
+// http.FileServer takes the Content-Type from the extension. A roster row
+// naming an .svg or .html file on the admin's disk would publish it as a page
+// on the app's own origin, so the extension is gated here and not only on the
+// upload path. Needs no database: openFor is a file operation and a check.
+func TestOpenForAllowsOnlyPhotoExtensions(t *testing.T) {
+	dir := t.TempDir()
+	ps := photoStore{dir: dir, uploads: t.TempDir()}
+
+	for _, name := range []string{"ok.JPG", "ok.png", "bad.svg", "bad.html", "bad.pdf", "noext"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		ok   bool
+		want string // a substring of the error, when there is one
+	}{
+		{name: "ok.JPG", ok: true},
+		{name: "ok.png", ok: true},
+		{name: "bad.svg", want: "not a photo"},
+		{name: "bad.html", want: "not a photo"},
+		{name: "bad.pdf", want: "not a photo"},
+		{name: "noext", want: "no file extension"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, ext, err := ps.openFor(tc.name)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("openFor(%s) = %v, want it accepted", tc.name, err)
+				}
+				f.Close()
+				if ext != strings.ToLower(filepath.Ext(tc.name)) {
+					t.Errorf("ext = %q", ext)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("openFor(%s) = %v, want ErrInvalid", tc.name, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.want)
+			}
+			if f != nil {
+				f.Close()
+				t.Error("the file was opened despite being rejected")
+			}
+		})
+	}
+}

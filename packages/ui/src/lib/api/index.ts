@@ -31,6 +31,7 @@ import type {
   RestoreResult,
   RosterResult,
   ScanResult,
+  SignInPhotos,
   Settings,
   SettingsInput,
   UserInput,
@@ -60,6 +61,22 @@ export const MAX_CHECKOUT_DAYS = 7;
 
 export function health() {
   return request<HealthResult>("/health", { anonymous: true });
+}
+
+/* ------------------------------------------------- sign-in photo wall ---- */
+
+/**
+ * A batch of tile URLs for the sign-in photo wall
+ * (docs/design/signin-photo-wall.html §5).
+ *
+ * `anonymous` because there is no session at the sign-in screen and the route
+ * requires none -- it is the one thing the server hands out to nobody in
+ * particular. Always 200, so the only failure this can throw is the transport
+ * one, which the component swallows: the wall is decoration and must not make
+ * noise on a machine with no internet.
+ */
+export function signInPhotos() {
+  return request<SignInPhotos>("/signin/photos", { anonymous: true });
 }
 
 /* ---------------------------------------------------------------- auth ---- */

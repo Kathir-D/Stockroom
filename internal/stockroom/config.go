@@ -30,14 +30,23 @@ type Config struct {
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). The
 	// remote is the switch: blank disables the feature entirely and no
-	// goroutine starts, which is the state every existing .env is in. The
-	// live folder is not here -- §7 makes it an admin-panel value seeded
-	// from app_settings, and a setting that lives in two places drifts.
-	SignInPhotosRemote     string
-	SignInPhotosDir        string
-	SignInPhotosCount      int
-	SignInPhotosBatch      int
-	SignInPhotosTTLMinutes int
+	// goroutine starts, which is the state every existing .env is in.
+	//
+	// SignInPhotosFolderID is a first-boot seed rather than a setting, the
+	// same shape as the three backup values above: §7 makes the live folder
+	// an admin-panel value in app_settings, and a value that lives in two
+	// places drifts. Until §7's column exists this is simply where the folder
+	// comes from, and §7 takes ownership of it without changing its meaning
+	// here. It is a capability, not a label -- see §7 on why it is never sent
+	// back to a client and must be redacted from the backup export the moment
+	// it reaches app_settings.
+	SignInPhotosRemote        string
+	SignInPhotosFolderID      string
+	SignInPhotosDir           string
+	SignInPhotosCount         int
+	SignInPhotosBatch         int
+	SignInPhotosTTLMinutes    int
+	SignInPhotosManifestHours int
 }
 
 // LoadConfig reads .env (searching the current directory and its parents, so
@@ -62,8 +71,9 @@ func LoadConfig() (Config, error) {
 		PhotoBackupDir:     os.Getenv("PHOTO_BACKUP_DIR"),
 		RcloneRemote:       os.Getenv("RCLONE_REMOTE"),
 
-		SignInPhotosRemote: os.Getenv("SIGNIN_PHOTOS_REMOTE"),
-		SignInPhotosDir:    getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
+		SignInPhotosRemote:   os.Getenv("SIGNIN_PHOTOS_REMOTE"),
+		SignInPhotosFolderID: os.Getenv("SIGNIN_PHOTOS_FOLDER_ID"),
+		SignInPhotosDir:      getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
 	}
 
 	// The idle timeout is the one value that must parse; a bad number is a
@@ -75,7 +85,7 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.SessionIdleMinutes = n
 
-	// The photo wall's three numbers follow the same rule as the idle
+	// The photo wall's four numbers follow the same rule as the idle
 	// timeout: a value that does not parse is a typo in .env, and a typo that
 	// silently falls back to the default is one nobody ever finds.
 	for _, v := range []struct {
@@ -86,6 +96,7 @@ func LoadConfig() (Config, error) {
 		{"SIGNIN_PHOTOS_COUNT", DefaultPhotoWallCount, &cfg.SignInPhotosCount},
 		{"SIGNIN_PHOTOS_BATCH", DefaultPhotoWallBatch, &cfg.SignInPhotosBatch},
 		{"SIGNIN_PHOTOS_TTL_MINUTES", int(DefaultPhotoWallTTL / time.Minute), &cfg.SignInPhotosTTLMinutes},
+		{"SIGNIN_PHOTOS_MANIFEST_HOURS", DefaultPhotoWallManifestHours, &cfg.SignInPhotosManifestHours},
 	} {
 		n, err := positiveInt(v.key, v.def)
 		if err != nil {

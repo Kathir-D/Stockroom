@@ -77,6 +77,19 @@ const (
 	// photoWallExt is the extension every tile carries. The normalizer (§4)
 	// re-encodes everything to JPEG, so there is only ever one.
 	photoWallExt = ".jpg"
+	// photoWallTiles is the subdirectory the tiles themselves live in, and it
+	// exists to keep everything else out of the one directory §5 mounts on an
+	// unauthenticated route.
+	//
+	// The cache directory holds three kinds of thing -- tiles, the ownership
+	// marker, and §3's manifest -- and the manifest is a listing of Drive
+	// paths, which §0's second barrier says no client may ever receive.
+	// http.FileServer refuses to enumerate a directory but serves any file in
+	// it by name, so a flat layout would put that listing one guessed URL
+	// away from anybody standing at the machine. Separating them means the
+	// served root contains only tiles by construction, rather than because
+	// §5's handler remembered to exclude a filename.
+	photoWallTiles = "tiles"
 )
 
 // PhotoWallPrefix is where the server mounts the reel's directory, and so the
@@ -114,7 +127,8 @@ type PhotoWallOptions struct {
 	// Source is where tiles come from. Nil is legal and means the reel never
 	// fills: the directory is still created and wiped, TakePhotos returns
 	// nothing, and the sign-in screen is exactly what it is today. That is
-	// the state of the feature until §3 lands.
+	// the state whenever rclone is missing or no Drive folder has been
+	// chosen, which is most installations.
 	Source PhotoSource
 	// FetchDelay spaces successive fetches. Zero means photoWallFetchDelay;
 	// tests set a negative value to disable the pacing entirely.
@@ -219,11 +233,42 @@ func NewPhotoWall(opts PhotoWallOptions) (*PhotoWall, error) {
 	return w, nil
 }
 
+// TTL is how long a served tile survives before the reaper deletes it, and so
+// how long a tile URL stays fetchable. §5 reports it in the batch response and
+// uses it as the tiles' Cache-Control lifetime, since caching a file past the
+// point the server deletes it is the one thing "delete after use" forbids.
+//
+// The default on a nil reel, so a caller computing a cache header never has to
+// branch on the feature being off.
+func (w *PhotoWall) TTL() time.Duration {
+	if w == nil {
+		return DefaultPhotoWallTTL
+	}
+	return w.ttl
+}
+
+// TileDir is the directory §5 mounts at PhotoWallPrefix. It is a subdirectory
+// of the cache directory and holds nothing but tiles; see photoWallTiles for
+// why that separation is structural rather than a convention.
+//
+// An empty string on a nil reel, which fileServer already answers with a 404
+// handler, so "the wall is off" needs no branch in the router.
+func (w *PhotoWall) TileDir() string {
+	if w == nil {
+		return ""
+	}
+	return filepath.Join(w.dir, photoWallTiles)
+}
+
 // wipePhotoWallDir empties the cache directory, creating it if it is absent.
 //
 // Every tile is single-use and re-derivable, so a leftover from the last run
 // is just a photograph we have already shown -- and wiping is also what stops
-// a crash from stranding files on disk forever (§2).
+// a crash from stranding files on disk forever (§2). Two files survive it: the
+// marker below, and §3's manifest, which is neither single-use nor cheap to
+// rebuild.
+//
+// The tiles sit in a subdirectory, which is emptied wholesale and recreated.
 //
 // The guard matters more than the wipe. SIGNIN_PHOTOS_DIR is operator-set, and
 // this function deletes everything in whatever it names; pointed at ./uploads
@@ -249,12 +294,21 @@ func wipePhotoWallDir(dir string) error {
 		}
 	}
 	for _, e := range entries {
-		if e.Name() == photoWallMarker {
+		// The marker is how this directory is recognised next boot, and the
+		// manifest (§3) is a weekly artifact that costs minutes of Drive
+		// listing to rebuild -- neither is a tile, and wiping either would
+		// undo something the wipe was never about.
+		if e.Name() == photoWallMarker || e.Name() == photoWallManifest {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 			return fmt.Errorf("clear the sign-in photo cache %s: %w", dir, err)
 		}
+	}
+	// Recreated after the sweep above has removed it, so the served directory
+	// starts every run genuinely empty.
+	if err := os.MkdirAll(filepath.Join(dir, photoWallTiles), 0o755); err != nil {
+		return fmt.Errorf("create the sign-in photo cache %s: %w", dir, err)
 	}
 	if err := os.WriteFile(marker, []byte(
 		"This directory is the Stockroom sign-in photo wall cache.\n"+
@@ -486,7 +540,7 @@ func (w *PhotoWall) readyLocked() int {
 // tilePath is where a tile id lives on disk. The id is hex from crypto/rand,
 // so it can never be a path.
 func (w *PhotoWall) tilePath(id string) string {
-	return filepath.Join(w.dir, id+photoWallExt)
+	return filepath.Join(w.dir, photoWallTiles, id+photoWallExt)
 }
 
 // newPhotoTileID returns the random stem of one tile's filename. Random, not

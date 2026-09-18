@@ -86,23 +86,52 @@ func main() {
 	// failure in this subsystem may delay, block or visibly break sign-in, and
 	// a server that refuses to start over a decorative wall breaks it hardest.
 	//
-	// The reel has no source of photographs yet -- rclone (§3) and the
-	// normalizer (§4) are not built -- so with the remote set it creates and
-	// wipes its cache directory, idles empty, and hands out nothing.
+	// Two goroutines, not one, and each is stopped by ctx: the reel fills and
+	// reaps tiles on a ten-second tick, while the source re-lists the Drive
+	// folder about once a week. Keeping them apart is what preserves the
+	// reel's one-writer rule over the tile files (§2) while a listing that
+	// takes minutes runs beside it.
+	//
+	// A source that cannot be built -- rclone not installed, no remote -- is a
+	// warning and a reel that idles empty, not a reason to skip the reel:
+	// §5's endpoint and §7's screen are written against a wall that may have
+	// nothing to hand out, because that is the state they spend most of their
+	// life in.
 	if cfg.SignInPhotosRemote != "" {
-		wall, err := stockroom.NewPhotoWall(stockroom.PhotoWallOptions{
+		source, err := stockroom.NewDrivePhotoSource(stockroom.DrivePhotoSourceOptions{
+			Remote:          cfg.SignInPhotosRemote,
+			FolderID:        cfg.SignInPhotosFolderID,
+			Dir:             cfg.SignInPhotosDir,
+			RefreshInterval: time.Duration(cfg.SignInPhotosManifestHours) * time.Hour,
+		})
+		if err != nil {
+			log.Printf("warning: sign-in photo wall has no source: %v", err)
+		}
+
+		wall, wallErr := stockroom.NewPhotoWall(stockroom.PhotoWallOptions{
 			Dir:   cfg.SignInPhotosDir,
 			Count: cfg.SignInPhotosCount,
 			Batch: cfg.SignInPhotosBatch,
 			TTL:   time.Duration(cfg.SignInPhotosTTLMinutes) * time.Minute,
+			// A nil *DrivePhotoSource in a non-nil PhotoSource interface would
+			// be a source the reel calls and that always errors, so the nil
+			// case is kept out of the interface entirely.
+			Source: photoSource(source),
 		})
-		if err != nil {
-			log.Printf("warning: sign-in photo wall disabled, check SIGNIN_PHOTOS_DIR: %v", err)
+		if wallErr != nil {
+			log.Printf("warning: sign-in photo wall disabled, check SIGNIN_PHOTOS_DIR: %v", wallErr)
 		} else {
 			db.PhotoWall = wall
-			// Stops with ctx, so Ctrl+C ends the reel with everything else.
 			go wall.Run(ctx)
+			if source != nil {
+				// Started after the reel, because NewPhotoWall wipes the cache
+				// directory and the source reads its manifest back out of it.
+				go source.Run(ctx)
+			}
 			log.Printf("sign-in photo wall caching in %s", cfg.SignInPhotosDir)
+			if cfg.SignInPhotosFolderID == "" {
+				log.Printf("sign-in photo wall: no Drive folder set, so the wall stays empty")
+			}
 		}
 	}
 
@@ -135,4 +164,14 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// photoSource wraps a concrete source so a nil one stays a nil interface.
+// Assigning a typed nil pointer into an interface produces a value that is not
+// nil, and the reel's "no source means idle quietly" check would miss it.
+func photoSource(s *stockroom.DrivePhotoSource) stockroom.PhotoSource {
+	if s == nil {
+		return nil
+	}
+	return s
 }

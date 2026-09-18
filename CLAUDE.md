@@ -200,10 +200,13 @@ stockroom/
 │   ├── target_drive.go        # Google Drive via the rclone binary
 │   ├── target_github.go       # GitHub via the REST API, no git binary
 │   ├── drive_authorize.go     # `rclone authorize drive` driven from the admin panel
+│   ├── photowall.go           # the sign-in photo wall's reel: prefetch, hand out, delete after use
+│   ├── photowall_drive.go     # its source: the Drive folder's manifest, and one `rclone cat`
+│   ├── photowall_image.go     # its normalizer: EXIF, ratio gate, crop, resize to one 900x600 JPEG
 │   └── RESTORE.md             # embedded in every zip; the instructions travel with the backup
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
-│   └── auth.go, users.go, assets.go, custody.go, admin.go
+│   └── auth.go, users.go, assets.go, custody.go, admin.go, photowall.go
 ├── cmd/restore/               # disaster CLI: calls the same RestoreFromZip as
 │                              # the admin panel, passing stockroom.LocalCLIActor() -- so RequireAdmin still
 │                              # holds, and it works with zero accounts in the database (§11)
@@ -222,7 +225,7 @@ stockroom/
 │       ├── stores/            # session, cart, cart-items, catalog, scan, router (hash)
 │       ├── components/ui/     # shadcn-svelte generated
 │       ├── components/app/    # StatusDot, Serial, ModelRow, UnitRow, CartDock, ScanResult,
-│       │                      # PasswordInput (masked field + reveal toggle), ...
+│       │                      # PasswordInput (masked field + reveal toggle), PhotoWall, ...
 │       └── screens/           # sign-in, browse, cart-page, history, admin/{assets,categories,users,overdue,backup}
 ├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 ├── web-app/                   # Vite + Svelte 5 secondary UI
@@ -271,6 +274,8 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /admin/restore/remote` | admin | the same restore, bytes fetched from a target by date |
 | `GET /admin/photos/generations`, `POST /admin/photos/restore`, `DELETE /admin/photos/generations/{name}` | admin | the mirror. Deleting is the only deletion it has, and it is a person pressing a button |
 | `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
+| `GET /signin/photos` | nobody | the sign-in photo wall's batch: `{photos: [...], ttl_seconds}`. **Always 200**, with `[]` whenever the wall is off, unconfigured, warming up or drained — every one of those means "draw no columns" to the only caller, and the sign-in screen must never look broken (`docs/design/signin-photo-wall.html` §5, §9) |
+| `GET /signin-photos/...` | nobody | the tiles, off `SIGNIN_PHOTOS_DIR/tiles/`. The **subdirectory**, never the cache root: the root holds `manifest.json`, which is a listing of the Drive folder, and `http.FileServer` serves any named file in a directory even though it refuses to list one |
 
 **Statuses.** `ErrNotFound` 404, `ErrInvalid` 400, `ErrUnauthorized`/`ErrBadCredentials`/`ErrPasswordNotSet` 401, `ErrForbidden` 403, `ErrConflict`/`ErrOverdueBlocked` 409, anything else 500 with the detail logged, not sent. **`ErrNotConfigured` is 503** with its message intact: an unset `UPLOADS_DIR` or `BACKUP_DIR` is neither the client's fault nor a bug, and the admin reading the response is the person who edits `.env`.
 
@@ -519,7 +524,8 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ## Code Exploration Rules
-- If available, ALWAYS query `codebase-memory-mcp` tools FIRST before using standard file tools (`grep`, `glob`, or reading individual files) to explore or analyze code structure.
+- The following rules apply if `codebase-memory-mcp` is installed:
+ALWAYS query `codebase-memory-mcp` tools FIRST before using standard file tools (`grep`, `glob`, or reading individual files) to explore or analyze code structure.
 - For finding symbols, function definitions, or references, use the `search_graph` tool instead of plain text search.
 - For analyzing architectural context, call chains, or dependencies across files, use `trace_path` or `get_architecture`.
 - Only read raw source files directly after narrowing down the specific targets through graph queries.

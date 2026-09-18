@@ -51,19 +51,17 @@ func newTestWall(t *testing.T, opts PhotoWallOptions) (*PhotoWall, *time.Time) {
 	return w, &clock
 }
 
-// tileFiles lists the tiles on disk, ignoring the marker wipePhotoWallDir
-// leaves behind.
+// tileFiles lists the tiles on disk. They live in their own subdirectory, so
+// there is nothing else in it to filter out -- which is the point of the
+// separation: it is the only directory §5 serves.
 func tileFiles(t *testing.T, w *PhotoWall) []string {
 	t.Helper()
-	entries, err := os.ReadDir(w.dir)
+	entries, err := os.ReadDir(w.TileDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var names []string
 	for _, e := range entries {
-		if e.Name() == photoWallMarker {
-			continue
-		}
 		names = append(names, e.Name())
 	}
 	return names
@@ -89,13 +87,18 @@ func TestPhotoWallBootWipe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, photoWallMarker), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"aa" + photoWallExt, "bb" + photoWallExt, ".staged-tile-123"} {
+	if err := os.MkdirAll(filepath.Join(dir, photoWallTiles, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		filepath.Join(photoWallTiles, "aa"+photoWallExt),
+		filepath.Join(photoWallTiles, "bb"+photoWallExt),
+		filepath.Join(photoWallTiles, ".staged-tile-123"),
+		"stray" + photoWallExt,
+	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("junk"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
-		t.Fatal(err)
 	}
 
 	w, err := NewPhotoWall(PhotoWallOptions{Dir: dir})
@@ -108,6 +111,9 @@ func TestPhotoWallBootWipe(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, photoWallMarker)); err != nil {
 		t.Errorf("marker file missing after the wipe: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "stray"+photoWallExt)); !os.IsNotExist(err) {
+		t.Error("the wipe left a file in the cache root")
+	}
 }
 
 // TestPhotoWallAdoptsAnEmptyDirectory is the fresh-install path: no marker
@@ -119,6 +125,9 @@ func TestPhotoWallAdoptsAnEmptyDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, photoWallMarker)); err != nil {
 		t.Errorf("expected the cache directory to be created and marked: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, photoWallTiles)); err != nil {
+		t.Errorf("expected the tiles subdirectory to be created: %v", err)
 	}
 }
 
@@ -169,7 +178,7 @@ func TestPhotoWallLifecycle(t *testing.T) {
 		if !strings.HasPrefix(u, PhotoWallPrefix) {
 			t.Errorf("url %q is not under %s", u, PhotoWallPrefix)
 		}
-		if _, err := os.Stat(filepath.Join(w.dir, strings.TrimPrefix(u, PhotoWallPrefix))); err != nil {
+		if _, err := os.Stat(filepath.Join(w.TileDir(), strings.TrimPrefix(u, PhotoWallPrefix))); err != nil {
 			t.Errorf("tile deleted on hand-out, which would 404 the whole wall: %v", err)
 		}
 	}
@@ -300,7 +309,7 @@ func TestPhotoWallInvalidate(t *testing.T) {
 		t.Errorf("after the switch the cache holds %v, want only the 2 served tiles", got)
 	}
 	for _, u := range served {
-		if _, err := os.Stat(filepath.Join(w.dir, strings.TrimPrefix(u, PhotoWallPrefix))); err != nil {
+		if _, err := os.Stat(filepath.Join(w.TileDir(), strings.TrimPrefix(u, PhotoWallPrefix))); err != nil {
 			t.Errorf("a served tile was deleted under a live page: %v", err)
 		}
 	}
