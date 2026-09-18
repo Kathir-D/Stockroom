@@ -53,12 +53,19 @@ func photoURL(stored *string) *string {
 	return &url
 }
 
-// uploadPhotoExtensions is what SetAssetPhoto accepts. The list is short on
-// purpose: /files/ serves the uploads directory without a session, and
-// http.FileServer picks the Content-Type from the extension, so an .html or
-// .svg upload would run as a page on the web app's own origin. A roster
-// import is not held to the list, because those files come off the admin's
-// own disk rather than over HTTP.
+// uploadPhotoExtensions is what every path that writes into the uploads
+// directory accepts -- SetAssetPhoto and the roster import both. The list is
+// short on purpose: /files/ serves the uploads directory without a session,
+// and http.FileServer picks the Content-Type from the extension, so an .html
+// or .svg copy would run as a page on the web app's own origin.
+//
+// The roster import used to be exempt, on the grounds that its files come off
+// the admin's own disk rather than over HTTP. That answers whether the bytes
+// can be trusted, which is not the question the list exists to settle: the
+// risk is in what this server then publishes, unauthenticated, under a
+// Content-Type the extension chose. An admin importing four hundred rows is
+// not reading the extension on each one, and a profile photo that is not a
+// picture is broken as a photo anyway, so the exemption bought nothing.
 var uploadPhotoExtensions = map[string]bool{
 	".jpg":  true,
 	".jpeg": true,

@@ -210,8 +210,10 @@ func (db *DB) upsertProfileRow(ctx context.Context, sn, first, last string, phot
 // alongside its lowercased extension; the caller closes the file. The photo
 // lands at <uploads>/profiles/<studentNumber>.<ext>, so the extension is
 // required: it is what tells a browser how to render the file, and it is part
-// of the stored path. Which extensions are allowed is not checked here; see
-// uploadPhotoExtensions for why the upload path is stricter than this one.
+// of the stored path. It must also be one of uploadPhotoExtensions, for the
+// reason given there -- the extension decides the Content-Type /files/ serves
+// the copy under, and that is a property of what this server publishes rather
+// than of who supplied the bytes.
 func (ps photoStore) openFor(src string) (*os.File, string, error) {
 	if !filepath.IsAbs(src) {
 		dir := ps.dir
@@ -223,6 +225,10 @@ func (ps photoStore) openFor(src string) (*os.File, string, error) {
 	ext := strings.ToLower(filepath.Ext(src))
 	if ext == "" {
 		return nil, "", fmt.Errorf("%w: photo %s has no file extension", ErrInvalid, src)
+	}
+	if !uploadPhotoExtensions[ext] {
+		return nil, "", fmt.Errorf("%w: photo %s is not a photo; use a .jpg, .png, .gif or .webp file",
+			ErrInvalid, src)
 	}
 	in, err := os.Open(src)
 	if err != nil {
