@@ -227,22 +227,29 @@
    * rendered from. Re-checking the stale copy would only have re-derived what
    * the screen already showed.
    *
-   * A failed re-read falls through to the snapshot instead of blocking. The
-   * cart is a client-side list, the cart page refetches a live status per line
-   * before checkout, and `CheckOutAssets` refuses an unavailable unit whatever
-   * the client sends — so the cost of being wrong here is a 409 later, while
-   * the cost of refusing is a student who cannot take a kit because one request
-   * timed out.
+   * A failed re-read aborts rather than falling through to the snapshot. It is
+   * tempting to add the kit anyway — the cart page refetches a live status per
+   * line and `CheckOutAssets` refuses an unavailable unit whatever the client
+   * sends, so nothing incorrect would be checked out. But "added whole or not
+   * at all" (§13) is a promise made *at this press*, and the snapshot is the
+   * one thing that cannot keep it: it may call a kit complete when a unit went
+   * out minutes ago, so falling through turns the all-or-nothing rule into
+   * "all, or however much of it is still here" — discovered two screens later,
+   * which is the failure this function exists to move forward in time.
    */
   async function addKitToCart(kit: KitDetail) {
     if (session.checkoutBlocked) return
     busy = true
-    let current = kit
+    let current: KitDetail
     try {
       current = await api.getKit(kit.id)
       kits.patch(current)
-    } catch {
-      // Keep `current` as the snapshot; see above.
+    } catch (error) {
+      toast.error(
+        `Could not check what is in ${kit.name} right now: ` +
+          (error instanceof Error ? error.message : String(error))
+      )
+      return
     } finally {
       busy = false
     }
