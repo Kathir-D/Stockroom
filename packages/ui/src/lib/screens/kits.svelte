@@ -77,6 +77,14 @@
   const SEARCH_DEBOUNCE_MS = 200
   const MAX_RESULTS = 8
   let searchTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * The request the picker's state belongs to. Aborting is not enough on its
+   * own: `request` turns a fetch abort into an `ApiError` like any other
+   * network failure, so a superseded run still reaches `catch` and would clear
+   * the results the current run just wrote — naming "cannot reach the Stockroom
+   * server" as the reason, which is not what happened.
+   */
+  let pickerInflight: AbortController | null = null
 
   $effect(() => {
     if (!kits.loaded && !kits.loading) void kits.reload()
@@ -85,29 +93,44 @@
   // The picker's own search. Debounced and server-side for the same reason the
   // command palette's is: `GET /assets?q=` has the index and matches partial
   // identifiers a client-side `includes` over one page cannot.
+  //
+  // The in-flight request is aborted on every change, the way `catalog.reload`
+  // does it, and the answer is thrown away unless it is still the one being
+  // waited for. Without both, fast typing lands results out of order and the
+  // list settles on an older query — and closing the picker mid-request drew
+  // the previous kit's results into the next one.
   $effect(() => {
     const kit = pickerFor
     const query = pickerQuery.trim()
     if (!kit) return
     if (searchTimer) clearTimeout(searchTimer)
+    pickerInflight?.abort()
+    const controller = new AbortController()
+    pickerInflight = controller
     pickerSearching = true
     searchTimer = setTimeout(async () => {
       try {
-        const found = await api.listAssets(query ? { q: query } : {})
+        const found = await api.listAssets(query ? { q: query } : {}, controller.signal)
+        if (controller.signal.aborted) return
         // Units already in this kit are dropped rather than shown and refused:
         // the server would answer 409, and the press buys nothing either way.
         const inKit = new Set(kit.items.map((u) => u.id))
         pickerResults = found.filter((u) => !inKit.has(u.id)).slice(0, MAX_RESULTS)
         pickerError = null
       } catch (error) {
+        if (controller.signal.aborted) return
         pickerError = error instanceof Error ? error.message : String(error)
         pickerResults = []
       } finally {
-        pickerSearching = false
+        if (pickerInflight === controller) {
+          pickerInflight = null
+          pickerSearching = false
+        }
       }
     }, SEARCH_DEBOUNCE_MS)
     return () => {
       if (searchTimer) clearTimeout(searchTimer)
+      controller.abort()
     }
   })
 
@@ -195,27 +218,59 @@
     }
   }
 
-  function addKitToCart(kit: KitDetail) {
+  /**
+   * **Add to cart**, which is a decision about what is on the shelf *now*.
+   *
+   * The row was drawn from a list that may be minutes old, and on a shared
+   * closet machine somebody else can take a unit in between — so the press
+   * re-reads the kit before it plans, rather than trusting the snapshot it is
+   * rendered from. Re-checking the stale copy would only have re-derived what
+   * the screen already showed.
+   *
+   * A failed re-read falls through to the snapshot instead of blocking. The
+   * cart is a client-side list, the cart page refetches a live status per line
+   * before checkout, and `CheckOutAssets` refuses an unavailable unit whatever
+   * the client sends — so the cost of being wrong here is a 409 later, while
+   * the cost of refusing is a student who cannot take a kit because one request
+   * timed out.
+   */
+  async function addKitToCart(kit: KitDetail) {
     if (session.checkoutBlocked) return
-    const plan = kitCartPlan(kit, cart.ids)
-    const message = kitPlanMessage(kit, plan)
+    busy = true
+    let current = kit
+    try {
+      current = await api.getKit(kit.id)
+      kits.patch(current)
+    } catch {
+      // Keep `current` as the snapshot; see above.
+    } finally {
+      busy = false
+    }
+
+    const plan = kitCartPlan(current, cart.ids)
+    const message = kitPlanMessage(current, plan)
     if (!kitIsAddable(plan)) {
       toast.error(message)
-      // The screen disagreed with the server about what is on the shelf, which
-      // means somebody else moved a unit. Reload rather than leave the row
-      // saying the kit is ready to go.
-      void kits.reload()
       return
     }
     for (const unit of plan.addable) cart.add(unit.id)
     toast.success(message)
   }
 
+  /**
+   * **Return kit.** Once `checkInKit` resolves the units are back, and nothing
+   * after that point may be allowed to report otherwise.
+   *
+   * The refresh that follows is a separate concern with its own failure: it was
+   * inside this `try` at first, so a failed `GET /kits/{id}` replaced "three
+   * items checked in" with an error toast and skipped the browse-list and
+   * overdue-flag refresh — telling the person at the counter that a committed
+   * return had failed, which is the one thing the screen must never say.
+   */
   async function returnKit(kit: KitDetail) {
     busy = true
     try {
       const result = await api.checkInKit(kit.id)
-      kits.patch(await api.getKit(kit.id))
       if (result.failed.length > 0) {
         // Never a silent partial: the units that did not come back are named,
         // with the server's own reason.
@@ -231,6 +286,12 @@
         )
       }
       await onCheckedIn(result)
+      try {
+        kits.patch(await api.getKit(kit.id))
+      } catch {
+        // The return committed; only this row's counts are stale. A reload of
+        // the screen, or the next visit to it, settles them.
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
@@ -308,7 +369,11 @@
             <!-- Disabled rather than hidden: the reason a kit cannot go out is
                  the count line right beside it, and a button that vanishes
                  leaves the person looking for it. -->
-            <Button size="sm" disabled={!addable} onclick={() => addKitToCart(kit)}>
+            <Button
+              size="sm"
+              disabled={!addable || busy}
+              onclick={() => void addKitToCart(kit)}
+            >
               <PlusIcon aria-hidden="true" />
               Add to cart
             </Button>

@@ -37,20 +37,19 @@ class KitsStore {
     }
   }
 
-  /** Replace one kit in place, after an edit or a return. Adds it if new. */
+  /** Replace one kit, after an edit or a return. Adds it if new. */
   patch(next: KitDetail) {
-    const at = this.kits.findIndex((k) => k.id === next.id)
-    if (at === -1) {
-      // A kit created on this screen: insert by name rather than appending, so
-      // the list stays in the order the server would have returned.
-      const before = this.kits.findIndex(
-        (k) => k.name.localeCompare(next.name, undefined, { sensitivity: "base" }) > 0
-      )
-      const at = before === -1 ? this.kits.length : before
-      this.kits = [...this.kits.slice(0, at), next, ...this.kits.slice(at)]
-      return
-    }
-    this.kits = [...this.kits.slice(0, at), next, ...this.kits.slice(at + 1)]
+    // Removed and reinserted by name, never written back at its old index. A
+    // rename is the reason: writing "Alpha" over where "Zebra" sat parks it at
+    // the end of the list until the next reload, which is the one edit where
+    // the row visibly belongs somewhere else. Every other patch leaves the name
+    // alone and so lands back exactly where it was.
+    const rest = this.kits.filter((k) => k.id !== next.id)
+    const before = rest.findIndex(
+      (k) => k.name.localeCompare(next.name, undefined, { sensitivity: "base" }) > 0
+    )
+    const at = before === -1 ? rest.length : before
+    this.kits = [...rest.slice(0, at), next, ...rest.slice(at)]
   }
 
   remove(id: string) {
