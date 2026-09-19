@@ -106,13 +106,15 @@ That is deliberately thin, and the reason is the same one that put every screen 
 hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
 tests belong in `packages/ui`.
 
-### `packages/ui` (33 tests)
+### `packages/ui` (37 tests)
 
 `status.test.ts` (11) covers the five-status resolution and the viewer-aware custodian line.
 
 `scanner.test.ts` (11) covers scan-vs-typed and the editing gestures that must never sign somebody in as a deleted number: a backspaced burst is typed, a chord or a caret key discards the pending burst, and a Backspace that empties the buffer resets rather than demoting the next card scan.
 
 `kits.test.ts` (5) covers expanding a kit into cart lines: available units that are not already in the cart are added, a unit that is out blocks the whole kit and is named, status drift is read through `status.ts` rather than the column, and an empty kit is refused. The rule worth pinning is the one the screen cannot show — `checkable` was true when the list was fetched, so the press has to re-decide per unit or the cart silently accepts an item somebody else is carrying, and the failure only appears as a 409 at checkout.
+
+`stores/kits.test.ts` (4) covers the one decision in the kits store: where a patched row lands. `patch` exists so an edit does not cost a list refetch, and that shortcut is only honest if the row ends up where a refetch would have put it — a rename is the case that separates the two.
 
 `keep-alive.test.ts` (6), covering `attachKeepAlive`: it pings when someone has interacted and the connection
 has gone quiet, and stays silent when nobody has, when requests are already flowing, when nobody is signed
