@@ -60,6 +60,14 @@ func constraintMessage(e *pgconn.PgError) string {
 		return "serial number already in use"
 	case "categories_name_key":
 		return "category name already in use"
+	case "kits_name_lower_key":
+		// Case-insensitive, so the duplicate the admin is looking at may not
+		// look like one. Say so rather than naming the index.
+		return "a kit with that name already exists"
+	case "kit_items_asset_key":
+		// AddAssetToKit reads the offending row back and names the kit, so
+		// this is only the fallback for a caller that did not.
+		return "that item is already in a kit"
 	}
 	if e.ConstraintName != "" {
 		return e.ConstraintName

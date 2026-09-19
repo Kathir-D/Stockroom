@@ -70,6 +70,7 @@
   const DESTINATIONS: Destination[] = [
     { label: "Browse equipment", keywords: "all inventory catalogue shelf", route: { name: "browse" } },
     { label: "Cart", keywords: "checkout basket due date", route: { name: "cart" } },
+    { label: "Kits", keywords: "bundle set camera bag package", route: { name: "kits" } },
     { label: "My history", keywords: "borrowed returned past", route: { name: "history" } },
     { label: "Admin · Assets", keywords: "add edit serial photo", route: { name: "admin", tab: "assets" }, adminOnly: true },
     { label: "Admin · Categories", keywords: "tree type model", route: { name: "admin", tab: "categories" }, adminOnly: true },

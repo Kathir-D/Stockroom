@@ -12,6 +12,7 @@
 export type Route =
   | { name: "browse"; category?: string }
   | { name: "cart" }
+  | { name: "kits" }
   | { name: "history" }
   | { name: "admin"; tab: AdminTab }
 
@@ -32,6 +33,8 @@ function parse(hash: string): Route {
   switch (head) {
     case "cart":
       return { name: "cart" }
+    case "kits":
+      return { name: "kits" }
     case "history":
       return { name: "history" }
     case "admin": {
@@ -49,6 +52,8 @@ function serialise(route: Route): string {
   switch (route.name) {
     case "cart":
       return "#/cart"
+    case "kits":
+      return "#/kits"
     case "history":
       return "#/history"
     case "admin":

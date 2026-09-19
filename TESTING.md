@@ -36,7 +36,7 @@ Go's database-backed tests skip themselves when Postgres is unreachable, so `go 
 
 The rule for the Go suites is one happy path per module plus, where the module has one, the admin-only or forbidden gate. The gate tests exist because every permission rule is enforced inside `internal/stockroom`, not the router, and a refactor there is the most likely way to open one without noticing.
 
-### `internal/stockroom` (87 tests)
+### `internal/stockroom` (91 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -46,6 +46,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `assets_admin_test.go` | 2 | every asset write refuses a student; `CreateAsset` |
 | `categories_admin_test.go` | 2 | every category write refuses a student; `CreateCategory` |
 | `custody_test.go` | 5 | checkout to self; a student cannot check out to someone else; scanning a checked-out item returns it; the custody lists refuse a student; a damage note lands on a **closed** event, and an open one is a conflict |
+| `kits_test.go` | 4 | every kit write refuses a student while both reads answer; build a kit, read it back and take a unit out; a unit already in a kit is refused **naming that kit**; a kit return checks in only what is out and reports the rest, rather than failing because one unit was already back |
 | `backup_test.go` | 5 | backup refuses a student; a run writes a restorable archive; `github_token` is redacted out of the export; a second concurrent run is a **skip**, not an error; no folder configured is `ErrNotConfigured` |
 | `archive_test.go` | 3 | the encryption round-trip; a wrong passphrase is refused; an encrypted archive asks for one |
 | `restore_test.go` | 8 | restore refuses a student; refuses without the typed confirmation; **a real truncate-and-reload round-trip against the live database**; a damaged archive is caught by its checksum; an archive whose rows point at absent parents is caught by the FK anti-join; `LocalCLIActor` satisfies `RequireAdmin` and `Resolve` never sets `trustedCLI`; `last_value`/`is_called` survive a round-trip (including the never-read, `is_called = false` case, where replaying with `setval`'s default would burn the first value); a descending or cycling sequence is refused outright rather than checked by a rule never designed for one |
@@ -65,7 +66,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 `main_test.go` lowers the bcrypt cost for the whole package. `testdb_test.go` holds the fixtures: a test profile, a test asset, an open custody row, all deleted at cleanup.
 
-### `server` (16 tests)
+### `server` (18 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -73,6 +74,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `json_test.go` | 1 | each sentinel error becomes the right status, and `ErrNotConfigured` is a 503 with its message intact |
 | `auth_test.go` | 1 | scan in with no password, be refused on a full-only route, set a password, be a normal session |
 | `custody_test.go` | 1 | `POST /checkout` round trip |
+| `kits_test.go` | 2 | the kit round trip over HTTP — build, check the units out through the ordinary `POST /checkout`, return the kit in one press; every kit *write* answers 403 to a student while both reads and the return answer 200 |
 | `admin_test.go` | 2 | the asset admin routes over HTTP; every admin route answers 403 to a student |
 | `backup_test.go` | 3 | every backup, settings, restore and photo route answers 403 to a student; the settings and status routes over HTTP; **back up and then restore over HTTP**, the same path the admin panel takes |
 | `photowall_test.go` | 5 | the sign-in photo wall's two routes: `GET /signin/photos` answers **200 with `[]`** when no wall was built, which is the common case and not an error; it is reachable with no session and no cookie, the only route on the server that is; the batch-then-fetch round trip, so the endpoint's URLs and the static mount's paths cannot disagree unnoticed; **`manifest.json`, the marker, an escaped `..%2F` and the bare directory are all unreachable** through the tile route, because the manifest is a listing of the Drive folder and `http.FileServer` serves any named file in a directory; `/files/` still works after `fileServer` took a prefix parameter |
@@ -81,9 +83,9 @@ The rule for the Go suites is one happy path per module plus, where the module h
 
 | File | Covers |
 |---|---|
-| `010_structure` | every table, view, enum, index and trigger the Go row structs scan against |
+| `010_structure` | every table, view, enum, index and trigger the Go row structs scan against, including the two kit indexes that hold the rules Go would otherwise be the only keeper of |
 | `050_views` | `active_custody` and `overdue_custody`, which the sign-in warning and the checkout block both read |
-| `080_seed` | `seed.sql` loads: the category tree from `Catagories.md`, the two accounts, an open custody row behind every checked-out asset |
+| `080_seed` | `seed.sql` loads: the category tree from `Catagories.md`, the two accounts, an open custody row behind every checked-out asset, and the seeded kit — four units, all available, none of them in a second kit |
 | `090_app_settings` | the single-row constraint, every default, and the three bounds the settings endpoint repeats in words (`keep_days >= 1`, `stale_hours >= 1`, `schedule_hour` 0–23) |
 
 ### Frontends
@@ -104,11 +106,13 @@ That is deliberately thin, and the reason is the same one that put every screen 
 hosts render the same component, so testing behaviour in both would be testing it twice. The behaviour
 tests belong in `packages/ui`.
 
-### `packages/ui` (28 tests)
+### `packages/ui` (33 tests)
 
 `status.test.ts` (11) covers the five-status resolution and the viewer-aware custodian line.
 
 `scanner.test.ts` (11) covers scan-vs-typed and the editing gestures that must never sign somebody in as a deleted number: a backspaced burst is typed, a chord or a caret key discards the pending burst, and a Backspace that empties the buffer resets rather than demoting the next card scan.
+
+`kits.test.ts` (5) covers expanding a kit into cart lines: available units that are not already in the cart are added, a unit that is out blocks the whole kit and is named, status drift is read through `status.ts` rather than the column, and an empty kit is refused. The rule worth pinning is the one the screen cannot show — `checkable` was true when the list was fetched, so the press has to re-decide per unit or the cart silently accepts an item somebody else is carrying, and the failure only appears as a 409 at checkout.
 
 `keep-alive.test.ts` (6), covering `attachKeepAlive`: it pings when someone has interacted and the connection
 has gone quiet, and stays silent when nobody has, when requests are already flowing, when nobody is signed

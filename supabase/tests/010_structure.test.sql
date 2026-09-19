@@ -119,5 +119,14 @@ select has_function('public', 'log_asset_status_change', 'log_asset_status_chang
 select has_trigger('public', 'assets', 'trg_assets_updated_at', 'assets has the updated_at trigger');
 select has_trigger('public', 'assets', 'trg_asset_status_log', 'assets has the status-change logging trigger');
 
+-- Kits (migration 20260918090000) --------------------------------------------
+-- Both rules live in the database rather than only in Go, because neither may
+-- drift: a kit name is a physical label, and a unit shared between two kits
+-- makes the second kit incomplete without saying so.
+select has_index('public', 'kits', 'kits_name_lower_key', 'kit names are unique, case-insensitively');
+select index_is_unique('public', 'kits', 'kits_name_lower_key', 'kits_name_lower_key is unique');
+select has_index('public', 'kit_items', 'kit_items_asset_key', 'an asset can only be in one kit');
+select index_is_unique('public', 'kit_items', 'kit_items_asset_key', 'kit_items_asset_key is unique');
+
 select * from finish();
 rollback;

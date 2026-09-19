@@ -127,5 +127,28 @@ select is(
   0::bigint,
   'nothing seeded is overdue, so the student is not blocked from checking out');
 
+-- Kits (Phase 8) -------------------------------------------------------------
+-- The seeded kit is the Kits screen's only content on a fresh reset, and it is
+-- deliberately all-available: the whole-or-nothing add rule has nothing to
+-- demonstrate if one of its units starts checked out.
+select is(
+  (select count(*) from kit_items ki where ki.kit_id = '00000000-0000-0000-0000-000000000301'),
+  4::bigint,
+  'the seeded kit holds four units');
+
+select is(
+  (select count(*) from kit_items ki join assets a on a.id = ki.asset_id
+    where ki.kit_id = '00000000-0000-0000-0000-000000000301' and a.status <> 'available'),
+  0::bigint,
+  'every unit in the seeded kit is available, so the kit can go into a cart');
+
+-- An asset belongs to at most one kit (migration 20260918090000). Asserted on
+-- the data as well as the index, because the seed is the one place a duplicate
+-- would be written by hand.
+select is(
+  (select count(*) from (select asset_id from kit_items group by asset_id having count(*) > 1) d),
+  0::bigint,
+  'no seeded unit is in two kits');
+
 select * from finish();
 rollback;

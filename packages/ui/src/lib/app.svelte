@@ -43,14 +43,16 @@
   import Browse from "@stockroom/ui/screens/browse.svelte"
   import CartPage from "@stockroom/ui/screens/cart-page.svelte"
   import History from "@stockroom/ui/screens/history.svelte"
+  import Kits from "@stockroom/ui/screens/kits.svelte"
   import SignIn from "@stockroom/ui/screens/sign-in.svelte"
   import * as api from "./api/index"
-  import type { AssetDetail, AssetListItem, CheckoutResult } from "./api/types"
+  import type { AssetDetail, AssetListItem, CheckoutResult, KitCheckInResult } from "./api/types"
   import { attachKeepAlive } from "./keep-alive"
   import { normalizeSerial } from "./scanner"
   import { cart } from "./stores/cart.svelte"
   import { cartItems } from "./stores/cart-items.svelte"
   import { catalog } from "./stores/catalog.svelte"
+  import { kits } from "./stores/kits.svelte"
   import { router } from "./stores/router.svelte"
   import { scanStore } from "./stores/scan.svelte"
   import { session } from "./stores/session.svelte"
@@ -78,6 +80,7 @@
       session.clear()
       scanStore.clear()
       catalog.reset()
+      kits.reset()
       cartItems.clear()
       toast.info("Signed out after ten minutes idle.")
     },
@@ -154,6 +157,7 @@
     await session.signOut()
     scanStore.clear()
     catalog.reset()
+    kits.reset()
     cartItems.clear()
     router.go({ name: "browse" })
   }
@@ -225,6 +229,20 @@
     const result = await api.checkIn(asset.id, note)
     catalog.patchUnit(result.asset)
     toast.success(`${result.asset.name} checked in`)
+    await session.refresh()
+  }
+
+  /**
+   * A kit came back in one press.
+   *
+   * The same two follow-ups a single check-in does, for the same reasons: the
+   * browse list's statuses just changed, and so did the viewer's own overdue
+   * flag. The screen has already said what came back and what did not — a kit
+   * return is deliberately per unit — so nothing is toasted twice here.
+   */
+  async function onKitCheckedIn(result: KitCheckInResult) {
+    if (result.returned.length === 0) return
+    await catalog.reload()
     await session.refresh()
   }
 
@@ -338,6 +356,8 @@
 
           {#if route.name === "cart"}
             <CartPage onBack={() => router.backToBrowse()} {onCheckedOut} />
+          {:else if route.name === "kits"}
+            <Kits onCheckedIn={onKitCheckedIn} />
           {:else if route.name === "history"}
             <History />
           {:else if route.name === "admin" && session.isAdmin}

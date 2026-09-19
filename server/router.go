@@ -69,6 +69,20 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /assets/{id}/checkin", d.withSession(d.handleCheckIn, fullOnly))
 	mux.Handle("POST /custody/{id}/note", d.withSession(d.handleAnnotateCustody, fullOnly))
 
+	// Kits: a named bundle of units. Reading one is any full session, because
+	// a student puts a kit in the cart the way they put a unit in it; building
+	// one is admin. Both are enforced in internal/stockroom. There is no kit
+	// checkout route -- a kit reaches POST /checkout as its asset ids, so one
+	// code path commits every cart (server/kits.go).
+	mux.Handle("GET /kits", d.withSession(d.handleListKits, fullOnly))
+	mux.Handle("GET /kits/{id}", d.withSession(d.handleGetKit, fullOnly))
+	mux.Handle("POST /kits", d.withSession(d.handleCreateKit, fullOnly))
+	mux.Handle("PUT /kits/{id}", d.withSession(d.handleUpdateKit, fullOnly))
+	mux.Handle("DELETE /kits/{id}", d.withSession(d.handleDeleteKit, fullOnly))
+	mux.Handle("POST /kits/{id}/items", d.withSession(d.handleAddKitItem, fullOnly))
+	mux.Handle("DELETE /kits/{id}/items/{assetId}", d.withSession(d.handleRemoveKitItem, fullOnly))
+	mux.Handle("POST /kits/{id}/checkin", d.withSession(d.handleCheckInKit, fullOnly))
+
 	// Custody reads. The two lists and the asset trail are admin-only,
 	// enforced inside internal/stockroom; a user's own history is not.
 	mux.Handle("GET /custody/active", d.withSession(d.handleActiveCustody, fullOnly))
