@@ -127,9 +127,19 @@ func (db *DB) RestoreFromZip(ctx context.Context, actor Actor, data []byte, opts
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	if !opts.Force && archive.manifest.SchemaVersion != "" && live != "" && archive.manifest.SchemaVersion != live {
-		return RestoreResult{}, fmt.Errorf("%w: this backup was taken on database version %s and this database is on %s. The columns may no longer match. Restore it anyway only if you know the difference is safe",
-			ErrConflict, archive.manifest.SchemaVersion, live)
+	// An override is not a clean restore, and the report is the only place
+	// anybody will ever see that it happened: the refusal below is a 409 the
+	// admin actively dismissed by pressing again with force, and without this
+	// the result reads exactly like a restore that needed no override at all.
+	var forced []string
+	if archive.manifest.SchemaVersion != "" && live != "" && archive.manifest.SchemaVersion != live {
+		if !opts.Force {
+			return RestoreResult{}, fmt.Errorf("%w: this backup was taken on database version %s and this database is on %s. The columns may no longer match. Restore it anyway only if you know the difference is safe",
+				ErrConflict, archive.manifest.SchemaVersion, live)
+		}
+		forced = append(forced, fmt.Sprintf(
+			"Restored across a database version change: the backup was taken on %s and this database is on %s. Check anything a migration added since.",
+			archive.manifest.SchemaVersion, live))
 	}
 
 	// The same lock a backup takes, so a restore and a backup can never
@@ -145,6 +155,7 @@ func (db *DB) RestoreFromZip(ctx context.Context, actor Actor, data []byte, opts
 	defer release()
 
 	res, err := db.restoreLocked(ctx, actor, archive, opts)
+	res.Warnings = append(forced, res.Warnings...)
 	if err != nil {
 		log.Printf("restore FAILED (source=%s by=%s): %v", opts.Source, actorLabel(actor), err)
 		return res, err
@@ -217,9 +228,17 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 		archiveSet[t] = true
 	}
 	for _, t := range liveTables {
-		if !archiveSet[t] && !opts.Force {
+		if archiveSet[t] {
+			continue
+		}
+		if !opts.Force {
 			return res, fmt.Errorf("%w: this database has a table the backup does not (%s), so restoring would empty it. Restore anyway only if that is what you want", ErrConflict, t)
 		}
+		// Forced past it: the table was emptied and nothing refilled it, which
+		// is the one outcome of a restore that loses data. It has to be on the
+		// report.
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"%s was emptied: this database has that table and the backup does not.", t))
 	}
 
 	// Secrets the export redacted are not in the archive, so they have to be

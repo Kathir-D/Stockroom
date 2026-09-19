@@ -291,6 +291,10 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 	out.Log = tailBackupLog(dir, logTailMax)
 
 	now := time.Now()
+	// The two reasons a backup is behind, kept apart: a target whose last
+	// success is too old, and one that has never succeeded at all.
+	var neverSucceeded []string
+	staleByAge := false
 	for _, name := range []string{localTarget, driveTargetName, githubTargetName} {
 		st := state.Targets[name]
 		row := BackupTargetStatus{
@@ -309,12 +313,15 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 
 		// Staleness is measured over the targets that are *supposed* to be
 		// running. A disabled target has no age, and a target that has never
-		// succeeded is as stale as it gets.
+		// succeeded is as stale as it gets -- but it is stale for a different
+		// reason than one whose last success is old, and the two must not be
+		// worded the same (see staleSentence).
 		if !row.Enabled {
 			continue
 		}
 		if row.AgeHours == nil {
 			out.Stale = true
+			neverSucceeded = append(neverSucceeded, row.Target)
 			continue
 		}
 		if out.WorstAgeHours == nil || *row.AgeHours > *out.WorstAgeHours {
@@ -323,11 +330,12 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 		}
 		if *row.AgeHours > float64(settings.StaleHours) {
 			out.Stale = true
+			staleByAge = true
 		}
 	}
 
 	if out.Stale {
-		out.Warnings = append(out.Warnings, staleSentence(out.WorstAgeHours))
+		out.Warnings = append(out.Warnings, staleSentence(out.WorstAgeHours, staleByAge, neverSucceeded))
 	}
 	for _, t := range out.Targets {
 		if t.Enabled && t.LastError != "" {
@@ -348,16 +356,56 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 const failsafeWarning = "No failsafe admin is configured. If the database is lost you will not be able to sign in to restore it. Set ADMIN_STUDENT_NUMBER and ADMIN_PASSWORD in .env and restart the server."
 
 // staleSentence is the one place the staleness wording lives, so the banner,
-// the admin's sign-in warning and a student's all count the same days.
+// the admin's sign-in warning and a student's all say the same thing.
 //
 // A backup that has never run gets its own sentence rather than an age,
 // because "has not run in 0 hours" is the kind of message that makes a person
-// stop reading warnings.
-func staleSentence(worstAgeHours *float64) string {
+// stop reading warnings. That was the whole rule, and it only covered the case
+// where *nothing* had ever succeeded -- so the common one slipped through:
+// with the local archive written minutes ago and GitHub misconfigured, the age
+// came from local (0) while the staleness came from GitHub, and every student
+// signing in was told "Backups have not run in 0 hours" (measured 2026-09-18).
+// The local target always exists and always succeeds, so that was not an edge
+// case; it was what a mistyped token looked like on day one.
+//
+// Hence three inputs rather than one: how old the oldest *success* is, whether
+// any of them is past the threshold, and which targets have never managed one.
+func staleSentence(worstAgeHours *float64, staleByAge bool, neverSucceeded []string) string {
+	never := neverSentence(neverSucceeded)
 	if worstAgeHours == nil {
+		// Nothing has ever succeeded, so there is no age to report at all.
 		return "Backups have never run on this machine."
 	}
-	return "Backups have not run in " + staleAge(worstAgeHours) + "."
+	age := "Backups have not run in " + staleAge(worstAgeHours) + "."
+	switch {
+	case staleByAge && never != "":
+		// Both, which is a machine nobody has looked at in a while: say both,
+		// because fixing one of them still leaves the other.
+		return age + " " + never
+	case staleByAge:
+		return age
+	case never != "":
+		return never
+	}
+	// Stale for a reason this function was not told about. Better a vague
+	// sentence than a confidently wrong number.
+	return "Backups are not up to date."
+}
+
+// neverSentence names the targets that have never produced a backup, in the
+// same words the failure warning beside it uses ("the last github backup
+// failed"), so a reader does not have to work out that they are about the same
+// thing.
+func neverSentence(targets []string) string {
+	switch len(targets) {
+	case 0:
+		return ""
+	case 1:
+		return "The " + targets[0] + " backup has never succeeded."
+	default:
+		return "The " + strings.Join(targets[:len(targets)-1], ", ") + " and " +
+			targets[len(targets)-1] + " backups have never succeeded."
+	}
 }
 
 // staleAge is a bare duration -- "18 hours", "5 days" -- so callers can put it
@@ -458,7 +506,8 @@ func (db *DB) computeBackupWarnings(ctx context.Context) (student, admin *Backup
 	state := readBackupState(dir)
 	now := time.Now()
 	var worst *float64
-	stale := false
+	var neverSucceeded []string
+	stale, staleByAge := false, false
 	for _, name := range []string{localTarget, driveTargetName, githubTargetName} {
 		if name != localTarget && !targetEnabled(settings, name) {
 			continue
@@ -471,6 +520,7 @@ func (db *DB) computeBackupWarnings(ctx context.Context) (student, admin *Backup
 				continue
 			}
 			stale = true
+			neverSucceeded = append(neverSucceeded, name)
 			continue
 		}
 		age := now.Sub(*st.LastSuccess).Hours()
@@ -479,13 +529,14 @@ func (db *DB) computeBackupWarnings(ctx context.Context) (student, admin *Backup
 		}
 		if age > float64(settings.StaleHours) {
 			stale = true
+			staleByAge = true
 		}
 	}
 	if !stale {
 		return nil, nil
 	}
 
-	sentence := staleSentence(worst)
+	sentence := staleSentence(worst, staleByAge, neverSucceeded)
 	admins := db.adminNames(ctx)
 	student = &BackupWarning{Message: sentence, Admins: admins}
 	if len(admins) > 0 {

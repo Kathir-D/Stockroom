@@ -3,6 +3,7 @@ package stockroom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -194,3 +195,39 @@ func TestEnsureSettingsSeedsOnceThenLeavesTheAdminAlone(t *testing.T) {
 
 func intPtr(n int) *int    { return &n }
 func boolPtr(b bool) *bool { return &b }
+
+// "Test connection" exists to name a misconfiguration. Its failure therefore
+// has to reach the admin as words, not as a 500.
+//
+// Measured before the fix (2026-09-18): a wrong GitHub token answered
+// `500 {"error":"internal error"}` while the server log held the real reason,
+// "github 401 Unauthorized: Bad credentials" — writeError's default branch logs
+// and hides anything without a sentinel. A target that says "bad credentials"
+// is a setting that is wrong, so it is ErrInvalid and the message survives.
+func TestTargetTestFailureCarriesItsReason(t *testing.T) {
+	err := wrapTargetTest(errors.New("github 401 Unauthorized: Bad credentials"))
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a failed connection test = %v, want ErrInvalid so the message survives", err)
+	}
+	if !strings.Contains(err.Error(), "Bad credentials") {
+		t.Errorf("the reason was lost on the way out: %q", err.Error())
+	}
+
+	// A multi-line failure (rclone writes several) is flattened, because the
+	// panel shows it in one line.
+	err = wrapTargetTest(errors.New("rclone failed\ndirectory not found\n"))
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("a multi-line failure reached the API with its newlines: %q", err.Error())
+	}
+
+	// A sentinel the target already chose is passed through, so "not set up
+	// yet" stays a 503 with its own wording instead of becoming a 400.
+	notConfigured := fmt.Errorf("%w: Google Drive backups are not set up", ErrNotConfigured)
+	if got := wrapTargetTest(notConfigured); !errors.Is(got, ErrNotConfigured) || errors.Is(got, ErrInvalid) {
+		t.Errorf("ErrNotConfigured was rewritten as %v", got)
+	}
+
+	if wrapTargetTest(nil) != nil {
+		t.Error("a successful test produced an error")
+	}
+}

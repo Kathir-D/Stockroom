@@ -2,6 +2,7 @@ package stockroom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -179,5 +180,43 @@ func (db *DB) TestBackupTarget(ctx context.Context, actor Actor, target string) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	return t.Test(ctx)
+	return wrapTargetTest(t.Test(ctx))
+}
+
+// wrapTargetTest turns a target's own connection failure into an error the
+// HTTP layer can answer with.
+func wrapTargetTest(err error) error {
+	if err != nil {
+		// A target that answers "bad credentials" is a *setting* that is
+		// wrong, not a fault in this server -- and naming which is the entire
+		// job of this button (CLAUDE.md §8.1: "so a misconfiguration is found
+		// by somebody standing at the machine rather than by nothing happening
+		// at 2 a.m."). Without a sentinel the error reaches writeError's
+		// default branch, which logs the reason and answers 500 "internal
+		// error", so the admin panel showed nothing usable for the one press
+		// that exists to explain itself (measured 2026-09-18: a wrong token
+		// gave "internal error" while the log held "github 401 Unauthorized:
+		// Bad credentials").
+		//
+		// A sentinel the target already chose is passed through untouched:
+		// ErrNotConfigured in particular is a 503 with its own message, which
+		// is the right answer for a target nobody has set up yet.
+		if isSentinel(err) {
+			return err
+		}
+		return fmt.Errorf("%w: %s", ErrInvalid, oneLine(err.Error()))
+	}
+	return nil
+}
+
+// isSentinel reports whether err already carries one of the package errors
+// server/ maps to a status, so wrapping it again would only bury the better
+// answer the target gave.
+func isSentinel(err error) bool {
+	for _, s := range []error{ErrNotConfigured, ErrInvalid, ErrNotFound, ErrForbidden, ErrConflict, ErrUnauthorized} {
+		if errors.Is(err, s) {
+			return true
+		}
+	}
+	return false
 }

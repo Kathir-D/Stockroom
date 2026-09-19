@@ -385,3 +385,64 @@ func findSequence(t *testing.T, db *DB, name string) SequenceState {
 	t.Fatalf("readSequences did not find %s", name)
 	return SequenceState{}
 }
+
+// A restore that had to be forced says so on its own report.
+//
+// The version check refuses an archive taken on a different schema, and `force`
+// is the admin overriding that refusal. Before this, the forced run answered
+// with an empty `warnings` list -- identical to a restore that needed no
+// override at all -- so the one record that an override happened lived only in
+// the head of whoever pressed the button.
+func TestForcedRestoreSaysItWasForced(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	db.BackupDir = t.TempDir()
+	db.PhotoBackupDir = t.TempDir()
+
+	res, err := db.BackupNow(ctx, admin)
+	if err != nil {
+		t.Fatalf("BackupNow: %v", err)
+	}
+	archive, err := os.ReadFile(res.Archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The archive's version is whatever this database is on. Move the database
+	// on by one migration, and put it back afterwards: every other test reads
+	// this table too.
+	if res.SchemaVersion == "" {
+		t.Skip("skipping: this database has no supabase_migrations table to move")
+	}
+	const ahead = "99999999999999"
+	if _, err := db.Pool.Exec(ctx,
+		`insert into supabase_migrations.schema_migrations (version) values ($1)`, ahead); err != nil {
+		t.Fatalf("move the schema version on: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(),
+			`delete from supabase_migrations.schema_migrations where version = $1`, ahead)
+	})
+
+	// Without force it is a refusal, and nothing is written.
+	_, err = db.RestoreFromZip(ctx, admin, archive, RestoreOptions{Confirm: restoreConfirmation, Source: "test"})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("restoring across a version change = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), ahead) {
+		t.Errorf("the refusal does not name the version this database is on: %v", err)
+	}
+
+	forced, err := db.RestoreFromZip(ctx, admin, archive,
+		RestoreOptions{Confirm: restoreConfirmation, Source: "test", Force: true})
+	if err != nil {
+		t.Fatalf("forced restore: %v", err)
+	}
+	if len(forced.Warnings) == 0 {
+		t.Fatal("a forced restore reported no warning, so nothing records that it was forced")
+	}
+	if !containsSubstring(forced.Warnings, "version") {
+		t.Errorf("the warning does not mention the version change: %v", forced.Warnings)
+	}
+}
