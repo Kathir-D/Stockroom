@@ -12,6 +12,7 @@
    * markup either way, so the two can't drift.
    */
   import BoxesIcon from "@lucide/svelte/icons/boxes"
+  import PackageIcon from "@lucide/svelte/icons/package"
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree"
   import UsersIcon from "@lucide/svelte/icons/users"
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
@@ -76,6 +77,24 @@
     {openPath}
     onSelect={onSelectCategory}
   />
+
+  <!-- Kits sit under the tree rather than inside it: a kit is a bundle of units
+       that may come from four different Types, so it has no place in a tree
+       whose whole meaning is where a unit files (CLAUDE.md §6.2). Visible to
+       everyone, because taking a kit out is a student action. -->
+  <button
+    type="button"
+    onclick={() => onNavigate({ name: "kits" })}
+    aria-current={route.name === "kits" ? "page" : undefined}
+    class={cn(
+      "flex min-h-(--tap) items-center gap-2 rounded-(--radius) px-2 text-left text-sm",
+      "transition-colors duration-(--dur-fast) hover:bg-raised",
+      route.name === "kits" ? "bg-raised text-fg" : "text-fg-muted hover:text-fg"
+    )}
+  >
+    <PackageIcon class="size-4 shrink-0" aria-hidden="true" />
+    Kits
+  </button>
 
   {#if isAdmin}
     <Separator class="my-1" />

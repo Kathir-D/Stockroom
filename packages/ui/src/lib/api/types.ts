@@ -255,6 +255,69 @@ export interface AssetInput {
   warranty_expiration?: string | null;
 }
 
+/**
+ * A kit: a named bundle of units that goes out and comes back together
+ * (CLAUDE.md §2, TODO Phase 8).
+ *
+ * A kit never holds custody of anything. Adding one to the cart expands it into
+ * its asset ids and `POST /checkout` commits them like any other cart, so the
+ * 7-day cap, the overdue block and the custodian rule cannot differ between a
+ * kit and a handful of units.
+ */
+export interface Kit {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
+/** `GET /kits` and `GET /kits/{id}`: the kit with its units as browse rows. */
+export interface KitDetail extends Kit {
+  /** Browse order — category document order, available first. */
+  items: AssetListItem[];
+  available: number;
+  checked_out: number;
+  unavailable: number;
+  /**
+   * True only when every unit is on the shelf. A kit is taken whole or not at
+   * all: half a kit is a camera with no lens, and the person holding it finds
+   * out at the shoot. An empty kit is not checkable either.
+   */
+  checkable: boolean;
+}
+
+/** Membership is not part of it: units go in and out one press at a time. */
+export interface KitInput {
+  name: string;
+  description?: string | null;
+}
+
+/** One unit named in a kit result, without the whole row. */
+export interface KitItemRef {
+  asset_id: string;
+  name: string;
+  serial_number: string | null;
+}
+
+export interface KitReturnProblem extends KitItemRef {
+  reason: string;
+}
+
+/**
+ * What `POST /kits/{id}/checkin` did, unit by unit.
+ *
+ * Three buckets rather than a count, because a kit return is deliberately not
+ * all-or-nothing: the units are on the counter, and refusing all four because
+ * one was already back would leave the database claiming somebody still holds
+ * items they returned. Every list is present, never null.
+ */
+export interface KitCheckInResult {
+  kit: Kit;
+  returned: CheckInResult[];
+  already_in: KitItemRef[];
+  failed: KitReturnProblem[];
+}
+
 export interface CategoryInput {
   name: string;
   /** Null means a Type, at the root of the tree. On an update this is a move. */

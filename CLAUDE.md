@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13). Amended 2026-09-18: Phase 8, kits — the last item on the build list — built and shipped (Sections 2, 6.2, 7, 8, 8.1, 12, 13; `docs/adr/0002`), and the backup system backtested end to end against a live database, which found and fixed three reporting defects (Section 13).
 
 ---
 
@@ -43,7 +43,7 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 - Email/SMS reminders (needs internet)
 - GPS tagging
 
-**Lowest priority, kept in scope if time allows.** Kits, a named bundle of assets (e.g. "Kit #1 = this camera + this lens + this bag") checked out/in as one unit.
+**Built last, as Phase 8 (2026-09-18).** Kits, a named bundle of assets (e.g. "Kit #1 = this camera + this lens + this bag") added to the cart and returned as one unit. A kit is a *label over assets* and holds no custody of its own: adding one to the cart expands it into its asset ids and `CheckOutAssets` commits them unchanged, one custody event per asset, so the 7-day cap, the overdue block and the custodian rule cannot differ between a kit and a handful of units. An asset belongs to at most one kit (`docs/adr/0002`). See §13 (2026-09-18).
 
 ---
 
@@ -121,7 +121,9 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 **`categories`.** One addition, `sort_order integer not null default 0` (`20260913090000_category_sort_order.sql`). It is a row's position among its *siblings*, ascending, with the name breaking a tie, and it exists because the browse screen sorts by `Catagories.md`'s document order rather than alphabetically (§13, 2026-09-12) and nothing in the table recorded that order. Gaps and duplicates are harmless; the numbers never have to restart at 1 under a parent. Phase 5's category CRUD maintains it. Otherwise unchanged: used as a strict 3-level tree via `parent_id`:
 `Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `Catagories.md`, whose Type and Model names are used verbatim. That file names the Categories under `Lenses` (Zooms, Primes, Accessories) and `Cameras/Bodies` (Camera Model) but lists models straight under the other six types, so the seed invents a middle Category there (Lights → Studio Lights + Light Modifiers, Audio Stuff → Wireless Mics + Wired Mics, and so on); those six are the seed's own naming and are safe to rename. Branches may stop short of depth 3 when a Category has no models yet: `Primes` is seeded empty because `Catagories.md` records none in inventory. `categories.name` is unique across the whole table, not per parent, so generic names are worth avoiding.
 
-**Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`. `kits` / `kit_items` are used only if Phase 8 happens.
+**Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`.
+
+**`kits` / `kit_items` (in use since Phase 8, `20260918090000_kits_v1.sql`).** No columns added; two unique indexes, both rules that must not be able to drift. `kits (lower(name))` because a kit name is a label on a bag and two kits cannot share one, case ignored. `kit_items (asset_id)` because an asset belongs to at most one kit: a unit shared between two bundles makes the second one incomplete without saying so, and unchecked that surfaces at the shelf, to a student who cannot fix it, rather than at kit-building time, to the admin who can (`docs/adr/0002`). `AddAssetToKit` inserts and reads the offending row back, so the refusal names the kit that already holds the unit.
 
 ---
 
@@ -143,6 +145,8 @@ Two kinds of account, decided by `profiles.is_admin`:
 | Admin panel: asset CRUD, mark unavailable, category tree CRUD | | ✓ |
 | Admin panel: user CRUD, roster CSV import, set/reset any password | | ✓ |
 | Admin panel: overdue list, override overdue-block on checkout, Backup Now | | ✓ |
+| See the kits and what is in them; add a kit to the cart; return a whole kit | ✓ | ✓ |
+| Build a kit: create, rename, delete, put units in and take them out | | ✓ |
 
 **Custodian visibility.** Who currently holds a checked-out item is visible to any signed-in user. Deliberate, decided 2026-09-12: a student being able to find who has the lens they want outweighs withholding it, and there's no separate school privacy officer for this project to seek sign-off from. This applies only to the *current* holder: `GetAsset`, `ListAssets`, and `ScanItem` include it for every actor, so a browse row can say who has the lens without opening anything. What "who" means is the custodian's **name**, their due date and whether they are overdue, not their student number, which is the scan-login key and so stays admin-only (`AssetCustody.forViewer`, 2026-09-13). Past custodians (the full trail) stay admin-only via `GetAssetHistory`; a non-admin's own history is available only through `GetUserHistory`. Enforce this in the Go API, not the UI. The response itself omits history custodian identities for a non-admin actor, since a hidden field is still a `fetch` call away in the web app.
 
@@ -188,6 +192,7 @@ stockroom/
 │   ├── assets.go              # browse: ListAssets, GetAsset, current-holder reads, browse sort
 │   ├── assets_admin.go        # asset create/update/delete/status/photo
 │   ├── custody.go             # ScanItem, CheckOutAssets, CheckInAsset, the lists and histories
+│   ├── kits.go                # kits: CRUD, membership, CheckInKit. A kit holds no custody
 │   ├── photos.go              # staged photo writes, FilesPrefix, photo URLs
 │   ├── settings.go            # app_settings: load/save, .env as a first-boot seed, secrets redacted
 │   ├── backup.go              # the nightly run: snapshot, CSVs, inventory/accounts, prune, push
@@ -206,7 +211,7 @@ stockroom/
 │   └── RESTORE.md             # embedded in every zip; the instructions travel with the backup
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
-│   └── auth.go, users.go, assets.go, custody.go, admin.go, photowall.go
+│   └── auth.go, users.go, assets.go, custody.go, kits.go, admin.go, photowall.go
 ├── cmd/restore/               # disaster CLI: calls the same RestoreFromZip as
 │                              # the admin panel, passing stockroom.LocalCLIActor() -- so RequireAdmin still
 │                              # holds, and it works with zero accounts in the database (§11)
@@ -222,11 +227,12 @@ stockroom/
 │       ├── api/               # client.ts (token, 401, errors) + index.ts (one function per endpoint)
 │       ├── scanner.ts         # keystroke buffer, scan-vs-typed, the Ctrl+Shift+D diagnostic
 │       ├── status.ts, due.ts  # the five-status system; the 7-day cap as an instant
-│       ├── stores/            # session, cart, cart-items, catalog, scan, router (hash)
+│       ├── kits.ts            # expanding a kit into cart lines: whole or nothing
+│       ├── stores/            # session, cart, cart-items, catalog, kits, scan, router (hash)
 │       ├── components/ui/     # shadcn-svelte generated
 │       ├── components/app/    # StatusDot, Serial, ModelRow, UnitRow, CartDock, ScanResult,
 │       │                      # PasswordInput (masked field + reveal toggle), PhotoWall, ...
-│       └── screens/           # sign-in, browse, cart-page, history, admin/{assets,categories,users,overdue,backup}
+│       └── screens/           # sign-in, browse, cart-page, kits, history, admin/{assets,categories,users,overdue,backup}
 ├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 ├── web-app/                   # Vite + Svelte 5 secondary UI
 ├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
@@ -257,6 +263,10 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
 | `POST /assets/{id}/checkin` | any full | optional `{note}` (the damage note; an empty body is fine) |
 | `POST /custody/{id}/note` | any full | `{note}` onto a **closed** event's `condition_in`. A scan checks an item in before the "Add a note" surface renders, so the note has no check-in call left to ride; an open event is 409 |
+| `GET /kits`, `GET /kits/{id}` | any full | the kit with its units as browse rows, plus `available`/`checked_out`/`unavailable` and `checkable` |
+| `POST /kits`, `PUT/DELETE /kits/{id}` | admin | `{name, description?}`; a new kit is empty, and a delete removes the grouping only — no asset, status or custody row moves |
+| `POST /kits/{id}/items`, `DELETE /kits/{id}/items/{assetId}` | admin | `{asset_id}`; a unit already in a kit is 409 **naming that kit**, a non-member is 404 |
+| `POST /kits/{id}/checkin` | any full | returns every unit of the kit that is out. Per unit, never all-or-nothing: `returned`, `already_in`, `failed` |
 | `GET /users/{id}/history` | own, or admin | |
 | `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
 | `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo |
@@ -395,7 +405,7 @@ Admin panel endpoints (asset/category/user management, overdue, Backup Now). Buy
 Build the screens in the Wails app first, then mirror in the web app, both on `lib/api.ts`. Delete the supabase-js path. In-server backup scheduling + the two off-site targets + restore test.
 
 **Week 9: Kits if time, then testing + presentation** (TODO Phase 8)
-Kits only if everything above is solid. Final testing, walkthrough prep, presentation.
+Kits **built 2026-09-18** (TODO Phase 8): the package, the eight routes, the Kits screen, and the seeded example kit. Final testing, walkthrough prep, presentation.
 
 ---
 
@@ -414,7 +424,7 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] Checkout: user-chosen due date, max 7 days. Admin picks custodian from user list. Overdue users blocked (admin override).
 - [x] Check-in: requires sign-in; anyone can return any item; optional damage note.
 - [x] Photos: profile + asset photos in local `uploads/`, served by Go.
-- [x] Out of scope: bookings, locations, tags, saved filters, custom fields, LAN access, email. Kits = lowest priority.
+- [x] Out of scope: bookings, locations, tags, saved filters, custom fields, LAN access, email. Kits = lowest priority. *Kits shipped 2026-09-18 as Phase 8; everything else here is still out of scope.*
 - [x] Backup: nightly CSV via Go CLI into a **Google Drive** folder. *Superseded 2026-09-14 (Phase 7 design): Drive is one of two targets, the second being GitHub, and the nightly run is a goroutine inside the server rather than a CLI. See §11 and `docs/design/backup.md`.*
 - [x] Styling (2026-09-05): **Tailwind CSS v4** in both frontends via `@tailwindcss/vite`; design tokens live in each app's `src/app.css` `@theme` block (desktop: the dark "Nocturne" system from the UI import). No component CSS files, no `tailwind.config.js`.
 
@@ -499,6 +509,24 @@ Kits only if everything above is solid. Final testing, walkthrough prep, present
 - [x] **`RestoreResult` gained `by_name`.** `by` is an account id, which is right in a log line and wrong on a screen: the panel was telling the admin who had just pressed Restore that it was performed by `00000000-…-020`. Resolved **before** the tables are replaced, because afterwards that row may belong to somebody else or not exist.
 - [x] **The staleness banner renders the server's sentence and only that.** `BackupWarning.admins` stays on the wire as the structured form, but the student-facing message already names them ("Please tell Admin Admin or Test User."), and printing the list again underneath is the same fact twice in two wordings. Hue sits on the icon, never as a fill: §1.2 reserves the five status hues for asset state, and an amber panel reads as an item that is due soon.
 - [x] **Below 900px is checked, not assumed.** §7.2 calls it a courtesy rather than a target; measured at 860, 700 and 640px across browse, cart and all six admin tabs — no horizontal overflow anywhere, sidebar collapses to the sheet, hamburger appears.
+
+**Closed (2026-09-18, Phase 8: kits)**
+- [x] **A kit is a label over assets, not a thing that can be checked out.** Nothing in `kits.go` writes a custody row: adding a kit to the cart expands it into its asset ids in the frontend, and `CheckOutAssets` commits them exactly as it commits any cart. The alternative — a kit-shaped checkout endpoint — would have been a second definition of the 7-day cap, the overdue block and the custodian rule, and the first one to drift would have been the one nobody tested. It is also why the feature is small: custody stays a fact about a unit, so the history, the overdue rule, the scan branch and the backup all keep working without knowing kits exist.
+- [x] **An asset belongs to at most one kit** (`docs/adr/0002`, unique index `kit_items_asset_key`). A shared unit means checking out kit A silently makes kit B incomplete, and that failure surfaces at the shelf, to a student who cannot fix it. Refusing moves it to kit-building time, where an admin can. `AddAssetToKit` inserts and reads the offending row back rather than pre-checking, so there is no check-then-insert window and the refusal names the kit that already holds the unit.
+- [x] **A kit name is unique, case-insensitively** (`kits_name_lower_key`). It is what somebody reads off the tape on a bag, and "Kit #1" and "kit #1" name the same bag.
+- [x] **Added whole, returned per unit.** The two halves are deliberately asymmetric. **Add to cart** is refused unless every unit is on the shelf, because half a kit is a camera with no lens and the person carrying it finds out at the shoot. `CheckInKit` is the opposite: the units are physically on the counter, and refusing all four because one was already back would leave the database claiming somebody still holds items they returned. So a return is one transaction per unit and the result has three buckets — `returned`, `already_in`, `failed` — never a bare count.
+- [x] **The press re-checks what the row claims.** `checkable` comes from the server and was true when the list was fetched; on a shared closet machine somebody else can take a unit in between. `lib/kits.ts` re-decides per unit at press time and reloads the list when it disagrees, so the cart never quietly accepts an item that is already in a bag — the failure would otherwise land as a 409 at checkout naming an item the person never chose.
+- [x] **One Kits screen, not a browse one and an admin one.** A student reads it to take a kit out; an admin edits the same rows in place, with the controls simply absent for everyone else, the way the sidebar's Admin group is. Two lists of the same rows would have meant the admin's going stale.
+- [x] **Kits sit under the category tree in the sidebar, not inside it.** A kit's units come from four different Types, and the tree's whole meaning is where a *unit* files.
+- [x] **Deleting a kit is allowed while its units are out**, unlike deleting an asset. The asymmetry is the point: an asset delete cascades `custody_events` and would take the trail with it, while a kit owns no custody — `kit_items` cascades and the grouping is all that disappears.
+
+**Closed (2026-09-18, backup system backtested end to end)**
+The whole of Phase 7 re-verified against a live database — a real archive on disk, a truncate-and-restore round trip, the disaster path with zero accounts, and every refusal — which found three defects, all in the *reporting* rather than in the data path:
+- [x] **A target that has never succeeded is not a target that is late**, and the sentence has to say which. The local archive always succeeds, so from the first misconfigured off-site target the staleness came from GitHub while the *age* came from local — and all three surfaces, including **every student's sign-in**, read "Backups have not run in 0 hours." The rule already existed in a comment ("has not run in 0 hours is the kind of message that makes a person stop reading warnings") but the guard only covered the case where nothing at all had succeeded, which is the case a running site never reaches. `staleSentence` now takes the age, whether anything is past the threshold, and which targets have never managed a run.
+- [x] **"Test connection" now answers with the reason.** It existed so a misconfiguration is found by somebody standing at the machine, and a wrong token answered `500 {"error":"internal error"}` while the log held `github 401 Unauthorized: Bad credentials` — `writeError`'s default branch logs and hides anything without a sentinel. A target that says "bad credentials" is a *setting* that is wrong, so it is `ErrInvalid` and the message survives; a sentinel the target already chose (`ErrNotConfigured` → 503) is passed through untouched.
+- [x] **A forced restore says it was forced.** `force` is an admin overriding a refusal — a schema-version mismatch, or a live table the archive does not carry — and the report came back with an empty `warnings` list, identical to a restore that needed no override. Both overrides now name themselves on the report, and the second one says outright which table was emptied.
+
+What the backtest confirmed unchanged: every checksum in the manifest recomputes, every CSV's row count matches it, `sequences.csv` carries `last_value` **and** `is_called`, the redacted `github_token` never reaches `app_settings.csv` and is put back rather than nulled by the restore, a tampered CSV is refused *before* the transaction opens with the database untouched, a wrong passphrase is refused, encryption replaces the plaintext zip and both targets exclude the readable CSVs when it is on, two concurrent runs make one a skip rather than a failure, dated folders prune at `keep_days`, the photo mirror rolls over and its live generation cannot be deleted, and `cmd/restore` brought a database with **zero accounts** back from an encrypted archive with a typed passphrase — after which all three accounts signed in again. The boot catch-up was observed firing for real: it logged "no backup has ever completed on this machine; running now" ten seconds after start-up, once a folder had been configured.
 
 **Still open**
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge

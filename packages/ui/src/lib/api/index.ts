@@ -24,6 +24,9 @@ import type {
   CustodyRecord,
   DriveConnectResult,
   HealthResult,
+  KitCheckInResult,
+  KitDetail,
+  KitInput,
   LoginResult,
   MeResult,
   PhotoMirrorStatus,
@@ -200,6 +203,74 @@ export function annotateCustody(custodyEventId: string, note: string) {
       method: "POST",
       body: { note },
     },
+  );
+}
+
+/* ----------------------------------------------------------------- kits ---- */
+
+/**
+ * Every kit with its units. Any signed-in user: a student has to be able to see
+ * what is in a kit to decide to take it, the same rule that makes the current
+ * holder of a unit visible to everyone (CLAUDE.md §7).
+ */
+export function listKits() {
+  return request<KitDetail[]>("/kits");
+}
+
+export function getKit(id: string) {
+  return request<KitDetail>(`/kits/${encodeURIComponent(id)}`);
+}
+
+/** Admin. A new kit starts empty; the units go in one at a time below. */
+export function createKit(input: KitInput) {
+  return request<KitDetail>("/kits", { method: "POST", body: input });
+}
+
+/** Admin. Renames a kit. Membership is untouched — see `addKitItem`. */
+export function updateKit(id: string, input: KitInput) {
+  return request<KitDetail>(`/kits/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: input,
+  });
+}
+
+/**
+ * Admin. Removes the grouping only: no asset, status or custody row moves, so
+ * unlike `deleteAsset` this is allowed while the units are out.
+ */
+export function deleteKit(id: string) {
+  return request<{ ok: boolean }>(`/kits/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Admin. 409 when the unit is already in a kit, and the message names which
+ * one — an asset belongs to exactly one kit. Show it as written.
+ */
+export function addKitItem(kitId: string, assetId: string) {
+  return request<KitDetail>(`/kits/${encodeURIComponent(kitId)}/items`, {
+    method: "POST",
+    body: { asset_id: assetId },
+  });
+}
+
+export function removeKitItem(kitId: string, assetId: string) {
+  return request<KitDetail>(
+    `/kits/${encodeURIComponent(kitId)}/items/${encodeURIComponent(assetId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Returns every unit of the kit that is out, in one press. Any signed-in user,
+ * like a single check-in. The response is per unit — `returned`, `already_in`
+ * and `failed` — because a kit return is not all-or-nothing.
+ */
+export function checkInKit(kitId: string) {
+  return request<KitCheckInResult>(
+    `/kits/${encodeURIComponent(kitId)}/checkin`,
+    { method: "POST" },
   );
 }
 

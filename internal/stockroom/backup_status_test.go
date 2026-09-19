@@ -163,3 +163,113 @@ func containsSubstring(list []string, want string) bool {
 	}
 	return false
 }
+
+// A target that has never succeeded is stale for a different reason than one
+// whose last success is old, and the sentence has to say which.
+//
+// The bug this pins: the local archive always succeeds, so the moment an
+// off-site target was misconfigured the age came from local (zero hours) while
+// the staleness came from the target that had never run -- and every surface,
+// including every student's sign-in, read "Backups have not run in 0 hours."
+// The wording rule already existed for the case where *nothing* had succeeded;
+// this is the mixed case, which is the one a site actually hits.
+func TestStalenessTellsNeverApartFromOld(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	db.BackupDir = t.TempDir()
+
+	// GitHub enabled and never successful; the local archive written seconds
+	// ago. Settings are restored by the cleanup so the suite is unaffected.
+	before, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{
+		GitHubEnabled: boolPtr(true),
+		GitHubRepo:    strPtr("someone/backups"),
+		GitHubToken:   strPtr("ghp_test"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.SaveSettings(ctx, admin, SettingsInput{
+			GitHubEnabled: boolPtr(before.GitHubEnabled),
+			GitHubRepo:    strPtr(before.GitHubRepo),
+		})
+	})
+
+	now := time.Now()
+	writeBackupState(db.BackupDir, backupState{
+		Targets:   map[string]targetState{localTarget: {LastSuccess: &now}},
+		LastRunAt: &now,
+	})
+
+	status, err := db.BackupStatus(ctx, admin)
+	if err != nil {
+		t.Fatalf("BackupStatus: %v", err)
+	}
+	if !status.Stale {
+		t.Fatal("a target that has never succeeded is not reported as stale")
+	}
+	if containsSubstring(status.Warnings, "0 hours") {
+		t.Errorf("the warning counts an age that is not the reason: %v", status.Warnings)
+	}
+	if !containsSubstring(status.Warnings, "never succeeded") {
+		t.Errorf("the warning does not say the github backup has never succeeded: %v", status.Warnings)
+	}
+
+	// Both sign-in audiences inherit the same sentence, so neither is told the
+	// nonsense number either.
+	invalidateBackupWarning()
+	for _, isAdmin := range []bool{false, true} {
+		w := db.backupWarningFor(ctx, isAdmin)
+		if w == nil {
+			t.Fatalf("no sign-in warning for isAdmin=%v", isAdmin)
+		}
+		if strings.Contains(w.Message, "0 hours") {
+			t.Errorf("sign-in warning (isAdmin=%v) says %q", isAdmin, w.Message)
+		}
+	}
+}
+
+// The wording itself, without a database: the three shapes it has to tell
+// apart, and the both-at-once case that must not drop either half.
+func TestStaleSentenceWording(t *testing.T) {
+	old := 120.0
+	fresh := 0.0
+	cases := []struct {
+		name     string
+		age      *float64
+		byAge    bool
+		never    []string
+		contains []string
+		absent   []string
+	}{
+		{"nothing has ever run", nil, false, []string{"local"},
+			[]string{"never run on this machine"}, []string{"0 hours"}},
+		{"one target has never run", &fresh, false, []string{"github"},
+			[]string{"github", "never succeeded"}, []string{"0 hours", "not run in"}},
+		{"two targets have never run", &fresh, false, []string{"drive", "github"},
+			[]string{"drive and github", "never succeeded"}, []string{"0 hours"}},
+		{"old but all succeeding", &old, true, nil,
+			[]string{"5 days"}, []string{"never"}},
+		{"old and one never ran", &old, true, []string{"github"},
+			[]string{"5 days", "github", "never succeeded"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := staleSentence(c.age, c.byAge, c.never)
+			for _, want := range c.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("%q does not contain %q", got, want)
+				}
+			}
+			for _, no := range c.absent {
+				if strings.Contains(got, no) {
+					t.Errorf("%q should not contain %q", got, no)
+				}
+			}
+		})
+	}
+}

@@ -212,3 +212,19 @@ insert into assets (id, name, description, category_id, status, serial_number, c
 insert into custody_events (asset_id, custodian_id, checked_out_by, due_at) values
   ('00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000020', now() + interval '3 days'),
   ('00000000-0000-0000-0000-000000000111', '00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000020', now() + interval '3 days');
+
+-- Kits ---------------------------------------------------------------------
+-- One kit, so the Kits screen has something to draw on a fresh `db reset` and
+-- the whole-or-nothing rule has a case to demonstrate: every unit below is
+-- available, so the seeded kit reads "4 of 4 available" and can go into a cart.
+-- An asset belongs to exactly one kit (migration 20260918090000), so nothing
+-- here may repeat a unit from another kit added later.
+insert into kits (id, name, description) values
+  ('00000000-0000-0000-0000-000000000301', 'Kit #1 — Interview',
+   'Body, telephoto, lav mic and the bag they live in');
+
+insert into kit_items (kit_id, asset_id) values
+  ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000101'), -- Canon T7i
+  ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000105'), -- Canon 70-200mm f/2.8
+  ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000107'), -- DJI Wireless Lavalier
+  ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000112'); -- Backpack

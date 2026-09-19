@@ -26,6 +26,8 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Category tree.** `categories`, a three-level tree via `parent_id`: **Type** (Lenses) → **Category** (Zooms) → **Model** (Canon 70-200mm f/2.8). A node's position among its siblings is `sort_order`, which follows `Catagories.md`'s document order. An asset may file under any node (ADR 0001), though the seed puts every unit under a Model.
 
+**Kit.** A named bundle of units that goes out and comes back together — `kits` plus `kit_items` — "Kit #1 = this camera, this lens, this bag". A kit is a *label over assets* and never holds custody itself: adding one to the cart expands it into its asset ids, and checkout commits them like any other cart, one custody event per asset. An asset belongs to **at most one kit**, so a shared unit cannot make a second kit quietly incomplete. A kit is added to a cart whole or not at all; it is returned unit by unit, because the units come back to the counter one at a time.
+
 **Photo.** A file under `UPLOADS_DIR`, either `profiles/<student number>.<ext>` or `assets/<asset id>.<ext>`. The row stores the relative path (`photo_path`); the API hands out the URL (`photo_url`, under `/files/`). Each table's `photo_path` has exactly one writer: `SetAssetPhoto` for assets, the roster import for profiles.
 
 ## Custody

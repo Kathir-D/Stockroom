@@ -116,7 +116,8 @@ The workspace only helps if every entry point installs it the same way. These la
 ### Phase 6 leftovers (closed 2026-09-17, with Phase 7)
 - [x] **Command palette** (`Cmd/Ctrl+K`), jump-to-asset over `GET /assets?q=` plus every screen as a destination. It carries its **own scoped scanner**: its input has focus, so the root `<ScanListener>` is deaf to it by design (§9.3), and without that a barcode read at the palette would type a serial into a search box instead of checking the item in
 - [x] Below-900px measured at 860, 700 and 640px across browse, cart and all six admin tabs: no horizontal overflow anywhere, the sidebar collapses to the sheet, the hamburger appears
-- [ ] Run the desktop app under `wails dev` against real hardware. Only the web host has been exercised in a browser so far
+- [x] The desktop host exercised for real (2026-09-18): `wails build` from a clean tree, the packaged `Stockroom.app` launched against the running server, signed in, and every screen including the new Kits one renders identically to the web host. The build ran `npm install` inside `desktop-app/frontend` and left **no** shadowing `node_modules` behind, which is the failure §2.2 warns about
+- [ ] Still untested against **real hardware**: no barcode scanner has been bought, so scan-vs-typed is still the untuned 50 ms default (Week 7 item, unchanged)
 
 ## Phase 7: Backup & restore (Week 8) — **built 2026-09-17**
 Specified in full in **`docs/design/backup.md`** (2026-09-14) after a grilling pass over the original three-line plan. The spec is the detail; this is the checklist. Section references below are to that file. `docs/BACKUP-SETUP.md` is the shipped walkthrough; CLAUDE.md §11 is the summary and §13 (2026-09-17) records what building it changed.
@@ -190,10 +191,16 @@ Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_valu
 - [ ] Both targets at once; break one, confirm the other still succeeds and the status names which failed. **Blocked on credentials**: no Google account has been connected and no GitHub repository created, so both target implementations are unit-tested and hand-read but never round-tripped against the real services. The local target is verified end to end
 - [ ] A config-only run-through from a fresh clone, without opening a text editor. Same blocker
 
-## Phase 8: Kits (Week 9, only if everything above is done)
-- [ ] `ListKits`, `CreateKit`, `UpdateKit`, `DeleteKit`, `AddAssetToKit`, `RemoveAssetFromKit`
-- [ ] Cart can add a kit → expands to its assets; `CheckOutAssets` handles it unchanged (one custody row per asset)
-- [ ] `CheckInKit` convenience (check in every asset in the kit)
+## Phase 8: Kits (Week 9) — **built 2026-09-18**
+A named bundle of units: "Kit #1 = this camera, this lens, this bag". `docs/adr/0002` records the one-kit-per-asset rule; CLAUDE.md §13 (2026-09-18) records the rest.
+- [x] `ListKits`, `GetKit`, `CreateKit`, `UpdateKit`, `DeleteKit`, `AddAssetToKit`, `RemoveAssetFromKit` in `internal/stockroom/kits.go`. Reading a kit is any full session — a student has to see what is in one to decide to take it — and building one is admin, gated in the package like every other rule
+- [x] Cart adds a kit → expands to its asset ids in the frontend; **`CheckOutAssets` is unchanged**, one custody row per asset. No kit checkout endpoint, deliberately: a second commit path would be a second definition of the 7-day cap, the overdue block and the custodian rule
+- [x] `CheckInKit`, per unit rather than all-or-nothing: `returned`, `already_in` and `failed`, because the units are physically on the counter and refusing all four because one was already back would leave the database claiming somebody still holds items they returned
+- [x] Migration `20260918090000_kits_v1.sql`: `kits (lower(name))` unique, because a kit name is a label on a bag; `kit_items (asset_id)` unique, because a shared unit makes the second kit incomplete without saying so. Both in the database rather than only in Go, so `seed.sql`, Studio and a restore are held to them too. `AddAssetToKit` reads the offending row back so the 409 names the kit that already has the unit
+- [x] Frontend: `GET/POST /kits` … in `api/index.ts`, `lib/kits.ts` (the expansion rule, with its own Vitest), `stores/kits.svelte.ts`, `screens/kits.svelte`, a sidebar entry and a command-palette destination. **One screen for everybody** — the admin controls are absent for a student, not a second list
+- [x] **Add to cart is whole-or-nothing and re-checked at press time.** `checkable` was true when the list was fetched; the press re-decides per unit and reloads when it disagrees, so the cart never quietly takes an item somebody else already has
+- [x] Tests: 4 Go tests in `internal/stockroom/kits_test.go` (the gate, build-and-edit, the one-kit rule naming the other kit, a partial return), 2 in `server/kits_test.go` (the round trip through checkout and back, every write refused to a student while both reads answer 200), 5 Vitest cases over the expansion rule, and pgTAP over both indexes and the seeded kit
+- [x] Verified by hand against the live server: the seeded kit reads 4 of 4 available, its units check out through `POST /checkout` as an ordinary cart, a unit returned on its own lands in `already_in` while the other three come back, the custody trail survives, and deleting a kit leaves every unit's status untouched
 
 ---
 

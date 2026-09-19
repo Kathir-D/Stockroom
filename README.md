@@ -77,6 +77,9 @@ Those are scope decisions, not missing work. See §2 of [`CLAUDE.md`](CLAUDE.md)
 - A due date chosen at checkout, capped at 7 days out
 - Check-in by scanning, with an optional damage note. Anyone signed in can return anything
 - Full custody history on every asset and every user
+- **Kits** — a named bundle ("Kit #1 = this camera, this lens, this bag") added to the cart whole
+  and returned in one press. A kit holds no custody of its own: it expands into its units, so a kit
+  checkout is an ordinary checkout, and a return reports unit by unit
 
 **Guard rails**
 
@@ -93,6 +96,7 @@ Those are scope decisions, not missing work. See §2 of [`CLAUDE.md`](CLAUDE.md)
 - Asset CRUD, photos, and an `unavailable` status for broken or missing gear
 - Category tree editing, with sibling ordering that follows the department's own inventory document
 - User management, password resets, and a roster CSV import (optionally with profile photos)
+- Kit building: create a bundle and put units in it, one press per unit
 - Live "who has what" and overdue lists
 - One-click CSV export of every table
 
@@ -376,6 +380,7 @@ stockroom/
 │   ├── categories*.go      the category tree, and its admin CRUD
 │   ├── assets*.go          browse and admin asset operations
 │   ├── custody.go          ScanItem, CheckOutAssets, CheckInAsset, histories
+│   ├── kits.go             kits: CRUD, membership, CheckInKit (a kit holds no custody)
 │   └── backup.go           CSV export
 ├── server/                 net/http JSON API; handlers decode, call the package, encode
 ├── packages/ui/            @stockroom/ui — every component, screen, store and the API client
@@ -384,7 +389,7 @@ stockroom/
 │       ├── api/            one function per endpoint, over one fetch client
 │       ├── scanner.ts      keystroke buffer, scan-vs-typed, the Ctrl+Shift+D diagnostic
 │       ├── components/     shadcn-svelte primitives + Stockroom components
-│       └── screens/        sign-in, browse, cart, history, admin/*
+│       └── screens/        sign-in, browse, cart, kits, history, admin/*
 ├── desktop-app/            Wails host (Go side is a window, nothing more)
 ├── web-app/                Vite + Svelte 5 host
 ├── supabase/               config.toml, migrations/, seed.sql, tests/ (pgTAP)
@@ -646,8 +651,8 @@ a restore that validates every foreign key, row count, checksum and sequence bef
 folder, not yet against a real Google account or a real GitHub repository from the closet PC, and
 the full wipe-and-restore round-trip in §11 is still to be run before go-live. Real inventory entry
 is under way. The barcode scanner has not been purchased, so the scan-vs-typed threshold is an
-untuned default. Kits — a named bundle checked out as one unit — are the lowest priority and may
-not ship.
+untuned default. Kits shipped on 2026-09-18, which closes the build list; the desktop host has been
+run against the live server, but neither host has met a real barcode scanner yet.
 
 [`TODO.md`](TODO.md) tracks this phase by phase. [`CLAUDE.md`](CLAUDE.md) §13 records every decision
 that shaped it, including the ones that were reversed.
