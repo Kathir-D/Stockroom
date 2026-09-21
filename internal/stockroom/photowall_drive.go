@@ -165,6 +165,11 @@ type DrivePhotoSource struct {
 	// indistinguishable from a broken feature unless the screen says why.
 	listing bool
 	listed  int
+	// rebuildRequested is §7's Rebuild button, waiting to be acted on. It is
+	// what lets that button keep the current manifest: without it, "rebuild
+	// now" and "the manifest is stale" would have to be the same state, and
+	// the only way to say the first would be to throw the second away.
+	rebuildRequested bool
 	// lastErr is kept rather than logged, for the same reason the reel keeps
 	// its own: a decorative subsystem failing every few minutes on a machine
 	// with no internet must not fill the log with noise nobody asked for.
@@ -272,18 +277,28 @@ func (s *DrivePhotoSource) SetFolder(folderID string) bool {
 // Rebuild asks the refresher to re-list the folder now rather than waiting
 // out the weekly interval (§7's Rebuild button).
 //
-// The nudge is the same one SetFolder sends, and it clears nextAttempt so a
-// rebuild requested minutes after a *failed* listing is not swallowed by the
-// five-minute retry gate -- an admin pressing the button has usually just
-// fixed the thing that made it fail.
+// The nudge is the same one SetFolder sends, but the manifest is *kept*, which
+// is the one difference between the two. SetFolder discards it because it
+// describes a folder that is no longer live; here the folder has not changed,
+// so the existing listing is still correct -- and a listing takes minutes
+// (§3), so dropping it would black the wall out for the whole rebuild, exactly
+// when an admin is standing at the screen watching the feature they just
+// pressed a button on appear to break. buildManifest replaces the manifest in
+// one assignment when it finishes, so the wall crosses over with no gap.
+//
+// The request is a flag rather than a cleared nextAttempt: with the manifest
+// kept, a fresh one would make buildDue answer "not due for a week" and the
+// press would do nothing at all. The flag also carries what clearing
+// nextAttempt used to -- a rebuild requested minutes after a *failed* listing
+// is not swallowed by the five-minute retry gate, because an admin pressing
+// the button has usually just fixed the thing that made it fail.
 func (s *DrivePhotoSource) Rebuild() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.manifest = nil
+	s.rebuildRequested = true
 	s.listed = 0
-	s.nextAttempt = time.Time{}
 	s.mu.Unlock()
 
 	select {
@@ -384,8 +399,17 @@ func (s *DrivePhotoSource) buildDue() (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Consumed whether or not it is acted on, so a press that arrives with no
+	// folder chosen cannot queue a redundant second listing behind the build
+	// the eventual SetFolder starts.
+	requested := s.rebuildRequested
+	s.rebuildRequested = false
+
 	if s.folderID == "" {
 		return "", false // configured but no folder chosen: nothing to list
+	}
+	if requested {
+		return s.folderID, true // §7's button: now, not after the retry gate
 	}
 	if s.now().Before(s.nextAttempt) {
 		return "", false

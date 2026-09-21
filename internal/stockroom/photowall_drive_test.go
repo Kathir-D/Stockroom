@@ -438,3 +438,85 @@ func TestDriveManifestIsNotInTheServedDirectory(t *testing.T) {
 		t.Errorf("the served directory holds %q, which is not a tile", e.Name())
 	}
 }
+
+// TestDriveRebuildKeepsTheManifestServing is §7's Rebuild button: it re-lists
+// the folder that is already live, so the listing it is replacing is still
+// correct and must keep feeding the wall for the minutes the new one takes
+// (§3). Dropping it would empty the wall the moment an admin pressed the
+// button -- the feature appearing to break as a direct result of somebody
+// asking for more of it.
+func TestDriveRebuildKeepsTheManifestServing(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+	before := s.manifest
+
+	s.Rebuild()
+
+	if s.manifest != before {
+		t.Fatal("Rebuild discarded the manifest the wall is still serving from")
+	}
+	if _, _, ok := s.pick(); !ok {
+		t.Error("the wall went dark while the rebuild was pending")
+	}
+	// And the press has to actually list: with the manifest kept, a fresh one
+	// would otherwise read as "not due for another week".
+	folderID, due := s.buildDue()
+	if !due || folderID != "FOLDER-1" {
+		t.Fatalf("buildDue() = %q, %v; want the pressed folder", folderID, due)
+	}
+	if _, due := s.buildDue(); due {
+		t.Error("one press listed twice")
+	}
+
+	// A folder switch is the other case, and still discards: that manifest
+	// describes a folder that is no longer live.
+	if !s.SetFolder("FOLDER-2") {
+		t.Fatal("SetFolder reported no change")
+	}
+	if s.manifest != nil {
+		t.Error("a folder switch kept the previous folder's manifest")
+	}
+}
+
+// TestDriveRebuildBeatsTheRetryGate: a failed listing backs off for five
+// minutes, and an admin pressing Rebuild has usually just fixed whatever made
+// it fail. The press is not swallowed by that gate.
+func TestDriveRebuildBeatsTheRetryGate(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = func(context.Context, string) (io.ReadCloser, func() error, error) {
+		return nil, nil, errors.New("connection reset")
+	}
+	s.buildManifest(context.Background(), "FOLDER-1")
+	if _, due := s.buildDue(); due {
+		t.Fatal("a failed listing should back off before trying again")
+	}
+
+	s.Rebuild()
+	if _, due := s.buildDue(); !due {
+		t.Error("the retry gate swallowed an admin's Rebuild press")
+	}
+}
+
+// TestDriveRebuildWithNoFolderQueuesNothing: pressing Rebuild before a folder
+// has been chosen must not leave a request sitting in wait, or the eventual
+// SetFolder's listing would be followed straight away by a redundant second
+// one -- minutes of Drive listing for nothing.
+func TestDriveRebuildWithNoFolderQueuesNothing(t *testing.T) {
+	s := newTestSource(t, "")
+	s.Rebuild()
+	if _, due := s.buildDue(); due {
+		t.Fatal("listed a folder that has not been chosen")
+	}
+
+	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.SetFolder("FOLDER-1")
+	folderID, due := s.buildDue()
+	if !due || folderID != "FOLDER-1" {
+		t.Fatalf("buildDue() = %q, %v; want the newly chosen folder", folderID, due)
+	}
+	s.buildManifest(context.Background(), folderID)
+	if _, due := s.buildDue(); due {
+		t.Error("a stale Rebuild request re-listed the folder immediately after")
+	}
+}
