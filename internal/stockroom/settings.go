@@ -359,8 +359,8 @@ func validateRepo(repo string) error {
 // EnsureSettings seeds null columns from the environment on start-up and
 // returns the settings in force.
 //
-// It runs exactly once per database, guarded by the env_seeded marker, and
-// writes only where the column is null. That is the whole distinction in §C.2
+// It runs exactly once per database, guarded by the env_seeded and
+// signin_photos_env_seeded markers, and writes only where the column is null. That is the whole distinction in §C.2
 // between "bootstrap fallback" and "source of truth", and getting it backwards
 // would mean an admin's change silently reverting on the next restart.
 //
@@ -372,33 +372,64 @@ func validateRepo(repo string) error {
 // the pass is what is one-time, not the copying -- so a value cleared today
 // stays cleared after someone fills in .env tomorrow.
 //
-// One statement, with the marker in the same UPDATE as the seed and `not
-// env_seeded` in the WHERE. Two servers racing to start therefore cannot both
-// seed: the second finds the row already marked and updates nothing.
+// One statement per pass, with the marker in the same UPDATE as the seed and
+// `not <marker>` in the WHERE. Two servers racing to start therefore cannot
+// both seed: the second finds the row already marked and updates nothing.
+//
+// There are two passes because there are two markers, and that is a fact
+// about when the columns shipped rather than a design with a spare part. The
+// photo wall's folder joined this seed a day after env_seeded had already
+// been set true on every database that had started the server -- so carrying
+// it in the first statement gave it a WHERE clause that is false on exactly
+// the installations it was written for, and SIGNIN_PHOTOS_FOLDER_ID would be
+// silently ignored on all of them. Its own marker, defaulting to false on a
+// database that has never run the pass, is what makes it the first-boot seed
+// CLAUDE.md §9 describes on an upgraded machine as well as a fresh one. See
+// 20260921090000_app_settings_signin_photos_env_seeded.sql.
+//
+// The two are deliberately not one transaction: each is idempotent and
+// guarded by its own marker, so a start-up that dies between them simply
+// finishes the second pass on the next one.
 func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) {
 	if _, err := db.loadSettings(ctx); err != nil {
 		return Settings{}, err
 	}
 	_, err := db.Pool.Exec(ctx, `
 		update app_settings set
-			backup_dir              = coalesce(backup_dir,       nullif($1, '')),
-			photo_backup_dir        = coalesce(photo_backup_dir, nullif($2, '')),
-			drive_remote            = coalesce(drive_remote,     nullif($3, '')),
-			signin_photos_folder_id = coalesce(signin_photos_folder_id, nullif($4, '')),
+			backup_dir       = coalesce(backup_dir,       nullif($1, '')),
+			photo_backup_dir = coalesce(photo_backup_dir, nullif($2, '')),
+			drive_remote     = coalesce(drive_remote,     nullif($3, '')),
+			env_seeded       = true
+		where id = true and not env_seeded`,
+		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir),
+		strings.TrimSpace(cfg.RcloneRemote))
+	if err != nil {
+		return Settings{}, fmt.Errorf("seed settings from environment: %w", err)
+	}
+
+	// The photo wall's folder, on its own marker. coalesce keeps a folder an
+	// admin has already chosen -- this pass is late on an upgraded database,
+	// so unlike the statement above it can meet a column somebody has filled
+	// in through the panel, and overwriting that from .env is the exact
+	// reversal §C.2 rules out. The marker is set even when .env is blank,
+	// because what is one-time is the pass and not the copying.
+	_, err = db.Pool.Exec(ctx, `
+		update app_settings set
+			signin_photos_folder_id  = coalesce(signin_photos_folder_id, nullif($1, '')),
 			-- The label rides along so a seeded folder is not nameless on the
-			-- admin screen. It is only ever written here when a folder was
-			-- actually seeded, which is what the nullif on $4 above decides.
-			signin_photos_label     = case
-				when signin_photos_folder_id is null and nullif($4, '') is not null
+			-- admin screen, and only when a folder is actually being put in:
+			-- the right-hand side of an UPDATE reads the row as it was, so
+			-- this tests the column before the line above fills it.
+			signin_photos_label      = case
+				when signin_photos_folder_id is null and nullif($1, '') is not null
 				then coalesce(signin_photos_label, 'Folder from .env')
 				else signin_photos_label
 			end,
-			env_seeded              = true
-		where id = true and not env_seeded`,
-		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir),
-		strings.TrimSpace(cfg.RcloneRemote), strings.TrimSpace(cfg.SignInPhotosFolderID))
+			signin_photos_env_seeded = true
+		where id = true and not signin_photos_env_seeded`,
+		strings.TrimSpace(cfg.SignInPhotosFolderID))
 	if err != nil {
-		return Settings{}, fmt.Errorf("seed settings from environment: %w", err)
+		return Settings{}, fmt.Errorf("seed the photo wall folder from environment: %w", err)
 	}
 	return db.loadSettings(ctx)
 }
