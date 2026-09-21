@@ -92,6 +92,32 @@ func TestSettingsAndStatusRoutes(t *testing.T) {
 
 	// A target that is not configured is a 503 with its message intact: an
 	// unfilled setting is neither the client's fault nor a bug.
+	//
+	// The settings row is shared with whoever is using this machine's stack, so
+	// somebody who has connected a real Google account by hand would otherwise
+	// turn this into a 200 and a red build that says nothing about the code.
+	// Put the target into the state the assertion is about, and put it back --
+	// clearing drive_remote never touches a stored secret, and the deferred
+	// restore runs even if an assertion below fails.
+	code, saved := call(t, h, http.MethodGet, "/admin/settings", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /admin/settings = %d %v", code, saved)
+	}
+	defer func() {
+		if c, b := call(t, h, http.MethodPut, "/admin/settings", token, map[string]any{
+			"drive_enabled": saved["drive_enabled"],
+			"drive_remote":  saved["drive_remote"],
+			"drive_path":    saved["drive_path"],
+		}); c != http.StatusOK {
+			t.Errorf("could not restore the Drive settings this test cleared: %d %v", c, b)
+		}
+	}()
+	if c, b := call(t, h, http.MethodPut, "/admin/settings", token, map[string]any{
+		"drive_enabled": false, "drive_remote": "",
+	}); c != http.StatusOK {
+		t.Fatalf("clearing the Drive settings = %d %v", c, b)
+	}
+
 	code, body = call(t, h, http.MethodPost, "/admin/settings/test", token, map[string]any{"target": "drive"})
 	if code != http.StatusServiceUnavailable {
 		t.Errorf("testing an unconfigured target = %d %v, want 503", code, body)

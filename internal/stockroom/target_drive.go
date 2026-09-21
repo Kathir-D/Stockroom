@@ -79,6 +79,13 @@ func (d *driveTarget) Push(ctx context.Context, req pushRequest) (string, error)
 		// Staging directories are named .partial-*; a run in progress must
 		// not be published as though it were finished.
 		"--exclude", ".partial-*/**",
+		// What a file manager leaves behind is not part of the backup. An
+		// admin who opens the backup folder in Finder to check on it puts a
+		// .DS_Store beside the archive, and `copy` would push that to Drive
+		// too -- so the off-site copy gains files the run never wrote, and
+		// anybody auditing what left the machine has to account for them.
+		"--exclude", ".DS_Store", "--exclude", "._*",
+		"--exclude", "Thumbs.db", "--exclude", "desktop.ini",
 	}
 	if req.Encrypted {
 		// The readable CSVs are deliberately *not* encrypted, because the

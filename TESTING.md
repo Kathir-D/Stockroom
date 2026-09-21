@@ -36,7 +36,7 @@ Go's database-backed tests skip themselves when Postgres is unreachable, so `go 
 
 The rule for the Go suites is one happy path per module plus, where the module has one, the admin-only or forbidden gate. The gate tests exist because every permission rule is enforced inside `internal/stockroom`, not the router, and a refactor there is the most likely way to open one without noticing.
 
-### `internal/stockroom` (95 tests)
+### `internal/stockroom` (96 tests)
 
 | File | Tests | Covers |
 |---|---|---|
@@ -50,7 +50,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 | `backup_test.go` | 5 | backup refuses a student; a run writes a restorable archive; `github_token` is redacted out of the export; a second concurrent run is a **skip**, not an error; no folder configured is `ErrNotConfigured` |
 | `archive_test.go` | 3 | the encryption round-trip; a wrong passphrase is refused; an encrypted archive asks for one |
 | `restore_test.go` | 9 | restore refuses a student; refuses without the typed confirmation; **a real truncate-and-reload round-trip against the live database**; a damaged archive is caught by its checksum; an archive whose rows point at absent parents is caught by the FK anti-join; `LocalCLIActor` satisfies `RequireAdmin` and `Resolve` never sets `trustedCLI`; `last_value`/`is_called` survive a round-trip (including the never-read, `is_called = false` case, where replaying with `setval`'s default would burn the first value); a descending or cycling sequence is refused outright rather than checked by a rule never designed for one; **a restore that had to be forced past the schema-version check says so on its report**, which is otherwise indistinguishable from one that needed no override |
-| `settings_test.go` | 6 | settings are admin-only; a secret never comes back over the API; each bound is a readable message rather than a Postgres constraint name; a target cannot be enabled half-configured; `EnsureSettings` seeds a blank column **once**, so neither a value an admin typed nor one an admin cleared is taken back by a restart; **a failed connection test carries its reason** — "Test connection" exists to name a misconfiguration, and without a sentinel a wrong token answered 500 "internal error" while the log held "github 401 Unauthorized: Bad credentials" |
+| `settings_test.go` | 7 | settings are admin-only; a secret never comes back over the API; each bound is a readable message rather than a Postgres constraint name; a target cannot be enabled half-configured; `EnsureSettings` seeds a blank column **once**, so neither a value an admin typed nor one an admin cleared is taken back by a restart; **a failed connection test carries its reason** — "Test connection" exists to name a misconfiguration, and without a sentinel a wrong token answered 500 "internal error" while the log held "github 401 Unauthorized: Bad credentials"; **a backup folder must be a full path**, because a path that lost its leading separator on the way out of a Finder window is resolved against the server's working directory and produces a complete, valid backup somewhere nobody will ever look |
 | `backup_status_test.go` | 6 | staleness is computed over the targets that are supposed to be running; **a target that has never succeeded is worded differently from one whose last success is old**, because the local archive always succeeds and so a misconfigured off-site target used to read as "Backups have not run in 0 hours" on every surface including every student's sign-in; the wording's five shapes; the no-failsafe-admin warning fires; the state file and log are written; dated folders are pruned |
 | `photos_backup_test.go` | 4 | the mirror copies only what changed; a missing `uploads/` is a no-op rather than an error; a generation rolls over at the retention boundary; the live generation cannot be deleted |
 | `photowall_test.go` | 11 | the wall is wiped at boot and adopts only a directory it owns, refusing a foreign one; the fill/take/invalidate lifecycle; a take is atomic and answers when empty; filling backs off; a stale generation is discarded; tile names give nothing away; the run loop stops with its context |
@@ -142,6 +142,20 @@ Still unwritten, and worth doing next: `groupByModel` (the browse list's shape),
 states and the 24h due-soon threshold), `dueInstant` (the 7-day cap's clamp), and the cart store's set
 semantics. All are pure functions or plain stores with
 no component and no server needed.
+
+## Testing the backup by hand
+
+Two scripts exist for the thing the suite cannot cover: whether a *real* target, with a real
+account behind it, actually received the archive.
+
+| Script | What it does |
+|---|---|
+| `scripts/backup-check.sh` | Signs in with the failsafe admin from `.env`, prints where backups are configured to go, optionally runs each target's connection check (`--test`), takes a real backup (`--run`), lists what is stored on every target (`--versions`), and verifies the newest archive. `--all` does all of it |
+| `scripts/verify-archive.py` | Checks one archive the way a restore does, without a database: every SHA-256 in `manifest.json`, every table's row count, that `sequences.csv` and `RESTORE.md` are present, that each sequence carries `is_called`, and that no GitHub token survived redaction into `app_settings.csv` |
+
+`verify-archive.py` takes any archive, so it is also how you prove a zip *fetched back* from Drive
+or GitHub is byte-identical in the ways that matter. Exit status is 0 only when the archive would
+pass a restore's own checks.
 
 ## Planned
 

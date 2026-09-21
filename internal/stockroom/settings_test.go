@@ -99,6 +99,46 @@ func TestSettingsBoundsAreReadable(t *testing.T) {
 	restore()
 }
 
+// A folder typed without its leading separator is the mistake that produces a
+// backup which reports success and cannot be found: the server resolves it
+// against its own working directory, writes a complete, valid archive there,
+// and every screen agrees it worked. Refuse it beside the field instead.
+func TestBackupFolderMustBeAFullPath(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+
+	for _, tc := range []struct {
+		name  string
+		in    SettingsInput
+		field string
+	}{
+		{"a path missing its leading slash", SettingsInput{BackupDir: strPtr("Users/you/Desktop/backups")}, "backup_dir"},
+		{"a relative folder", SettingsInput{BackupDir: strPtr("./backups")}, "backup_dir"},
+		{"the photo mirror too", SettingsInput{PhotoBackupDir: strPtr("photos")}, "photo_backup_dir"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.SaveSettings(ctx, admin, tc.in)
+			if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), tc.field) {
+				t.Errorf("SaveSettings(%s) = %v, want ErrInvalid naming %s", tc.name, err, tc.field)
+			}
+		})
+	}
+
+	// An absolute folder is ordinary, and clearing one stays allowed: blank
+	// means "not configured", which is a 503 the admin can act on, not a typo.
+	//
+	// withTestSettings wraps *both* writes, so the folder this database was
+	// configured with is put back. A test that clears shared configuration and
+	// leaves it cleared turns the next real backup into a 503, which is how
+	// this comment came to be written.
+	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr(t.TempDir())})
+	defer restore()
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("")}); err != nil {
+		t.Errorf("clearing the backup folder = %v, want nil", err)
+	}
+}
+
 // Enabling a target with nothing to reach is a configuration that can only
 // fail at 2 a.m. Say so while somebody is looking at the form.
 func TestSettingsRefuseAHalfConfiguredTarget(t *testing.T) {

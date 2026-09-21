@@ -25,6 +25,13 @@ with.
    photos. Leave it empty to skip photos entirely.
 4. **Save folders**
 
+> **It has to start with `/` (or `C:\` on Windows).** Copying a path out of a
+> Finder or Explorer window often loses the leading separator, and
+> `Users/you/Desktop/backups` is not the same place as `/Users/you/Desktop/backups`
+> — the second is your Desktop, the first is a new folder created wherever
+> Stockroom happens to be running from. Stockroom refuses a path without it
+> rather than write a perfectly good backup somewhere you will never look.
+
 Then **Admin → Backup → Back up now**. It should say how many rows it wrote and
 where. If it does not, the message on screen says what is wrong.
 
