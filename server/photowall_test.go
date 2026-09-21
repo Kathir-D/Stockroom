@@ -236,3 +236,144 @@ func TestFilesRouteStillWorks(t *testing.T) {
 		t.Error("the uploads directory is enumerable")
 	}
 }
+
+/* --------------------------------------------------------- §7's routes ---- */
+
+// TestPhotoWallAdminRoutes is the wire for §7: the four routes exist, they
+// need a session, and the two that answer with a status never say the folder
+// id or a Drive URL out loud.
+//
+// The switch itself has its rules pinned one layer down in
+// internal/stockroom; what is checked here is that the routes are reachable,
+// admin-gated, and that a *student's* token does not reach them, which is the
+// thing a router edit can break without any package test noticing.
+func TestPhotoWallAdminRoutes(t *testing.T) {
+	h, d := testDeps(t)
+	admin := adminToken(t, h, d)
+	_, studentSN := seedUser(t, d, false, "student-route-password")
+	student := login(t, h, studentSN, "student-route-password")
+
+	for _, route := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, "/admin/photo-wall", nil},
+		{http.MethodPut, "/admin/photo-wall", map[string]any{"link": "1abcdefghijklmnop", "label": "x"}},
+		{http.MethodPost, "/admin/photo-wall/rebuild", nil},
+		{http.MethodGet, "/admin/photo-wall/preview", nil},
+	} {
+		if code, _ := call(t, h, route.method, route.path, "", route.body); code != http.StatusUnauthorized {
+			t.Errorf("%s %s with no token = %d, want 401", route.method, route.path, code)
+		}
+		if code, _ := call(t, h, route.method, route.path, student, route.body); code != http.StatusForbidden {
+			t.Errorf("%s %s as a student = %d, want 403", route.method, route.path, code)
+		}
+	}
+
+	// The status read works with no wall configured, which is the state every
+	// machine is in before somebody sets one up.
+	code, body := call(t, h, http.MethodGet, "/admin/photo-wall", admin, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /admin/photo-wall = %d %v, want 200", code, body)
+	}
+	if body["enabled"] != false {
+		t.Errorf("enabled = %v with no reel built, want false", body["enabled"])
+	}
+	// The screen disables the paste form on this one field, so it has to be
+	// the same condition the write guards on. False here and a 503 from the
+	// PUT below are the two halves of that, and this test holds them together.
+	if body["can_set_folder"] != false {
+		t.Errorf("can_set_folder = %v with no Drive source; the screen would offer a form that can only 503", body["can_set_folder"])
+	}
+	if _, ok := body["folder_label"]; !ok {
+		t.Errorf("the status has no folder_label, which is all the screen has to name the folder by: %v", body)
+	}
+	for key := range body {
+		if strings.Contains(key, "folder_id") {
+			t.Errorf("the status carries %q; the folder id must never leave the server", key)
+		}
+	}
+
+	// A pasted link that is not a Drive folder link is a 400 naming the forms
+	// that do work, not a generic failure -- and nothing is written.
+	code, body = call(t, h, http.MethodPut, "/admin/photo-wall", admin,
+		map[string]any{"link": "the folder Jamie shared", "label": "Photos"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("PUT with junk = %d %v, want 400", code, body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "drive.google.com/drive/folders") {
+		t.Errorf("the refusal does not name an accepted form: %v", body["error"])
+	}
+
+	// With no source on this server a good link is a 503 naming the setting,
+	// not a 500: rclone being absent is a machine that has not been set up,
+	// which is the same posture UPLOADS_DIR and BACKUP_DIR already have.
+	code, body = call(t, h, http.MethodPut, "/admin/photo-wall", admin,
+		map[string]any{"link": "https://drive.google.com/drive/folders/1abcdefghijklmnopqrst", "label": "Photos"})
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("PUT with no Drive source = %d %v, want 503", code, body)
+	}
+
+	// The preview is an empty list rather than an error when there is no reel,
+	// for the same reason the sign-in batch is.
+	code, body = call(t, h, http.MethodGet, "/admin/photo-wall/preview", admin, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /admin/photo-wall/preview = %d %v, want 200", code, body)
+	}
+	if photos, ok := body["photos"].([]any); !ok || len(photos) != 0 {
+		t.Errorf("preview = %v, want an empty photos array", body["photos"])
+	}
+}
+
+// TestPhotoWallPreviewDoesNotConsumeOverHTTP is §10's "preview does not
+// consume", asserted where it can actually go wrong: a handler that reached
+// for TakePhotos because it was the method already there would empty the reel
+// every time an admin opened the screen.
+func TestPhotoWallPreviewDoesNotConsumeOverHTTP(t *testing.T) {
+	h, d := testDeps(t)
+	admin := adminToken(t, h, d)
+
+	wall, err := stockroom.NewPhotoWall(stockroom.PhotoWallOptions{
+		Dir:        t.TempDir(),
+		Count:      4,
+		Batch:      4,
+		Source:     fixedSource{data: []byte("tile bytes")},
+		FetchDelay: -1,
+	})
+	if err != nil {
+		t.Fatalf("NewPhotoWall: %v", err)
+	}
+	d.db.PhotoWall = wall
+	t.Cleanup(func() { d.db.PhotoWall = nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go wall.Run(ctx)
+
+	var ready int
+	for i := 0; i < 200 && ready < 4; i++ {
+		ready, _ = wall.Counts()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ready != 4 {
+		t.Fatalf("the reel holds %d tiles after 2s, want 4", ready)
+	}
+
+	for i := 0; i < 3; i++ {
+		code, body := call(t, h, http.MethodGet, "/admin/photo-wall/preview", admin, nil)
+		if code != http.StatusOK {
+			t.Fatalf("preview %d = %d %v", i, code, body)
+		}
+		if photos, _ := body["photos"].([]any); len(photos) != 4 {
+			t.Fatalf("preview %d returned %d tiles, want 4", i, len(photos))
+		}
+	}
+	if ready, served := wall.Counts(); ready != 4 || served != 0 {
+		t.Errorf("after three previews the reel is %d ready / %d served, want 4/0", ready, served)
+	}
+
+	// And the sign-in screen still gets the full batch.
+	if got := readPhotos(t, do(newRouter(d), http.MethodGet, "/signin/photos")); len(got.Photos) != 4 {
+		t.Errorf("the sign-in batch got %d tiles after three previews, want 4", len(got.Photos))
+	}
+}

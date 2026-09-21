@@ -93,3 +93,76 @@ func photoTileServer(wall *stockroom.PhotoWall) http.Handler {
 		files.ServeHTTP(w, r)
 	})
 }
+
+/* --------------------------------------------------------------- admin ---- */
+
+// The Drive folder the wall reads from, controlled from the admin panel
+// (§7). Admin-only, enforced by RequireAdmin inside internal/stockroom rather
+// than here, like every other admin route.
+//
+// The one rule that runs through all four: **no response carries the folder
+// id or a Drive URL**. The field is write-only, and there is a test asserting
+// these bodies contain neither, because the way that property regresses is a
+// debug field somebody adds in a year.
+
+// GET /admin/photo-wall
+func (d deps) handlePhotoWallStatus(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	status, err := d.db.GetPhotoWallStatus(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// PUT /admin/photo-wall  {"link": "...", "label": "..."}
+// Parse the link, probe Drive, write the row, tear the reel down. A failed
+// probe writes nothing and leaves the previous folder live.
+func (d deps) handleSetPhotoWallFolder(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in struct {
+		Link  string `json:"link"`
+		Label string `json:"label"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	status, err := d.db.SetPhotoWallFolder(r.Context(), actor, in.Link, in.Label)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// POST /admin/photo-wall/rebuild
+// Re-list the folder that is already live, rather than waiting out the weekly
+// refresh. The listing runs in the background; the response is the status
+// with Listing about to turn true, which is what the screen polls on.
+func (d deps) handleRebuildPhotoWall(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	status, err := d.db.RebuildPhotoWallManifest(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// GET /admin/photo-wall/preview
+// Up to six tile URLs that are *not* marked served: a preview must not
+// consume the buffer the sign-in screen is about to draw from.
+func (d deps) handlePhotoWallPreview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	urls, err := d.db.PhotoWallPreview(r.Context(), actor, 0)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if urls == nil {
+		urls = []string{}
+	}
+	// The tiles behind these URLs are still ready, so they may be handed to a
+	// real sign-in and reaped a TTL later. Caching the list would point the
+	// screen at files that are gone.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"photos": urls})
+}

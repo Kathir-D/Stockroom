@@ -206,6 +206,45 @@ func TestDriveNextPhotoRetriesPastRubbish(t *testing.T) {
 	}
 }
 
+// TestDriveNestedPathsSurviveToTheFetch. The source folder is a real Drive
+// folder, which means subfolders -- events, a year, a shoot -- and `lsjson -R`
+// reports a path relative to the root rather than a bare filename.
+//
+// Every link in the chain already had its own test and none of them covered
+// the chain: the manifest keeps `events/gala.jpg`, and driveRoot composes a
+// path onto the connection string, but nothing asserted that the path the
+// manifest stored is the path the download is given. A `path.Base` added
+// anywhere between them would pass both of those tests and fetch nothing, and
+// the symptom would be an empty wall with a download error nobody reads.
+func TestDriveNestedPathsSurviveToTheFetch(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	// A space, a nested directory and an uppercase extension: all three are
+	// ordinary in a folder a person filled, and all three have been a bug
+	// somewhere. The extension filter lowercases; the path never touches the
+	// local filesystem, so its separators stay rclone's.
+	const nested = "events/gala 2026/sub/DSC_0142.JPG"
+	s.list = stubListing(`[
+	  {"Path":"` + nested + `","Name":"DSC_0142.JPG","Size":1000,"IsDir":false}
+	]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+	if len(s.manifest.Entries) != 1 || s.manifest.Entries[0].Path != nested {
+		t.Fatalf("manifest = %+v, want the nested path kept whole", s.manifest.Entries)
+	}
+
+	var sawRemote string
+	good := testJPEG(t, 1500, 1000)
+	s.fetch = func(_ context.Context, remote, _ string) ([]byte, error) {
+		sawRemote = remote
+		return good, nil
+	}
+	if _, err := s.NextPhoto(context.Background()); err != nil {
+		t.Fatalf("NextPhoto: %v", err)
+	}
+	if want := "gdrive,root_folder_id=FOLDER-1:" + nested; sawRemote != want {
+		t.Errorf("rclone cat was given %q, want %q", sawRemote, want)
+	}
+}
+
 // TestDriveNextPhotoGivesUp bounds the retry, so a folder holding nothing but
 // video returns instead of downloading it all.
 func TestDriveNextPhotoGivesUp(t *testing.T) {

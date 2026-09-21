@@ -381,12 +381,22 @@ func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) 
 	}
 	_, err := db.Pool.Exec(ctx, `
 		update app_settings set
-			backup_dir       = coalesce(backup_dir,       nullif($1, '')),
-			photo_backup_dir = coalesce(photo_backup_dir, nullif($2, '')),
-			drive_remote     = coalesce(drive_remote,     nullif($3, '')),
-			env_seeded       = true
+			backup_dir              = coalesce(backup_dir,       nullif($1, '')),
+			photo_backup_dir        = coalesce(photo_backup_dir, nullif($2, '')),
+			drive_remote            = coalesce(drive_remote,     nullif($3, '')),
+			signin_photos_folder_id = coalesce(signin_photos_folder_id, nullif($4, '')),
+			-- The label rides along so a seeded folder is not nameless on the
+			-- admin screen. It is only ever written here when a folder was
+			-- actually seeded, which is what the nullif on $4 above decides.
+			signin_photos_label     = case
+				when signin_photos_folder_id is null and nullif($4, '') is not null
+				then coalesce(signin_photos_label, 'Folder from .env')
+				else signin_photos_label
+			end,
+			env_seeded              = true
 		where id = true and not env_seeded`,
-		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir), strings.TrimSpace(cfg.RcloneRemote))
+		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir),
+		strings.TrimSpace(cfg.RcloneRemote), strings.TrimSpace(cfg.SignInPhotosFolderID))
 	if err != nil {
 		return Settings{}, fmt.Errorf("seed settings from environment: %w", err)
 	}

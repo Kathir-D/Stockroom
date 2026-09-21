@@ -63,6 +63,17 @@ type DB struct {
 	// server/main.go calls NewPhotoWall, logs a warning on failure and serves
 	// without one, which is exactly how it already treats the failsafe admin.
 	PhotoWall *PhotoWall
+
+	// PhotoWallSource is where that reel's photographs come from (§3), or nil
+	// when rclone is missing, no remote is configured, or the reel is off.
+	// Assigned alongside PhotoWall by server/main.go, for the same reason.
+	//
+	// It is the concrete type rather than the PhotoSource interface the reel
+	// holds, because §7's admin screen needs three things no photo source in
+	// general has: the folder switch, the manifest's listing progress, and
+	// the reachability probe a pasted link is validated against. Every method
+	// on it is nil-safe too.
+	PhotoWallSource *DrivePhotoSource
 }
 
 // Open connects to Postgres at databaseURL and verifies the connection with a

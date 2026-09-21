@@ -18,6 +18,7 @@
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
   import DatabaseBackupIcon from "@lucide/svelte/icons/database-backup"
   import SettingsIcon from "@lucide/svelte/icons/settings"
+  import ImagesIcon from "@lucide/svelte/icons/images"
   import { Separator } from "@stockroom/ui/components/ui/separator"
   import { cn } from "@stockroom/ui/utils"
   import type { CategoryNode } from "../../api/types"
@@ -50,6 +51,12 @@
     { tab: "overdue", label: "Overdue", icon: AlertTriangleIcon },
     { tab: "backup", label: "Backup", icon: DatabaseBackupIcon },
     { tab: "settings", label: "Settings", icon: SettingsIcon },
+    // Last rather than directly under Backup, which is where
+    // docs/design/signin-photo-wall.html §7 put it: Backup and Settings are one
+    // subject read top to bottom, and the photo wall is a different one. It is
+    // also the only item here that is decoration rather than inventory, so it
+    // belongs at the bottom of the list on those grounds too.
+    { tab: "photo-wall", label: "Photo wall", icon: ImagesIcon },
   ]
 
   const browsing = $derived(route.name === "browse")
