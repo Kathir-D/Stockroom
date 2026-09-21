@@ -140,11 +140,13 @@ type DrivePhotoSource struct {
 	dir      string
 	interval time.Duration
 
-	// list and fetch are the rclone seam. They are fields rather than direct
-	// calls so the tests can run the whole of this file with no network, no
-	// rclone binary and no Google account, which is what §10 asks for.
+	// list, fetch and probe are the rclone seam. They are fields rather than
+	// direct calls so the tests can run the whole of this file with no
+	// network, no rclone binary and no Google account, which is what §10 asks
+	// for.
 	list  func(ctx context.Context, remote string) (io.ReadCloser, func() error, error)
 	fetch func(ctx context.Context, remote, file string) ([]byte, error)
+	probe func(ctx context.Context, remote string) error
 
 	// rebuild carries a nudge from SetFolder. Buffered to one, so a switch
 	// never blocks on the refresher being mid-listing.
@@ -163,6 +165,11 @@ type DrivePhotoSource struct {
 	// indistinguishable from a broken feature unless the screen says why.
 	listing bool
 	listed  int
+	// rebuildRequested is §7's Rebuild button, waiting to be acted on. It is
+	// what lets that button keep the current manifest: without it, "rebuild
+	// now" and "the manifest is stale" would have to be the same state, and
+	// the only way to say the first would be to throw the second away.
+	rebuildRequested bool
 	// lastErr is kept rather than logged, for the same reason the reel keeps
 	// its own: a decorative subsystem failing every few minutes on a machine
 	// with no internet must not fill the log with noise nobody asked for.
@@ -208,6 +215,7 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 		interval: opts.RefreshInterval,
 		list:     streamRcloneList,
 		fetch:    catRclone,
+		probe:    probeRcloneFolder,
 		rebuild:  make(chan struct{}, 1),
 		folderID: strings.TrimSpace(opts.FolderID),
 		now:      time.Now,
@@ -264,6 +272,70 @@ func (s *DrivePhotoSource) SetFolder(folderID string) bool {
 	default:
 	}
 	return true
+}
+
+// Rebuild asks the refresher to re-list the folder now rather than waiting
+// out the weekly interval (§7's Rebuild button).
+//
+// The nudge is the same one SetFolder sends, but the manifest is *kept*, which
+// is the one difference between the two. SetFolder discards it because it
+// describes a folder that is no longer live; here the folder has not changed,
+// so the existing listing is still correct -- and a listing takes minutes
+// (§3), so dropping it would black the wall out for the whole rebuild, exactly
+// when an admin is standing at the screen watching the feature they just
+// pressed a button on appear to break. buildManifest replaces the manifest in
+// one assignment when it finishes, so the wall crosses over with no gap.
+//
+// The request is a flag rather than a cleared nextAttempt: with the manifest
+// kept, a fresh one would make buildDue answer "not due for a week" and the
+// press would do nothing at all. The flag also carries what clearing
+// nextAttempt used to -- a rebuild requested minutes after a *failed* listing
+// is not swallowed by the five-minute retry gate, because an admin pressing
+// the button has usually just fixed the thing that made it fail.
+func (s *DrivePhotoSource) Rebuild() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.rebuildRequested = true
+	s.listed = 0
+	s.mu.Unlock()
+
+	select {
+	case s.rebuild <- struct{}{}:
+	default:
+	}
+}
+
+// Probe checks that a folder id is reachable with the configured credential,
+// and is what stands between a mistyped link and a wall that silently empties
+// ten minutes later (§7).
+//
+// It is a *bounded* listing -- one level, not the recursive walk a manifest
+// build does -- because an admin is standing at the screen waiting for the
+// answer and §3's full listing of a large folder takes minutes.
+//
+// An empty folder passes. §9 is explicit that a folder holding no usable
+// photographs is permitted: it may be mid-upload, and refusing it would make
+// the panel unusable in exactly the moment somebody is setting the feature up.
+// What Probe rejects is Drive saying no -- a folder that does not exist, or
+// one the machine's account cannot see.
+func (s *DrivePhotoSource) Probe(ctx context.Context, folderID string) error {
+	if s == nil {
+		return fmt.Errorf("%w: the sign-in photo wall has no Drive source", ErrNotConfigured)
+	}
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return fmt.Errorf("%w: no folder id to check", ErrInvalid)
+	}
+	if err := s.probe(ctx, s.driveRoot(folderID)); err != nil {
+		// Named causes rather than a generic failure: these two are what it
+		// almost always is, and an admin who is told which one can fix it in
+		// Drive without a support conversation.
+		return fmt.Errorf("%w: that folder isn't reachable with the configured Drive account — check that it is shared with that account, or set to anyone-with-the-link. rclone said: %s",
+			ErrInvalid, oneLine(err.Error()))
+	}
+	return nil
 }
 
 // Status is §7's read.
@@ -327,8 +399,17 @@ func (s *DrivePhotoSource) buildDue() (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Consumed whether or not it is acted on, so a press that arrives with no
+	// folder chosen cannot queue a redundant second listing behind the build
+	// the eventual SetFolder starts.
+	requested := s.rebuildRequested
+	s.rebuildRequested = false
+
 	if s.folderID == "" {
 		return "", false // configured but no folder chosen: nothing to list
+	}
+	if requested {
+		return s.folderID, true // §7's button: now, not after the retry gate
 	}
 	if s.now().Before(s.nextAttempt) {
 		return "", false
@@ -599,6 +680,18 @@ func streamRcloneList(ctx context.Context, remote string) (io.ReadCloser, func()
 		return errors.New(oneLine(msg))
 	}
 	return stdout, wait, nil
+}
+
+// probeRcloneFolder runs the bounded listing Probe is built on.
+//
+// --max-depth 1 keeps it to the folder's own contents: what is being tested is
+// whether Drive will answer for this id at all, and walking the tree to find
+// that out would take the minutes a manifest build takes. --files-only is
+// deliberately absent, so a folder whose photographs all live in subfolders
+// still proves reachable rather than looking empty.
+func probeRcloneFolder(ctx context.Context, remote string) error {
+	_, err := runRclone(ctx, photoProbeTimeout, "lsjson", remote, "--max-depth", "1", "--no-modtime")
+	return err
 }
 
 // catRclone downloads one file to memory. The path argument is only for the

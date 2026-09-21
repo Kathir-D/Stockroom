@@ -573,6 +573,11 @@ entirely.
 - **Errors** render inline beneath the input, never as a toast. A toast can vanish before someone reads it.
 - **On success**, if `has_overdue`, a blocking overdue notice appears before the browse screen, listing the
   overdue items and their days-late count, with a single **Continue**.
+- **The photo wall** (`docs/design/signin-photo-wall.html`) renders behind the card: two slowly scrolling
+  columns of department photography, `pointer-events: none`, `aria-hidden`, shed entirely below 1280px and
+  static under `prefers-reduced-motion`. It is decoration and is the first thing to go — it never blocks
+  first paint, never retries a failed fetch, and the input sits at the same pixel whether it is there or
+  not. Off by default; an admin points it at a Drive folder in §8.7's **Photo wall** screen.
 
 ### 8.2 Browse
 
@@ -799,6 +804,14 @@ theme. It is the same shell, `data-density="compact"`.
 - **Overdue.** The highest-value admin screen. `ListOverdueCustody` sorted by days-late descending:
   custodian, student number, item, serial, due date, days late. Row action: **Check in**.
 - **Backup.** One **Backup Now** button, the destination path, and the result of the last run.
+- **Photo wall.** Which Google Drive folder the sign-in wall reads from. One paste field for the share
+  link, one for a name, and **Replace folder** — which checks the folder against Drive before writing, so
+  a typo is a message here rather than a wall that silently empties ten minutes later. The link is
+  **write-only**: never rendered, never pre-filled, blank again the instant a folder is set, because a
+  folder link is a key to the folder and this machine is shared. What identifies the live folder instead
+  is the typed name, the counts, and a six-tile preview strip — which is the real confirmation, and which
+  shows nothing the sign-in screen does not already show to anyone who walks up. Last in the group: it is
+  the only admin screen that is decoration rather than inventory.
 
 ---
 
@@ -1047,3 +1060,13 @@ previously specified anywhere): categories in `Catagories.md`'s document order, 
 checked-out ones within any list. Backup (`CLAUDE.md` §11) moves from "local CSV, Drive client syncs it"
 to "local CSV, then `rclone copy` pushes it directly" — a one-time human `rclone config` OAuth step replaces
 writing custom Google API/OAuth code.
+
+**2026-09-18, the photo wall's folder link is treated as a credential, not a label.** A Drive folder shared
+"anyone with the link" is readable by whoever holds the URL, so §8.7's new **Photo wall** screen never shows
+the live link back — the same rule the GitHub token and every password field already follow, reaching one
+more value. The field starts empty every time, including straight after a folder is set, and the server has
+a test asserting neither the read nor the write response contains the id or a `drive.google.com` string. The
+folder is identified on screen by a name somebody typed and by the preview strip; §7 of
+`signin-photo-wall.html` asked for the folder's *Drive* name, which turned out not to be obtainable —
+`rclone` addresses Drive by path from a configured root and has no "stat this id" command, and fetching it
+any other way would mean the Google API client that document exists to avoid.

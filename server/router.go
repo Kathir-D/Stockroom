@@ -124,6 +124,16 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /admin/photos/restore", d.withSession(d.handleRestorePhotos, fullOnly))
 	mux.Handle("DELETE /admin/photos/generations/{name}", d.withSession(d.handleDeletePhotoGeneration, fullOnly))
 
+	// The sign-in photo wall's Drive folder
+	// (docs/design/signin-photo-wall.html §7). Admin-only, enforced inside
+	// internal/stockroom. None of these four ever returns the folder id: the
+	// link is a capability, so the field is write-only and the screen is given
+	// a label, counts and a preview strip instead.
+	mux.Handle("GET /admin/photo-wall", d.withSession(d.handlePhotoWallStatus, fullOnly))
+	mux.Handle("PUT /admin/photo-wall", d.withSession(d.handleSetPhotoWallFolder, fullOnly))
+	mux.Handle("POST /admin/photo-wall/rebuild", d.withSession(d.handleRebuildPhotoWall, fullOnly))
+	mux.Handle("GET /admin/photo-wall/preview", d.withSession(d.handlePhotoWallPreview, fullOnly))
+
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))

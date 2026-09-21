@@ -98,9 +98,19 @@ func main() {
 	// nothing to hand out, because that is the state they spend most of their
 	// life in.
 	if cfg.SignInPhotosRemote != "" {
+		// The live folder comes from app_settings, not from .env (§8).
+		// SIGNIN_PHOTOS_FOLDER_ID seeded that column on first boot, above, and
+		// is ignored from then on -- otherwise a folder an admin pasted in the
+		// panel would be silently out-voted by the environment on the next
+		// restart, which is the direction the Phase 7 decision rules out.
+		folderID, folderLabel, err := db.PhotoWallFolder(ctx)
+		if err != nil {
+			log.Printf("warning: could not read the sign-in photo wall folder: %v", err)
+		}
+
 		source, err := stockroom.NewDrivePhotoSource(stockroom.DrivePhotoSourceOptions{
 			Remote:          cfg.SignInPhotosRemote,
-			FolderID:        cfg.SignInPhotosFolderID,
+			FolderID:        folderID,
 			Dir:             cfg.SignInPhotosDir,
 			RefreshInterval: time.Duration(cfg.SignInPhotosManifestHours) * time.Hour,
 		})
@@ -122,6 +132,10 @@ func main() {
 			log.Printf("warning: sign-in photo wall disabled, check SIGNIN_PHOTOS_DIR: %v", wallErr)
 		} else {
 			db.PhotoWall = wall
+			// The source is handed to DB as well as to the reel, because §7's
+			// admin screen needs the folder switch, the listing progress and
+			// the probe -- none of which the PhotoSource interface has.
+			db.PhotoWallSource = source
 			go wall.Run(ctx)
 			if source != nil {
 				// Started after the reel, because NewPhotoWall wipes the cache
@@ -129,8 +143,10 @@ func main() {
 				go source.Run(ctx)
 			}
 			log.Printf("sign-in photo wall caching in %s", cfg.SignInPhotosDir)
-			if cfg.SignInPhotosFolderID == "" {
-				log.Printf("sign-in photo wall: no Drive folder set, so the wall stays empty")
+			if folderID == "" {
+				log.Printf("sign-in photo wall: no Drive folder set, so the wall stays empty until one is chosen in Admin → Photo wall")
+			} else {
+				log.Printf("sign-in photo wall reading %q", folderLabel)
 			}
 		}
 	}
