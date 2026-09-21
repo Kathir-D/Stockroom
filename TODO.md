@@ -1,6 +1,17 @@
 # Stockroom: backend and functionality to-do
 
+> **Closed, 2026-09-21. 126 of 129 items done; the three left are blocked on hardware and
+> credentials, not on work.** Phases 0 to 8 shipped, which is the whole build list. This file is
+> kept as the record of what was built and why — `CLAUDE.md` §13 and `README.md` both reference it,
+> and it is the only place several implementation decisions are written down.
+>
+> **The active list is [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md)** — turning this into something
+> another school can install. The three items still open below are carried into its Phase T10, so
+> nothing is tracked only here.
+
 Backend/functionality work only (no UI/layout/styling; UI is planned separately). `CLAUDE.md` is the architecture/decision reference; this file is the ordered work list. Phases map to the Week 5 to 9 timeline in CLAUDE.md §12.
+
+**Scope note.** This file is the build of Stockroom *for one department*. Turning it into something another school can install — packaging, configurable policy, the install path, the docs for a non-developer, and the GitHub setup that distributes it — is a separate track in [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md).
 
 **Shape of the work.** All logic lives in Go, in `internal/stockroom`. `server/` exposes it as a localhost JSON API. Both the Wails desktop app and the web-app are thin Svelte UIs calling that API via `fetch` (`lib/api.ts`). No supabase-js, no DB credentials in TypeScript. Postgres keeps running inside the Supabase Docker stack; Go connects on port 54322.
 
