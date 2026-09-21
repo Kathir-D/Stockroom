@@ -61,7 +61,7 @@ first, because they describe the behaviour the code has to keep.
 [Settings in the app](#settings-that-live-in-the-app) ·
 [Rules you cannot change yet](#rules-you-cannot-change-yet)
 
-**Part 4 — [Backup and restore](#part-4--backup-and-restore)**
+**Part 4 — [Backup and restore](#part-4--backup-and-restore)** · [Sign-in photo wall](#sign-in-photo-wall)
 
 **Part 5 — [For developers](#part-5--for-developers)**
 [Architecture](#architecture) ·
@@ -570,7 +570,11 @@ Copy `.env.example` to `.env` at the repository root.
 | `BACKUP_DIR` | **First-boot seed only** for the backup folder | *(none)* |
 | `PHOTO_BACKUP_DIR` | First-boot seed only for the photo mirror folder | *(none)* |
 | `RCLONE_REMOTE` | First-boot seed only for the Google Drive remote name | *(none)* |
-| `SIGNIN_PHOTOS_*` | Optional decorative photo wall behind the sign-in card | see `.env.example` |
+| `SIGNIN_PHOTOS_REMOTE` | The rclone remote holding the photo wall's pictures. **Blank switches the whole feature off** | *(none)* |
+| `SIGNIN_PHOTOS_FOLDER_ID` | First-boot seed only for the Drive folder; Admin → Photo wall owns it afterwards | *(none)* |
+| `SIGNIN_PHOTOS_DIR` | Tile cache. **Wiped on every start**, so give it a directory of its own | `./.cache/signin-photos` |
+| `SIGNIN_PHOTOS_COUNT` / `_BATCH` / `_TTL_MINUTES` | Tiles buffered, tiles per request, minutes before a shown tile is deleted | `48` / `16` / `15` |
+| `SIGNIN_PHOTOS_MANIFEST_HOURS` | How often the Drive folder is re-listed | `168` (weekly) |
 
 **The three backup variables are a seed, not a setting.** They fill the `app_settings` row the
 first time the server starts against a fresh database, and are ignored on every start after that.
@@ -680,6 +684,131 @@ error from the last failed attempt, and the tail of `backup.log`.
 > Google Drive has been connected and no GitHub repository created. Both are unit-tested and hand-
 > read, not round-tripped. Test yours before you rely on it, with the *Test connection* button and
 > then an actual restore.
+
+---
+
+## Sign-in photo wall
+
+Two slowly scrolling columns of department photography behind the sign-in card, read from a Google
+Drive folder. It is **decoration and nothing else**, and it is **off unless you turn it on** — with
+`SIGNIN_PHOTOS_REMOTE` unset no cache is created, no goroutine starts, and the sign-in screen is
+exactly what it is without this feature. Nothing about it can delay, block or break signing in:
+every failure resolves to the same place, which is no columns.
+
+[`docs/design/signin-photo-wall.html`](docs/design/signin-photo-wall.html) is the full design. Setup
+is four steps and needs a Google account.
+
+### 1. Install rclone
+
+The same binary the nightly backup uses, so if you have already set up Drive backups you can skip
+this and the next step and reuse that remote.
+
+```bash
+brew install rclone            # macOS
+winget install Rclone.Rclone   # Windows
+```
+
+### 2. Connect a Google account
+
+```bash
+rclone config
+```
+
+- `n` for a new remote, name it `gdrive`
+- storage: `drive`
+- `client_id` / `client_secret`: leave both blank (but read the caveat below)
+- scope: **`drive.readonly`** — read-only, so this machine can never modify or delete anything in
+  the Drive
+- **`root_folder_id`: leave BLANK.** This one matters. A remote pinned to one folder cannot read a
+  different one, and choosing the folder from the admin panel is the whole point; the folder is
+  supplied per command instead
+- `service_account_file`: blank
+- advanced config: `n`
+- auto config: `y` — a browser opens, sign in to Google, approve read-only access
+
+Check it worked:
+
+```bash
+rclone lsd gdrive:
+```
+
+> **A public folder does not skip this step.** It is tempting to assume that sharing the folder
+> "anyone with the link" means no sign-in is needed. It does not: rclone needs the OAuth token to
+> *construct* the Drive backend, before it makes any network call and therefore before the folder's
+> sharing setting is ever looked at. Measured against rclone v1.75.1 — an unauthenticated remote
+> fails with `failed to create oauth client: empty token found`, public folder or not. Sharing
+> affects who else can see the photographs, not how this machine reads them.
+
+> **Caveat, as of 2026:** rclone warns that its shared Google Drive `client_id` *"is being retired
+> and will stop working during 2026"*. If you hit that, make your own client_id
+> ([rclone's instructions](https://rclone.org/drive/#making-your-own-client-id)) and supply it at
+> the `client_id` prompt above. This affects Drive **backups** the same way, since both go through
+> the same binary and the same default credential.
+
+### 3. Point Stockroom at the remote
+
+Add one line to `.env` and restart the server:
+
+```
+SIGNIN_PHOTOS_REMOTE=gdrive
+```
+
+This is the only photo-wall value that stays in `.env`, because it is an install-time fact about
+the machine. Everything else is in the admin panel.
+
+### 4. Choose the folder
+
+**Admin → Photo wall.** Give the folder a short name, paste its Drive share link, press
+**Use this folder**. Every form the Share button produces is accepted:
+
+```
+https://drive.google.com/drive/folders/<ID>?usp=sharing
+https://drive.google.com/drive/folders/<ID>
+https://drive.google.com/drive/u/0/folders/<ID>
+https://drive.google.com/open?id=<ID>
+<ID>                                    ← a bare id, pasted from elsewhere
+```
+
+The folder has to be openable by the Google account from step 2 — either shared with it, or set to
+anyone-with-the-link. **The link is checked against Drive before anything is saved**, so a typo or
+an unshared folder is a message on the screen rather than a wall that quietly empties ten minutes
+later. If the check fails, nothing is written and the folder in use stays live.
+
+Subfolders are fine and are walked to any depth. JPEG, PNG and WebP are used; HEIC, video and
+anything roughly portrait or panoramic is skipped, because the wall crops everything to one
+landscape 3:2 tile.
+
+### What to expect afterwards
+
+The first listing of a large folder takes **minutes**, and the wall is empty until it finishes —
+the screen reports `Rebuilding — 12,400 files listed so far` so you can tell that apart from
+something being broken. After that the reel fills one photograph at a time over a few minutes,
+deliberately slowly, so a decorative buffer never earns a rate limit on the same Google account the
+nightly backup uses. The folder is re-listed about once a week; **Re-list this folder** does it now,
+which is what you want after uploading a batch you want on the wall today.
+
+### Why the link is never shown back to you
+
+The paste field starts empty every time, including straight after you have set a folder, and no
+screen or API response ever contains the folder id. **A Drive folder link is a key to the folder,
+not a name for it** — a folder shared "anyone with the link" is readable by whoever holds the URL,
+so echoing it into a panel on a machine that sits unattended in a closet would hand it to anyone who
+walks past. It is the same rule the GitHub backup token and every password field already follow. The
+id is redacted from the backup export for the same reason, and the audit log records the name you
+typed rather than the link.
+
+So the folder is identified on that screen by **the name you gave it** and by **the preview strip**,
+which shows six tiles the wall is about to use. The strip is the real confirmation — "are the right
+photographs showing?" — and it reveals nothing the sign-in screen does not already show to everyone
+who walks up to the machine. Looking at it does not consume them.
+
+### Turning it off
+
+Blank `SIGNIN_PHOTOS_REMOTE` and restart. The cache directory is emptied on the next start and the
+sign-in screen goes back to what it was. Tiles are never backed up or mirrored — they are
+re-derivable from Drive and live for about fifteen minutes.
+
+---
 
 ---
 
@@ -833,6 +962,7 @@ one · **any full** is every signed-in user whose password is set — a limited 
 | `GET /admin/backup/status` · `GET /admin/backup/versions` | admin | Per-target state and the dated backups available |
 | `POST /admin/restore` · `POST /admin/restore/remote` | admin | Restore from an uploaded archive, or one picked by date |
 | `GET /admin/photos/generations` · `POST /admin/photos/restore` · `DELETE /admin/photos/generations/{name}` | admin | The local photo mirror |
+| `GET /admin/photo-wall` · `PUT /admin/photo-wall` · `POST /admin/photo-wall/rebuild` · `GET /admin/photo-wall/preview` | admin | The sign-in wall's Drive folder. `PUT` takes `{link, label}` and probes Drive before it writes. **No response ever contains the folder id or a Drive URL** |
 | `GET /files/...` | anyone | Photos; `<img>` tags cannot send a bearer token |
 | `GET /signin/photos` · `GET /signin-photos/...` | anyone | The optional sign-in photo wall. Always 200, `[]` when off |
 
@@ -965,6 +1095,88 @@ history intact and takes them out of circulation.
 Open Admin → Backup. The per-target table carries the exact error from the last failed attempt, and
 the tail of `backup.log` is below it. The two most common causes are a backup folder that was never
 configured (a 503, *not configured*) and an off-site token that expired.
+
+</details>
+
+<details>
+<summary><strong>The photo wall's "Replace folder" button is greyed out</strong></summary>
+
+This server has no Drive source, so a pasted link could not be checked and would not be saved. The
+**Status** block above the form says which piece is missing — usually `rclone` is not installed, or
+`SIGNIN_PHOTOS_REMOTE` is not in `.env`. Both need a server restart afterwards. See
+[Sign-in photo wall](#sign-in-photo-wall).
+
+</details>
+
+<details>
+<summary><strong>"not configured: the sign-in photo wall has no Drive source on this server"</strong></summary>
+
+The same thing, from the API rather than the screen. It is a 503 on purpose: a setting nobody has
+filled in yet is not a bug and not your fault. Work through
+[Sign-in photo wall](#sign-in-photo-wall) — installing rclone alone is not enough, the remote has
+to be named in `.env` and the server restarted.
+
+</details>
+
+<details>
+<summary><strong>The folder saved, but the wall is still empty</strong></summary>
+
+Normal for the first few minutes, and the admin screen distinguishes the cases. `Rebuilding — N
+files listed so far` means the folder is still being listed, which takes minutes on a large one.
+After that the reel fills roughly one photograph every couple of seconds, on purpose. If it stays
+empty with a listing built, check the photo count: everything portrait, panoramic, HEIC or video is
+skipped, so a folder of phone portraits legitimately yields nothing.
+
+</details>
+
+<details>
+<summary><strong>Components render but nothing updates when I interact</strong></summary>
+
+That is the two-copies-of-Svelte failure, and it means a nested `node_modules` is shadowing the
+workspace. Run `./scripts/dev.sh deps`, which detects and repairs it. Always install from the
+repository root.
+
+</details>
+
+<details>
+<summary><strong>Port 5173 is in use and Vite refuses to start</strong></summary>
+
+Deliberate — see the note in [Quick start](#where-things-are). Free the port
+(`./scripts/dev.sh stop`, or `lsof -ti:5173 | xargs kill`) rather than letting Vite pick another
+one, or every request will fail the CORS preflight.
+
+</details>
+
+<details>
+<summary><strong>"Something holds :8080 but does not answer /health"</strong></summary>
+
+An API server is running without a working database — usually Docker or Supabase stopped underneath
+it. `./scripts/dev.sh stop`, then `./scripts/dev.sh up`.
+
+</details>
+
+<details>
+<summary><strong>A scan asks for a password instead of signing me in</strong></summary>
+
+The burst was read as typed. Either the keystroke gaps exceeded `SCAN_KEY_THRESHOLD_MS` — press
+Ctrl+Shift+D to see the actual timings and tune the constant — or the field on screen no longer
+matched what the scanner sent, which happens if the field was edited mid-scan. Clear the field and
+scan again.
+
+</details>
+
+<details>
+<summary><strong>I am locked out of the admin panel</strong></summary>
+
+Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env` and restart the server. That account is
+recreated with that password on every start, by design, precisely for this.
+
+</details>
+
+<details>
+<summary><strong>I want to start over with a clean database</strong></summary>
+
+`supabase db reset` reapplies every migration and reloads `seed.sql`. It destroys all local data.
 
 </details>
 

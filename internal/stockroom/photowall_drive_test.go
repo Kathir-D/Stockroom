@@ -206,6 +206,45 @@ func TestDriveNextPhotoRetriesPastRubbish(t *testing.T) {
 	}
 }
 
+// TestDriveNestedPathsSurviveToTheFetch. The source folder is a real Drive
+// folder, which means subfolders -- events, a year, a shoot -- and `lsjson -R`
+// reports a path relative to the root rather than a bare filename.
+//
+// Every link in the chain already had its own test and none of them covered
+// the chain: the manifest keeps `events/gala.jpg`, and driveRoot composes a
+// path onto the connection string, but nothing asserted that the path the
+// manifest stored is the path the download is given. A `path.Base` added
+// anywhere between them would pass both of those tests and fetch nothing, and
+// the symptom would be an empty wall with a download error nobody reads.
+func TestDriveNestedPathsSurviveToTheFetch(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	// A space, a nested directory and an uppercase extension: all three are
+	// ordinary in a folder a person filled, and all three have been a bug
+	// somewhere. The extension filter lowercases; the path never touches the
+	// local filesystem, so its separators stay rclone's.
+	const nested = "events/gala 2026/sub/DSC_0142.JPG"
+	s.list = stubListing(`[
+	  {"Path":"` + nested + `","Name":"DSC_0142.JPG","Size":1000,"IsDir":false}
+	]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+	if len(s.manifest.Entries) != 1 || s.manifest.Entries[0].Path != nested {
+		t.Fatalf("manifest = %+v, want the nested path kept whole", s.manifest.Entries)
+	}
+
+	var sawRemote string
+	good := testJPEG(t, 1500, 1000)
+	s.fetch = func(_ context.Context, remote, _ string) ([]byte, error) {
+		sawRemote = remote
+		return good, nil
+	}
+	if _, err := s.NextPhoto(context.Background()); err != nil {
+		t.Fatalf("NextPhoto: %v", err)
+	}
+	if want := "gdrive,root_folder_id=FOLDER-1:" + nested; sawRemote != want {
+		t.Errorf("rclone cat was given %q, want %q", sawRemote, want)
+	}
+}
+
 // TestDriveNextPhotoGivesUp bounds the retry, so a folder holding nothing but
 // video returns instead of downloading it all.
 func TestDriveNextPhotoGivesUp(t *testing.T) {
@@ -397,5 +436,87 @@ func TestDriveManifestIsNotInTheServedDirectory(t *testing.T) {
 	}
 	for _, e := range served {
 		t.Errorf("the served directory holds %q, which is not a tile", e.Name())
+	}
+}
+
+// TestDriveRebuildKeepsTheManifestServing is §7's Rebuild button: it re-lists
+// the folder that is already live, so the listing it is replacing is still
+// correct and must keep feeding the wall for the minutes the new one takes
+// (§3). Dropping it would empty the wall the moment an admin pressed the
+// button -- the feature appearing to break as a direct result of somebody
+// asking for more of it.
+func TestDriveRebuildKeepsTheManifestServing(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+	before := s.manifest
+
+	s.Rebuild()
+
+	if s.manifest != before {
+		t.Fatal("Rebuild discarded the manifest the wall is still serving from")
+	}
+	if _, _, ok := s.pick(); !ok {
+		t.Error("the wall went dark while the rebuild was pending")
+	}
+	// And the press has to actually list: with the manifest kept, a fresh one
+	// would otherwise read as "not due for another week".
+	folderID, due := s.buildDue()
+	if !due || folderID != "FOLDER-1" {
+		t.Fatalf("buildDue() = %q, %v; want the pressed folder", folderID, due)
+	}
+	if _, due := s.buildDue(); due {
+		t.Error("one press listed twice")
+	}
+
+	// A folder switch is the other case, and still discards: that manifest
+	// describes a folder that is no longer live.
+	if !s.SetFolder("FOLDER-2") {
+		t.Fatal("SetFolder reported no change")
+	}
+	if s.manifest != nil {
+		t.Error("a folder switch kept the previous folder's manifest")
+	}
+}
+
+// TestDriveRebuildBeatsTheRetryGate: a failed listing backs off for five
+// minutes, and an admin pressing Rebuild has usually just fixed whatever made
+// it fail. The press is not swallowed by that gate.
+func TestDriveRebuildBeatsTheRetryGate(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = func(context.Context, string) (io.ReadCloser, func() error, error) {
+		return nil, nil, errors.New("connection reset")
+	}
+	s.buildManifest(context.Background(), "FOLDER-1")
+	if _, due := s.buildDue(); due {
+		t.Fatal("a failed listing should back off before trying again")
+	}
+
+	s.Rebuild()
+	if _, due := s.buildDue(); !due {
+		t.Error("the retry gate swallowed an admin's Rebuild press")
+	}
+}
+
+// TestDriveRebuildWithNoFolderQueuesNothing: pressing Rebuild before a folder
+// has been chosen must not leave a request sitting in wait, or the eventual
+// SetFolder's listing would be followed straight away by a redundant second
+// one -- minutes of Drive listing for nothing.
+func TestDriveRebuildWithNoFolderQueuesNothing(t *testing.T) {
+	s := newTestSource(t, "")
+	s.Rebuild()
+	if _, due := s.buildDue(); due {
+		t.Fatal("listed a folder that has not been chosen")
+	}
+
+	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.SetFolder("FOLDER-1")
+	folderID, due := s.buildDue()
+	if !due || folderID != "FOLDER-1" {
+		t.Fatalf("buildDue() = %q, %v; want the newly chosen folder", folderID, due)
+	}
+	s.buildManifest(context.Background(), folderID)
+	if _, due := s.buildDue(); due {
+		t.Error("a stale Rebuild request re-listed the folder immediately after")
 	}
 }

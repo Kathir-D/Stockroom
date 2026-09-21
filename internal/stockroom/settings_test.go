@@ -271,3 +271,117 @@ func TestTargetTestFailureCarriesItsReason(t *testing.T) {
 		t.Error("a successful test produced an error")
 	}
 }
+
+// The photo wall's folder joined the .env seed a day after env_seeded had
+// already been set true on every database that had started the server once.
+// Sharing that marker gave the folder a WHERE clause that is false on exactly
+// the installations it was written for: SIGNIN_PHOTOS_FOLDER_ID would pre-fill
+// a database created after the feature and be silently ignored on every one
+// created before it. It has its own marker, so this is the same first-boot
+// seed on an upgraded machine as on a fresh one.
+func TestEnsureSettingsSeedsThePhotoWallFolderOnAnUpgradedDatabase(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	defer restorePhotoWallFolder(t, db)()
+
+	// Both markers are one-shot and per-database, so this test spends them.
+	// Put them back on the way out.
+	var envBefore, photoBefore bool
+	if err := db.Pool.QueryRow(ctx,
+		`select env_seeded, signin_photos_env_seeded from app_settings where id = true`).
+		Scan(&envBefore, &photoBefore); err != nil {
+		t.Fatalf("read the seed markers: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(),
+			`update app_settings set env_seeded = $1, signin_photos_env_seeded = $2 where id = true`,
+			envBefore, photoBefore)
+	})
+	setMarkers := func(env, photo bool) {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, `
+			update app_settings set
+				env_seeded = $1, signin_photos_env_seeded = $2,
+				signin_photos_folder_id = null, signin_photos_label = null
+			where id = true`, env, photo); err != nil {
+			t.Fatalf("set the seed markers: %v", err)
+		}
+	}
+	folder := func() photoWallFolder {
+		t.Helper()
+		f, err := db.loadPhotoWallFolder(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr("/chosen/by/the/admin")})
+	defer restore()
+
+	// The upgrade: the backup values were seeded by an earlier release, so
+	// env_seeded is already true. Before the second marker this start-up
+	// copied nothing and said nothing.
+	setMarkers(true, false)
+	if _, err := db.EnsureSettings(ctx, Config{
+		BackupDir:            "/from/dot/env",
+		SignInPhotosFolderID: "FOLDER-FROM-ENV",
+	}); err != nil {
+		t.Fatalf("EnsureSettings: %v", err)
+	}
+	if got := folder(); got.id != "FOLDER-FROM-ENV" {
+		t.Errorf("signin_photos_folder_id is %q; .env was ignored on a database that had already seeded its backup settings", got.id)
+	} else if got.label == "" {
+		t.Error("a seeded folder is nameless on the admin screen; the label should ride along with it")
+	}
+
+	// And the pass that just ran must not have re-opened the backup columns:
+	// an admin who cleared one yesterday does not get it back because the
+	// photo wall gained a seed today.
+	s, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.BackupDir != "/chosen/by/the/admin" {
+		t.Errorf("backup_dir is %q; the photo wall's pass reached a column that is not its own", s.BackupDir)
+	}
+
+	// The admin then replaces the folder through the panel. A restart must
+	// leave theirs alone -- the whole point of the marker, and the case the
+	// backup columns' own seed never meets because it runs before anyone can
+	// have typed anything.
+	// savePhotoWallFolder rather than SetPhotoWallFolder: the exported one
+	// probes Drive first (§7), and this test has no rclone and no folder.
+	if err := db.savePhotoWallFolder(ctx, admin, "CHOSEN-BY-THE-ADMIN", "Fall 2026 game photos"); err != nil {
+		t.Fatalf("savePhotoWallFolder: %v", err)
+	}
+	if _, err := db.EnsureSettings(ctx, Config{SignInPhotosFolderID: "FOLDER-FROM-ENV"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := folder(); got.id != "CHOSEN-BY-THE-ADMIN" {
+		t.Errorf("signin_photos_folder_id is %q after a restart; the environment overwrote the folder an admin chose", got.id)
+	}
+
+	// The marker is set even when .env is blank: what is one-time is the
+	// pass, not the copying. Otherwise a folder deliberately left unset today
+	// would be filled in by a restart after somebody edits .env tomorrow.
+	setMarkers(true, false)
+	if _, err := db.EnsureSettings(ctx, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	var marked bool
+	if err := db.Pool.QueryRow(ctx,
+		`select signin_photos_env_seeded from app_settings where id = true`).Scan(&marked); err != nil {
+		t.Fatal(err)
+	}
+	if !marked {
+		t.Fatal("a blank SIGNIN_PHOTOS_FOLDER_ID left the pass unspent")
+	}
+	if _, err := db.EnsureSettings(ctx, Config{SignInPhotosFolderID: "LATE-ARRIVAL"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := folder(); got.id != "" {
+		t.Errorf("signin_photos_folder_id is %q; .env seeded a folder on a later restart, after its one pass had already run", got.id)
+	}
+}

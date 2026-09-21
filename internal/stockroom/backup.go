@@ -95,8 +95,16 @@ const (
 // A secret column added to this schema later has to be added here too. The
 // table's comment in the migration says so, because that is where somebody
 // adding a column is looking.
+// signin_photos_folder_id is on the list for the same reason as the other
+// two, and it is the least obvious of the three: a Drive folder link is a
+// capability, not a name (docs/design/signin-photo-wall.html §7). A folder
+// shared "anyone with the link" is readable by whoever holds the id, so an
+// unredacted export would push the key to the department's photographs into
+// the backup repository -- the precise failure this map already anticipated
+// for github_token. The folder's typed *label* is not redacted, because a
+// label is what it is for: something a person can read that opens nothing.
 var exportRedactions = map[string][]string{
-	"app_settings": {"github_token", "archive_passphrase"},
+	"app_settings": {"github_token", "archive_passphrase", "signin_photos_folder_id"},
 }
 
 // backupLockKey is the advisory-lock key the whole backup run holds. Any

@@ -16,7 +16,14 @@ export type Route =
   | { name: "history" }
   | { name: "admin"; tab: AdminTab }
 
-export type AdminTab = "assets" | "categories" | "users" | "overdue" | "backup" | "settings"
+export type AdminTab =
+  | "assets"
+  | "categories"
+  | "users"
+  | "overdue"
+  | "backup"
+  | "settings"
+  | "photo-wall"
 
 const ADMIN_TABS: AdminTab[] = [
   "assets",
@@ -25,6 +32,7 @@ const ADMIN_TABS: AdminTab[] = [
   "overdue",
   "backup",
   "settings",
+  "photo-wall",
 ]
 
 function parse(hash: string): Route {

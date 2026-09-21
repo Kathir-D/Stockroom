@@ -497,10 +497,69 @@ func (w *PhotoWall) TakePhotos(n int) ([]string, time.Duration) {
 	return urls, w.ttl
 }
 
+// PreviewPhotos returns up to n ready tile URLs **without marking them
+// served**, for §7's admin strip. n <= 0 asks for six, which is what that
+// strip shows.
+//
+// This is the one read that does not consume. An admin reloading the Drive
+// screen a few times must not empty the buffer the sign-in screen is about to
+// draw from, and a preview that did would make the screen's own confirmation
+// the thing that breaks the wall.
+//
+// Nothing is reserved either: a tile named here stays ready, so a real
+// sign-in may be handed it a moment later and the reaper may delete it a TTL
+// after that. The admin screen hides a tile that 404s, exactly as the wall
+// does (§9).
+func (w *PhotoWall) PreviewPhotos(n int) []string {
+	if w == nil {
+		return []string{}
+	}
+	if n <= 0 {
+		n = 6
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	ids := make([]string, 0, len(w.tiles))
+	for id, t := range w.tiles {
+		if !t.served {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > n {
+		ids = ids[:n]
+	}
+	urls := make([]string, 0, len(ids))
+	for _, id := range ids {
+		urls = append(urls, PhotoWallPrefix+id+photoWallExt)
+	}
+	return urls
+}
+
+// Counts is how many tiles are waiting and how many are out in a browser
+// somewhere, for §7's status block. Zero and zero on a nil reel, which is
+// what "the wall is off" should read as.
+func (w *PhotoWall) Counts() (ready, served int) {
+	if w == nil {
+		return 0, 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, t := range w.tiles {
+		if t.served {
+			served++
+		} else {
+			ready++
+		}
+	}
+	return ready, served
+}
+
 // Invalidate discards every ready tile and advances the generation, which is
 // the reel's half of an admin replacing the folder (§7). The other half --
 // writing the new folder, dropping the manifest and kicking a rebuild -- is
-// §7's and is not built yet.
+// DB.SetPhotoWallFolder, which calls the two together.
 //
 // Served tiles are deliberately left to expire on their own TTL. Their URLs
 // sit in a browser that has already rendered them, and 404ing a live page to

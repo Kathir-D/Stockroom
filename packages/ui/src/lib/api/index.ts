@@ -30,6 +30,7 @@ import type {
   LoginResult,
   MeResult,
   PhotoMirrorStatus,
+  PhotoWallStatus,
   Profile,
   RestoreResult,
   RosterResult,
@@ -541,4 +542,55 @@ export function deletePhotoGeneration(name: string) {
       method: "DELETE",
     },
   );
+}
+
+/* ----------------------------------------------------------- photo wall ---- */
+
+/**
+ * The sign-in photo wall's Drive folder
+ * (docs/design/signin-photo-wall.html §7).
+ *
+ * The status never carries the folder id or a Drive URL — the link is a
+ * capability, so the field is write-only and the screen is given a label,
+ * counts and a preview strip instead. Nothing in this file should ever be
+ * changed to render one back.
+ */
+export function photoWallStatus() {
+  return request<PhotoWallStatus>("/admin/photo-wall");
+}
+
+/**
+ * Replace the folder. The server parses the link, *probes Drive with it* and
+ * only then writes: a folder it cannot reach leaves the previous one live and
+ * nothing is saved. Show the error it returns as written — it names the
+ * accepted link forms, or says the folder is not shared with this machine's
+ * Google account, which is what it almost always is.
+ */
+export function setPhotoWallFolder(link: string, label: string) {
+  return request<PhotoWallStatus>("/admin/photo-wall", {
+    method: "PUT",
+    body: { link, label },
+  });
+}
+
+/**
+ * Re-list the folder now instead of waiting out the weekly refresh. The
+ * listing runs in the background, so the useful thing to do with the response
+ * is start polling `photoWallStatus()` for `listed_so_far`.
+ */
+export function rebuildPhotoWall() {
+  return request<PhotoWallStatus>("/admin/photo-wall/rebuild", {
+    method: "POST",
+  });
+}
+
+/**
+ * Up to six tiles from the reel **without** marking them served: a preview
+ * must not consume the buffer the sign-in screen is about to draw from.
+ *
+ * The same tiles stay available to sign-in, which means a URL here can go
+ * stale — treat a 404 the way the wall does, by hiding that tile.
+ */
+export function photoWallPreview() {
+  return request<{ photos: string[] }>("/admin/photo-wall/preview");
 }

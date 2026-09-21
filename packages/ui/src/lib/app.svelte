@@ -38,6 +38,7 @@
   import AdminBackup from "@stockroom/ui/screens/admin/backup.svelte"
   import AdminCategories from "@stockroom/ui/screens/admin/categories.svelte"
   import AdminOverdue from "@stockroom/ui/screens/admin/overdue.svelte"
+  import AdminPhotoWall from "@stockroom/ui/screens/admin/photo-wall.svelte"
   import AdminSettings from "@stockroom/ui/screens/admin/settings.svelte"
   import AdminUsers from "@stockroom/ui/screens/admin/users.svelte"
   import Browse from "@stockroom/ui/screens/browse.svelte"
@@ -371,6 +372,8 @@
               <AdminOverdue />
             {:else if route.tab === "settings"}
               <AdminSettings />
+            {:else if route.tab === "photo-wall"}
+              <AdminPhotoWall />
             {:else}
               <AdminBackup />
             {/if}

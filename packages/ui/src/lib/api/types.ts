@@ -523,3 +523,48 @@ export interface SignInPhotos {
   /** How long those URLs stay fetchable before the server deletes the files. */
   ttl_seconds: number;
 }
+
+/**
+ * The admin screen's read of the photo wall
+ * (docs/design/signin-photo-wall.html §7).
+ *
+ * There is deliberately no folder id and no Drive URL on this shape, and
+ * there must never be one. A Drive folder link is a capability, not a label:
+ * a folder shared "anyone with the link" is readable by whoever holds the
+ * URL, so echoing it into a screen on a shared closet machine would put the
+ * whole folder one copy-paste away from anyone who walks up to it. What
+ * identifies the folder here is `folder_label`, a name a person typed, plus
+ * the preview strip -- which answers the question an admin actually has
+ * ("are the right photographs showing?") better than an id could.
+ */
+export interface PhotoWallStatus {
+  /** Whether a reel exists at all. False is the common case, not an error. */
+  enabled: boolean;
+  rclone_installed: boolean;
+  /**
+   * Whether `setPhotoWallFolder` would get past its first gate. The server
+   * reports it rather than letting this screen infer it from the two above,
+   * which do not add up to the same condition — so the paste form can be
+   * refused before it is typed into instead of after.
+   */
+  can_set_folder: boolean;
+
+  folder_set: boolean;
+  /** The typed name. Never the id. */
+  folder_label: string;
+  changed_at: string | null;
+  changed_by: string;
+
+  /** §3's streamed listing progress: a big folder takes minutes. */
+  listing: boolean;
+  listed_so_far: number;
+  photo_count: number;
+  built_at: string | null;
+
+  /** Tiles waiting, and tiles out in a browser waiting to expire. */
+  ready: number;
+  served: number;
+
+  last_error: string;
+  last_error_at: string | null;
+}
