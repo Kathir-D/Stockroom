@@ -151,7 +151,7 @@ never hibernate.
 | **Docker Desktop** | Runs the local Supabase stack, which hosts Postgres | <https://www.docker.com/products/docker-desktop/> |
 | **Supabase CLI** | Starts Postgres, applies migrations, runs the database tests | <https://supabase.com/docs/guides/cli/getting-started> |
 | **Wails CLI** | Builds and runs the desktop app | *installed automatically by the script* |
-| **`rclone`** | Only if you want Google Drive backups | <https://rclone.org/downloads/> — see [`docs/BACKUP-SETUP.md`](docs/BACKUP-SETUP.md) |
+| **`rclone`** | Only if you want Google Drive backups, or the sign-in photo wall (it reads its photographs from a Drive folder) | <https://rclone.org/downloads/> — see [`docs/BACKUP-SETUP.md`](docs/BACKUP-SETUP.md) |
 
 You do not need to install Wails by hand — `dev.sh` runs `go install` for it if it is missing.
 
@@ -1130,57 +1130,6 @@ skipped, so a folder of phone portraits legitimately yields nothing.
 </details>
 
 <details>
-<summary><strong>Components render but nothing updates when I interact</strong></summary>
-
-That is the two-copies-of-Svelte failure, and it means a nested `node_modules` is shadowing the
-workspace. Run `./scripts/dev.sh deps`, which detects and repairs it. Always install from the
-repository root.
-
-</details>
-
-<details>
-<summary><strong>Port 5173 is in use and Vite refuses to start</strong></summary>
-
-Deliberate — see the note in [Quick start](#where-things-are). Free the port
-(`./scripts/dev.sh stop`, or `lsof -ti:5173 | xargs kill`) rather than letting Vite pick another
-one, or every request will fail the CORS preflight.
-
-</details>
-
-<details>
-<summary><strong>"Something holds :8080 but does not answer /health"</strong></summary>
-
-An API server is running without a working database — usually Docker or Supabase stopped underneath
-it. `./scripts/dev.sh stop`, then `./scripts/dev.sh up`.
-
-</details>
-
-<details>
-<summary><strong>A scan asks for a password instead of signing me in</strong></summary>
-
-The burst was read as typed. Either the keystroke gaps exceeded `SCAN_KEY_THRESHOLD_MS` — press
-Ctrl+Shift+D to see the actual timings and tune the constant — or the field on screen no longer
-matched what the scanner sent, which happens if the field was edited mid-scan. Clear the field and
-scan again.
-
-</details>
-
-<details>
-<summary><strong>I am locked out of the admin panel</strong></summary>
-
-Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env` and restart the server. That account is
-recreated with that password on every start, by design, precisely for this.
-
-</details>
-
-<details>
-<summary><strong>I want to start over with a clean database</strong></summary>
-
-`supabase db reset` reapplies every migration and reloads `seed.sql`. It destroys all local data.
-
-</details>
-
-<details>
 <summary><strong>I want to start over with a clean database</strong></summary>
 
 `supabase db reset` reapplies every migration and reloads `seed.sql`. It destroys all local data.
@@ -1216,8 +1165,10 @@ is the real cost — budget an afternoon with a volunteer per hundred items, plu
 <summary><strong>Do we need an internet connection?</strong></summary>
 
 Not for anything daily. Sign-in, browsing, checkout, check-in, history and the admin panel are all
-local. The internet is used only by the optional nightly backup push, and a failed push never
-interferes with the system working — the local archive is written first.
+local. Two optional features use it, both through `rclone`: the nightly backup push, where a failed
+push never interferes with the system working because the local archive is written first, and the
+sign-in photo wall, which pulls its photographs from a Google Drive folder and simply draws nothing
+when it cannot reach one. Leave both switched off and nothing in Stockroom touches the network.
 
 </details>
 

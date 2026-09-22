@@ -12,7 +12,16 @@ Exit status is 0 when the archive would pass a restore's checks, 1 when it would
 not. Called by scripts/backup-check.sh; useful on its own against an archive
 pulled down from Drive or GitHub, to prove the round trip did not corrupt it.
 """
-import hashlib, io, json, re, sys, zipfile
+import csv, hashlib, io, json, sys, zipfile
+
+# What the export writes into a redacted column: COPY ... CSV renders the
+# typed null as an empty field (internal/stockroom/backup.go, tableExportSQL).
+REDACTED = ""
+# The columns exportRedactions names. github_token has been there since the
+# export shipped, so an archive without it is not one this script can vouch
+# for; the other two arrived later and are checked only when present.
+REQUIRED_REDACTED = ("github_token",)
+OPTIONAL_REDACTED = ("archive_passphrase", "signin_photos_folder_id")
 
 
 def main(path):
@@ -37,7 +46,17 @@ def main(path):
             continue
         blob = z.read(name)
         got = hashlib.sha256(blob).hexdigest()
-        if want and got.lower() != str(want).lower():
+        # A manifest entry with no checksum, or one that is not a SHA-256, is a
+        # failure and not a file to wave through. The old `if want` skipped the
+        # comparison entirely in exactly that case, so an archive whose manifest
+        # had lost its digests passed every check and reported "every checksum
+        # matches" -- the one sentence this script exists to be able to say.
+        want = str(want or "").strip()
+        if len(want) != 64 or any(c not in "0123456789abcdefABCDEF" for c in want):
+            print("     FAIL %s: manifest carries no usable SHA-256 (%r)" % (name, want))
+            problems += 1
+            continue
+        if got.lower() != want.lower():
             print("     FAIL %s: checksum mismatch" % name)
             problems += 1
             continue
@@ -45,7 +64,13 @@ def main(path):
         if name.startswith("tables/") and name.endswith(".csv"):
             table = name[len("tables/"):-len(".csv")]
             if table in rows:
-                n = sum(1 for _ in io.StringIO(blob.decode("utf-8", "replace"))) - 1
+                # csv.reader, not a line count: a text column holding a newline
+                # is one CSV record over two physical lines, so counting lines
+                # reported a row count the manifest disagreed with and failed a
+                # perfectly good archive -- a damage note is free text and this
+                # is the ordinary case, not a corner.
+                n = max(0, sum(1 for _ in csv.reader(
+                    io.StringIO(blob.decode("utf-8", "replace")))) - 1)
                 if n != rows[table]:
                     print("     FAIL %s: manifest says %d rows, archive has %d"
                           % (name, rows[table], n))
@@ -71,13 +96,34 @@ def main(path):
 
     settings = [n for n in names if n.endswith("app_settings.csv")]
     if settings:
+        # Read the column, do not pattern-match the file. A prefix match asks
+        # "does this look like a token I recognise?", and every answer it gets
+        # wrong is wrong in the unsafe direction: a fine-grained PAT, a token
+        # GitHub introduces next year, or a passphrase in the column beside it
+        # all sail past while the archive is on its way to the repository the
+        # value unlocks. The column is either the redacted empty field the
+        # export writes or it is a secret that left the machine.
         body = z.read(settings[0]).decode("utf-8", "replace")
-        if re.search(r"gh[pousr]_[A-Za-z0-9]{20,}", body):
-            print("     FAIL app_settings.csv carries what looks like a GitHub token "
-                  "-- redaction failed")
+        reader = csv.DictReader(io.StringIO(body))
+        header = reader.fieldnames or []
+        missing = [c for c in REQUIRED_REDACTED if c not in header]
+        if missing:
+            print("     FAIL app_settings.csv has no %s column, so redaction cannot be "
+                  "checked" % ", ".join(missing))
             problems += 1
         else:
-            print("     OK   secrets are redacted from app_settings.csv")
+            exposed = sorted({
+                col
+                for row in reader
+                for col in REQUIRED_REDACTED + OPTIONAL_REDACTED
+                if col in header and (row.get(col) or "") != REDACTED
+            })
+            if exposed:
+                print("     FAIL app_settings.csv carries a value in %s -- redaction failed"
+                      % ", ".join(exposed))
+                problems += 1
+            else:
+                print("     OK   secrets are redacted from app_settings.csv")
 
     if problems:
         print("     %d problem(s) -- a restore would refuse this archive, which is correct"

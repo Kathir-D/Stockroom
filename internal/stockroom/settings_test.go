@@ -385,3 +385,56 @@ func TestEnsureSettingsSeedsThePhotoWallFolderOnAnUpgradedDatabase(t *testing.T)
 		t.Errorf("signin_photos_folder_id is %q; .env seeded a folder on a later restart, after its one pass had already run", got.id)
 	}
 }
+
+// The refusal above guards the field an admin types into. This one guards the
+// run, because a database configured before that refusal shipped still holds a
+// relative folder and no migration rewrites it -- and the whole point of the
+// decision is that such a run *succeeds*, writing a valid archive somewhere
+// nobody will look. A folder that is not a full path is the unconfigured
+// state, which the backup screen and every sign-in already say out loud.
+func TestAStoredRelativeFolderIsNotUsedAtRunTime(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+
+	before, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	// Written past SaveSettings on purpose: validateDir would refuse these,
+	// which is exactly why they can only arrive from an older installation.
+	if _, err := db.Pool.Exec(ctx,
+		`update app_settings set backup_dir = $1, photo_backup_dir = $2 where id = true`,
+		"Users/you/Desktop/backups", "Users/you/Desktop/photos"); err != nil {
+		t.Fatalf("plant the old values: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx,
+			`update app_settings set backup_dir = $1, photo_backup_dir = $2 where id = true`,
+			nullable(before.BackupDir), nullable(before.PhotoBackupDir))
+	})
+
+	overrideBackup, overridePhotos := db.BackupDir, db.PhotoBackupDir
+	db.BackupDir, db.PhotoBackupDir = "", ""
+	t.Cleanup(func() { db.BackupDir, db.PhotoBackupDir = overrideBackup, overridePhotos })
+
+	if _, _, err := db.backupDir(ctx); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("backupDir with a relative folder = %v, want ErrNotConfigured", err)
+	}
+
+	planted, err := db.loadSettings(ctx)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if dir := db.photoBackupDir(planted); dir != "" {
+		t.Errorf("photoBackupDir with a relative folder = %q, want \"\"", dir)
+	}
+
+	// And it says so, rather than mirroring nothing in silence.
+	status, err := db.PhotoMirrorStatus(ctx, planted)
+	if err != nil {
+		t.Fatalf("PhotoMirrorStatus: %v", err)
+	}
+	if len(status.Warnings) == 0 || !strings.Contains(status.Warnings[0], "full path") {
+		t.Errorf("PhotoMirrorStatus warnings = %v, want one naming the folder", status.Warnings)
+	}
+}

@@ -517,6 +517,18 @@ func (db *DB) backupDir(ctx context.Context) (string, Settings, error) {
 	if dir == "" {
 		return "", s, fmt.Errorf("%w: no backup folder is set. Open Admin → Settings and choose where backups should be written", ErrNotConfigured)
 	}
+	// The stored value is re-checked here, not only where it was typed.
+	// validateDir has refused a relative folder at the settings screen since
+	// 2026-09-21, but the database that produced that decision already held
+	// one, and nothing rewrites a column on upgrade. Resolving it now against
+	// whatever directory the server started in is exactly the silent success
+	// the decision rules out -- a complete archive, a manifest that verifies,
+	// every screen reporting a healthy backup, and the files somewhere nobody
+	// looks. Refusing before the run starts makes it an unconfigured folder,
+	// which the backup screen and the sign-in warning already say out loud.
+	if !filepath.IsAbs(dir) {
+		return "", s, fmt.Errorf("%w: the backup folder %q is not a full path, so which folder it means depends on where the server was started. Open Admin → Settings and enter one %s", ErrNotConfigured, dir, absHint)
+	}
 	return dir, s, nil
 }
 
@@ -525,8 +537,17 @@ func (db *DB) backupDir(ctx context.Context) (string, Settings, error) {
 // "photos are not being mirrored" -- so this returns "" rather than
 // ErrNotConfigured and lets each caller decide.
 func (db *DB) photoBackupDir(s Settings) string {
-	if db.PhotoBackupDir != "" {
-		return db.PhotoBackupDir
+	dir := db.PhotoBackupDir
+	if dir == "" {
+		dir = s.PhotoBackupDir
 	}
-	return s.PhotoBackupDir
+	// A folder that is not a full path is the unconfigured state here too, for
+	// backupDir's reason: a stored relative value predates validateDir, and a
+	// mirror written to a folder that moves with the working directory is the
+	// same silent success. "" is the answer every caller already handles, and
+	// PhotoMirrorStatus says which of the two empties this is.
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	return dir
 }

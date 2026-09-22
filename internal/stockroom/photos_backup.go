@@ -319,6 +319,15 @@ func (db *DB) PhotoMirrorStatus(ctx context.Context, settings Settings) (*PhotoM
 		Warnings:       []string{},
 	}
 	if dir == "" {
+		// Two different empties. A folder nobody has set is nothing to report;
+		// a folder somebody set that is not a full path is photos silently not
+		// being mirrored, and it has to say so here because photoBackupDir
+		// deliberately refuses it without an error (settings.go).
+		if raw := strings.TrimSpace(settings.PhotoBackupDir); raw != "" && !filepath.IsAbs(raw) {
+			out.Warnings = append(out.Warnings, fmt.Sprintf(
+				"Photos are not being mirrored: the photo backup folder %q is not a full path, so which folder it means depends on where the server was started. Open Admin → Settings and enter one %s.",
+				raw, absHint))
+		}
 		return out, nil
 	}
 	out.Configured = true

@@ -48,9 +48,15 @@ if [ -f .env ]; then
 fi
 BASE="http://${ADDR:-127.0.0.1:8080}"
 
+# STATUS is the script's own answer. Every failure goes through bad(), so the
+# exit code is set in one place and cannot drift from what was printed -- this
+# is run from a terminal while somebody sets a target up, but also from a `&&`
+# chain, and a script that prints FAIL and exits 0 is worse than no check.
+STATUS=0
+
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$*"; }
-bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; }
+bad()  { STATUS=1; printf '  \033[31mFAIL\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33mNOTE\033[0m %s\n' "$*"; }
 
 bold "1. Is the server up?"
@@ -123,18 +129,22 @@ if [ "$DO_RUN" = 1 ]; then
 fi
 
 bold "6. Status -- what the backup screen and every sign-in show"
-api "$BASE/admin/backup/status" > /tmp/bc-status.json 2>/dev/null || true
-if [ -s /tmp/bc-status.json ]; then
+# mktemp, not a fixed /tmp name: two copies of this script, or a stale file
+# left by somebody else's run, would otherwise report on each other's status.
+STATUS_JSON=$(mktemp)
+trap 'rm -f "$STATUS_JSON"' EXIT
+api "$BASE/admin/backup/status" > "$STATUS_JSON" 2>/dev/null || true
+if [ -s "$STATUS_JSON" ]; then
   jq -r '
     (if ((.warnings // []) | length) == 0 then "  OK   no warnings"
      else ((.warnings // [])[] | "  NOTE " + (if type=="object" then (.message // tostring) else tostring end)) end),
     "",
     ((.targets // [])[] | "  " + ((.target // .name // "?")|tostring) + "  last success: " + ((.last_success // .last_success_at // "never")|tostring)
       + (if (.last_error // "") != "" then "\n      last error: " + (.last_error|tostring) else "" end))
-  ' /tmp/bc-status.json
+  ' "$STATUS_JSON"
   echo
-  jq -r '"  photo generations: " + (((.photo_generations // []) | length)|tostring)' /tmp/bc-status.json
-  jq -r '(.log_tail // .log // "") | if type=="array" then .[-12:][] else (split("\n")[-12:][]) end' /tmp/bc-status.json 2>/dev/null \
+  jq -r '"  photo generations: " + (((.photo_generations // []) | length)|tostring)' "$STATUS_JSON"
+  jq -r '(.log_tail // .log // "") | if type=="array" then .[-12:][] else (split("\n")[-12:][]) end' "$STATUS_JSON" 2>/dev/null \
     | sed '/^$/d; s/^/    /' | { grep . && echo || true; }
 else
   warn "no status returned"
@@ -176,7 +186,7 @@ else
     warn "an encrypted archive cannot be checked from here; the restore verifies it with the passphrase"
   else
     ok "restorable archive: $ZIP ($(du -h "$ZIP" | cut -f1))"
-    python3 scripts/verify-archive.py "$ZIP"
+    python3 scripts/verify-archive.py "$ZIP" || STATUS=1
   fi
 fi
 
@@ -184,3 +194,4 @@ bold "Done."
 echo "  List what the restore CLI can see:   go run ./cmd/restore --list"
 echo "  Full round trip (REPLACES every record, then you sign in again):"
 echo "    go run ./cmd/restore --yes <the zip above>"
+exit "$STATUS"

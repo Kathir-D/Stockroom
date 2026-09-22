@@ -355,9 +355,12 @@ sentence if it cannot.** A version string is not verification.
       connection, which is where a silent installer looks frozen. Resume on failure; retry twice.
 - [ ] **Never require Go, Node, the Supabase CLI or git.** If the bootstrapper needs any of them,
       T5 is not finished. Those four are the entire difference between today's install and this one.
-- [ ] **`rclone` is installed on demand, not up front** — only when somebody chooses Google Drive
-      on the backup screen, installed by a button on that screen. A dependency for an optional
-      feature must not be part of the first five minutes.
+- [ ] **`rclone` is installed on demand, not up front** — only when somebody chooses one of the two
+      features that needs it, installed by a button on that screen. Those are Google Drive backups
+      and the sign-in photo wall, which reads its photographs from a Drive folder; either one alone
+      is enough to need it, and the wall's screen must offer the same button rather than assume the
+      backup screen was visited first. A dependency for an optional feature must not be part of the
+      first five minutes.
 - [ ] **Antivirus and SmartScreen, handled in advance.** Document the SmartScreen prompt with a
       screenshot and the exact words on the button ("More info" → "Run anyway"), and offer to add
       the install folder as an exclusion. A teacher who sees "Windows protected your PC" and no
@@ -797,13 +800,16 @@ backup system: doing it for real rather than reasoning about it (§13, 2026-09-1
 - [ ] **Do a real checkout**: import a roster, import a category tree, import assets, print a
       sticker sheet, scan a card, scan an item, check it out, check it back in.
 - [ ] **Configure a backup to a real Google Drive and a real private GitHub repo**, then restore
-      from each. Both are still unexercised against real accounts (§13, still open) and a template
-      cannot ship a backup system that has only ever talked to a fake.
+      from each. Drive has pushed to a real account since 2026-09-21; GitHub is still unexercised
+      (§13, still open), and a template cannot ship a backup system whose second target has only
+      ever talked to a fake.
 - [ ] **Reboot the machine.** Confirm the server comes back by itself and the backup still fires.
 - [ ] **Hand it to somebody who has not seen it** — a teacher, a parent, another student — and
       watch without helping. Write down every place they pause. That list is the next phase.
-- [ ] **Carried over from [`TODO.md`](TODO.md), which is otherwise closed** — the three items that
-      were never blocked on code:
+- [ ] **Carried over from [`TODO.md`](TODO.md), which is otherwise closed** — three items no
+      backend work would have closed. The first two wait on hardware and credentials; the third
+      waits on this track's own install and configuration work, so it is a blocker with a fix in
+      this file rather than something to wait out:
       - [ ] Buy a scanner and tune `SCAN_KEY_THRESHOLD_MS` against it. Everything about scanning is
             currently a reasoned 50 ms guess that has never met hardware.
       - [ ] Run both backup targets at once, break one, and confirm the other still succeeds and
