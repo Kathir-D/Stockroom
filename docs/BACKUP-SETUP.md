@@ -96,6 +96,15 @@ missing and repeat the command for your machine.
 > revoke the connection silently, and the first sign anyone would get is
 > Stockroom's staleness warning two days later.
 
+> **If rclone mentions its client ID, ignore it for now.** rclone prints a
+> notice saying the shared Google client ID it ships with is being retired
+> during 2026. It still works, and there is nowhere in Stockroom to put a
+> replacement yet, so there is nothing to do on this screen. It is on the
+> open list in `CLAUDE.md` §13 to be sorted out when this machine is
+> provisioned properly — do not go and make your own client ID without
+> reading that entry first, because an OAuth consent screen left in Google's
+> default "Testing" mode stops working after seven days.
+
 ---
 
 ## Step 4 — GitHub (optional)
