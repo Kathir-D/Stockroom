@@ -22,7 +22,7 @@ import (
 // Two input shapes, sniffed rather than declared, because a department has one
 // or the other already and neither is worth retyping:
 //
-//   - **Indented text**, the shape `Catagories.md` and the files in examples/
+//   - **Indented text**, the shape `examples/categories.media-department.md` and the files in examples/
 //     use: Markdown headings and list items, or plain indentation. This keeps
 //     the example files readable as documents rather than as data.
 //   - **CSV** with a `type,category,model` header, which is what a department
@@ -315,6 +315,19 @@ func parseCategoryText(body string) ([][]string, error) {
 	// stack[d] is the name at depth d of the branch being read.
 	var stack []string
 
+	// In a Markdown file only headings and list items are categories. Its
+	// prose -- an intro paragraph, a note under a heading -- would otherwise
+	// parse as indentation depth 0 and become a top-level Type, so an example
+	// file with one sentence of explanation would import a Type called that
+	// sentence.
+	markdown := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			markdown = true
+			break
+		}
+	}
+
 	sc := bufio.NewScanner(strings.NewReader(body))
 	sc.Buffer(make([]byte, 0, 64*1024), maxCategoryImportBytes)
 
@@ -326,6 +339,9 @@ func parseCategoryText(body string) ([][]string, error) {
 
 		depth, name, ok := categoryLineDepth(raw)
 		if !ok {
+			continue
+		}
+		if markdown && !hasMarkdownMarker(raw) {
 			continue
 		}
 		if name == "" {
@@ -357,7 +373,7 @@ func parseCategoryText(body string) ([][]string, error) {
 //
 // The `# Categories` title of a Markdown file is skipped rather than becoming
 // a root node that everything else hangs under -- it is the document's title,
-// not a category, and `Catagories.md` opens with one.
+// not a category, and `examples/categories.media-department.md` opens with one.
 func categoryLineDepth(raw string) (depth int, name string, ok bool) {
 	trimmed := strings.TrimLeft(raw, " \t")
 	indent := len(raw) - len(trimmed)
@@ -389,7 +405,10 @@ func indentDepth(raw string) int {
 	for _, r := range raw {
 		switch r {
 		case '\t':
-			depth++
+			// Two, so a tab is one level after the halving below. Counted as
+			// one it was half a level, and a single-tab child landed at the
+			// top of the tree beside its own parent.
+			depth += 2
 		case ' ':
 			depth++
 		default:
@@ -397,4 +416,11 @@ func indentDepth(raw string) int {
 		}
 	}
 	return 0
+}
+
+// hasMarkdownMarker is whether a line is a heading or a list item.
+func hasMarkdownMarker(raw string) bool {
+	t := strings.TrimLeft(raw, " \t")
+	return strings.HasPrefix(t, "#") || strings.HasPrefix(t, "- ") ||
+		strings.HasPrefix(t, "* ") || strings.HasPrefix(t, "+ ")
 }

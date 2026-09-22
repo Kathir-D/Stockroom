@@ -20,31 +20,31 @@ create temporary view category_depth as
   )
   select * from tree;
 
--- Category tree: Type -> Category -> Model, from Catagories.md ---------------
+-- Category tree: Type -> Category -> Model, from examples/categories.media-department.md ---------------
 select set_eq(
   $$select name from categories where parent_id is null$$,
   array['Cameras/Bodies','Lenses','Lights','Audio Stuff','Physical Bags, etc.','Tripods/Monopods','Batteries','Misc'],
-  'the eight top-level types from Catagories.md are seeded');
+  'the eight top-level types from examples/categories.media-department.md are seeded');
 
 select is(max(depth), 3, 'the seeded tree is exactly three levels deep') from category_depth;
 
 select set_eq(
   $$select c.name from categories c join categories p on p.id = c.parent_id where p.name = 'Lenses'$$,
   array['Zooms','Primes','Accessories'],
-  'Lenses keeps the Zooms, Primes and Accessories names Catagories.md gives it');
+  'Lenses keeps the Zooms, Primes and Accessories names examples/categories.media-department.md gives it');
 
 select is(
   (select count(*) from categories c join categories p on p.id = c.parent_id where p.name = 'Camera Model'),
   13::bigint,
   'all thirteen camera models are seeded under Camera Model');
 
--- Primes is the one branch that stops short of depth 3, because Catagories.md
+-- Primes is the one branch that stops short of depth 3, because examples/categories.media-department.md
 -- records no primes in inventory. Pin that down as the only exception, so a
 -- Category that loses its Models by accident is caught instead of blending in.
 select is(
   (select count(*) from categories c join categories p on p.id = c.parent_id where p.name = 'Primes'),
   0::bigint,
-  'Primes is seeded empty, as Catagories.md says');
+  'Primes is seeded empty, as examples/categories.media-department.md says');
 
 select set_eq(
   $$select d.name from category_depth d

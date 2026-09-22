@@ -37,7 +37,7 @@ type CategoryRef struct {
 }
 
 // GetCategoryTree returns the whole tree in one call, roots first, every
-// level in its own sibling order (Catagories.md's document order for the
+// level in its own sibling order (examples/categories.media-department.md's document order for the
 // Types, so the filter reads Cameras/Bodies, Lenses, Lights, ... rather than
 // alphabetically). Any full session may read it (CLAUDE.md §7).
 func (db *DB) GetCategoryTree(ctx context.Context, actor Actor) ([]CategoryNode, error) {

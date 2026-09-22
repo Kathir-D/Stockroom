@@ -5,7 +5,7 @@
  * The server already returns units in browse order — category position in the
  * tree, then available before checked_out before unavailable, then name, then
  * asset tag (CLAUDE.md §13, 2026-09-13). Nothing here re-sorts them. Grouping
- * preserves first-appearance order, so `Catagories.md`'s document order survives
+ * preserves first-appearance order, so `examples/categories.media-department.md`'s document order survives
  * into the rendered list without this file knowing what that order is.
  */
 
@@ -129,7 +129,7 @@ class CatalogStore {
 
   /**
    * True when the selected category genuinely holds no units, as opposed to the
-   * filters matching nothing. `Primes` is seeded empty because `Catagories.md`
+   * filters matching nothing. `Primes` is seeded empty because `examples/categories.media-department.md`
    * records no primes in inventory, and that needs a different message from "no
    * results" (design-system.md §8.2).
    */

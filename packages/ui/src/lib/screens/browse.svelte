@@ -3,13 +3,13 @@
    * The browse screen (design-system.md §8.2): the primary screen.
    *
    * List shape is `B3 + B1` — one row per model, and the row is an accordion onto
-   * its units. Sort order is the server's: categories in `Catagories.md`'s
+   * its units. Sort order is the server's: categories in `examples/categories.media-department.md`'s
    * document order, and available units before checked-out ones within any list
    * (CLAUDE.md §13). Nothing here re-sorts, because the server's first sort key is
    * the asset's position in the category tree and this screen doesn't know it.
    *
    * The two empty states are deliberately different. "This category has no models
-   * yet" is true of `Primes`, which is seeded empty because `Catagories.md`
+   * yet" is true of `Primes`, which is seeded empty because `examples/categories.media-department.md`
    * records no primes in inventory; "your filters matched nothing" wants the
    * filters cleared. They need different actions (§8.2).
    */

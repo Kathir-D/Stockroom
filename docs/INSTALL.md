@@ -98,7 +98,7 @@ development seed. In order:
    path**; a relative one is refused rather than quietly resolved against
    whatever directory the service started in.
 2. **Admin → Categories** → build your Type → Category → Model tree.
-   `Catagories.md` is the media department's, as an example of the shape.
+   `examples/categories.media-department.md` is the media department's, as an example of the shape.
 3. **Admin → Assets** → add your equipment. Each unit needs a serial number;
    that is what the barcode encodes and what a scan looks up.
 4. **Admin → Users** → import your roster CSV.

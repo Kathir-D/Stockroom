@@ -132,3 +132,29 @@ func TestBulkAddContinuesTheSeries(t *testing.T) {
 		t.Errorf("prefix with a space: err = %v, want ErrInvalid", err)
 	}
 }
+
+// The text parser, without a database: tabs are one level each, and a
+// Markdown file's prose is not a category.
+func TestParseCategoryText(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       []string
+	}{
+		{"tabs", "Lenses\n\tZooms\n\t\tCanon 70-200\n", []string{"Lenses", "Lenses/Zooms", "Lenses/Zooms/Canon 70-200"}},
+		{"spaces", "Lenses\n  Zooms\n", []string{"Lenses", "Lenses/Zooms"}},
+		{"markdown with prose", "# Title\n\nSome words about the file.\n\n## Lights\n\n### Studio\n- Aputure 120d\n", []string{"Lights", "Lights/Studio", "Lights/Studio/Aputure 120d"}},
+	}
+	for _, c := range cases {
+		paths, err := parseCategoryText(c.body)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		var got []string
+		for _, p := range paths {
+			got = append(got, strings.Join(p, "/"))
+		}
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}

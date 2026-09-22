@@ -338,7 +338,7 @@ Three things to know before you start typing:
   once.
 - **A branch may stop short.** A Category with no Models yet is fine and shows as an empty branch.
 
-[`Catagories.md`](Catagories.md) is one department's tree, as an example of the shape. Building a
+[`examples/categories.media-department.md`](examples/categories.media-department.md) is one department's tree, as an example of the shape. Building a
 tree of any size through the dialog is tedious; a tree import is the first item in
 [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) Phase T2 for exactly that reason.
 

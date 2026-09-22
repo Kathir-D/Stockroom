@@ -94,7 +94,7 @@ type Category struct {
 	ParentID *string `json:"parent_id"`
 	// SortOrder is the row's position among its siblings, ascending, with the
 	// name as the tiebreak. It exists because the browse screen follows
-	// Catagories.md's document order rather than alphabetical order.
+	// examples/categories.media-department.md's document order rather than alphabetical order.
 	SortOrder int       `json:"sort_order"`
 	CreatedAt time.Time `json:"created_at"`
 }

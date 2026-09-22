@@ -11,7 +11,7 @@
    *  - **Delete is refused when the node has children or assets.** Say which —
    *    the server's message does, so it is shown as written.
    *
-   * Sibling order is `sort_order`, which is `Catagories.md`'s document order and
+   * Sibling order is `sort_order`, which is `examples/categories.media-department.md`'s document order and
    * is what the browse screen and the filter tree sort on (CLAUDE.md §13). A new
    * node lands after its siblings; the arrows here swap two siblings' values,
    * which is the whole of "a level can be renumbered by hand".

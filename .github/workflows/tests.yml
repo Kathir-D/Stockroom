@@ -53,6 +53,8 @@ jobs:
               - 'scripts/**'
               - '.githooks/**'
               - '.github/workflows/**'
+              # Fixtures: examples_test.go imports every file in here.
+              - 'examples/**'
 
       - name: Set up Go
         if: steps.changes.outputs.code == 'true'
