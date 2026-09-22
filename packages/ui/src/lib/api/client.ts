@@ -150,13 +150,19 @@ interface RequestOptions {
   /** Skip the token, for the two login routes and /health. */
   anonymous?: boolean;
   signal?: AbortSignal;
+  /**
+   * Return the body as a Blob instead of parsing JSON: the label sheets, the
+   * ID cards and the barcode image. An error is still JSON and still throws
+   * an ApiError with the server's message.
+   */
+  blob?: boolean;
 }
 
 async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { method = "GET", body, form, query, anonymous, signal } = options;
+  const { method = "GET", body, form, query, anonymous, signal, blob } = options;
 
   let url = config.baseUrl + path;
   if (query) {
@@ -202,6 +208,8 @@ async function request<T>(
   // session's deadline the moment it resolved the token, whatever it then
   // decided about the request.
   if (typeof performance !== "undefined") lastRequestMs = performance.now();
+
+  if (blob && response.ok) return (await response.blob()) as T;
 
   const text = await response.text();
   let parsed: unknown = null;

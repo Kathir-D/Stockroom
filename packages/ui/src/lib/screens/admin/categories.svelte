@@ -29,9 +29,11 @@
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
+  import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
+  import UploadIcon from "@lucide/svelte/icons/upload"
   import { cn } from "@stockroom/ui/utils"
   import * as api from "../../api/index"
-  import type { CategoryNode } from "../../api/types"
+  import type { CategoryImportResult, CategoryNode } from "../../api/types"
   import { catalog } from "../../stores/catalog.svelte"
 
   /** The tree is three deep by definition; a depth-3 node takes no children. */
@@ -50,6 +52,8 @@
 
   let deleteTarget = $state<CategoryNode | null>(null)
   let deleteError = $state<string | null>(null)
+
+  let importOpen = $state(false)
 
   async function reload() {
     error = null
@@ -260,6 +264,10 @@
       </p>
     </div>
     <span class="flex-1"></span>
+    <Button variant="secondary" onclick={() => (importOpen = true)}>
+      <UploadIcon aria-hidden="true" />
+      Import
+    </Button>
     <Button onclick={() => openCreate(null)}>
       <PlusIcon aria-hidden="true" />
       New type
@@ -336,3 +344,31 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<ImportDialog
+  bind:open={importOpen}
+  title="Import a category tree"
+  accept=".md,.txt,.csv,text/markdown,text/plain,text/csv"
+  upload={api.importCategories}
+  onDone={reload}
+>
+  {#snippet description()}
+    A Markdown outline (<code class="font-mono">##</code> Type, <code class="font-mono">###</code>
+    Category, <code class="font-mono">-</code> Model — the files in <code class="font-mono">examples/</code>
+    are this shape), plain text indented with tabs, or a
+    <code class="font-mono">type,category,model</code> CSV. Safe to run twice: anything already there
+    is left alone. Names must be unique across the whole tree, not just under their parent.
+  {/snippet}
+  {#snippet report(r: CategoryImportResult)}
+    <p class="text-sm text-fg">
+      {r.created} new, {r.existing} already there.
+    </p>
+    {#if r.created}
+      <ul class="mt-1 flex flex-col gap-0.5 text-xs text-fg-muted">
+        {#each r.rows.filter((row) => row.created) as row (row.path.join("/"))}
+          <li>{row.path.join(" → ")}</li>
+        {/each}
+      </ul>
+    {/if}
+  {/snippet}
+</ImportDialog>

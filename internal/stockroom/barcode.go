@@ -68,11 +68,11 @@ type LabelLayout struct {
 	// written.
 	Hint string `json:"hint"`
 
-	PageW, PageH   float64 // page size
-	MarginL, MargT float64 // to the top-left corner of the first label
-	LabelW, LabelH float64
-	PitchX, PitchY float64 // corner to corner, so it includes the gap
-	Cols, Rows     int
+	PageW, PageH   float64 `json:"-"` // page size
+	MarginL, MargT float64 `json:"-"` // to the top-left corner of the first label
+	LabelW, LabelH float64 `json:"-"`
+	PitchX, PitchY float64 `json:"-"` // corner to corner, so it includes the gap
+	Cols, Rows     int     `json:"-"`
 }
 
 // Paper sizes. Both are offered rather than one, because "standard printer

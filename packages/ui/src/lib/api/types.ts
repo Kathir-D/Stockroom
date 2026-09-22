@@ -572,3 +572,54 @@ export interface PhotoWallStatus {
   last_error: string;
   last_error_at: string | null;
 }
+
+/* ------------------------------------------------ bulk ways in (Phase B) ---- */
+
+export interface CategoryImportResult {
+  created: number;
+  existing: number;
+  failed: number;
+  format: "text" | "csv";
+  rows: { path: string[]; created: boolean; error?: string }[];
+}
+
+export interface AssetImportResult {
+  created: number;
+  updated: number;
+  failed: number;
+  rows: {
+    line: number;
+    serial_number: string;
+    name: string;
+    action: "created" | "updated" | "failed";
+    error?: string;
+    /** On an update: the item that already had this serial. */
+    note?: string;
+  }[];
+}
+
+export interface BulkAddInput {
+  name: string;
+  prefix: string;
+  count: number;
+  category_id?: string | null;
+  /** Zero-padding of the number; 0 means 3. */
+  digits?: number;
+  /** 0 means "after the highest already used". */
+  start_at?: number;
+}
+
+export interface BulkPreview {
+  serials: string[];
+  existing: string[];
+  name: string;
+}
+
+export interface LabelLayout {
+  key: string;
+  label: string;
+  paper: string;
+  per_sheet: number;
+  max_serial_chars: number;
+  hint: string;
+}

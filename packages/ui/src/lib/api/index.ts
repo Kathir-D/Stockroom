@@ -34,6 +34,11 @@ import type {
   Profile,
   RestoreResult,
   RosterResult,
+  AssetImportResult,
+  BulkAddInput,
+  BulkPreview,
+  CategoryImportResult,
+  LabelLayout,
   ScanResult,
   SignInPhotos,
   Settings,
@@ -358,6 +363,50 @@ export function importRoster(file: File, photoDir?: string) {
 
 /* -------------------------------------------------------------- assets ---- */
 
+/** POST /assets/import: a CSV upserted by serial, per-row results. */
+export function importAssets(file: File) {
+  const form = new FormData();
+  form.set("file", file);
+  return request<AssetImportResult>("/assets/import", { method: "POST", form });
+}
+
+/** The serials a bulk add would create. Writes nothing. */
+export function bulkPreview(input: BulkAddInput) {
+  return request<BulkPreview>("/assets/bulk-preview", { method: "POST", body: input });
+}
+
+export function bulkAdd(input: BulkAddInput) {
+  return request<AssetDetail[]>("/assets/bulk", { method: "POST", body: input });
+}
+
+/* ------------------------------------------------------------ barcodes ---- */
+
+export function labelLayouts() {
+  return request<LabelLayout[]>("/labels/layouts");
+}
+
+/** A PDF sheet of labels, in the order given. */
+export function assetLabels(input: { asset_ids: string[]; layout: string; start_at?: number }) {
+  return request<Blob>("/assets/labels.pdf", { method: "POST", body: input, blob: true });
+}
+
+/** Printable ID cards carrying each student number as a barcode. */
+export function userCards(userIds: string[]) {
+  return request<Blob>("/users/cards.pdf", { method: "POST", body: { user_ids: userIds }, blob: true });
+}
+
+/**
+ * One asset's barcode as a PNG. Fetched rather than put in an <img src>,
+ * because an <img> cannot send the bearer token and the dev UI is on another
+ * origin from the server, so the cookie does not travel either.
+ */
+export function assetBarcode(assetId: string) {
+  return request<Blob>(`/assets/${encodeURIComponent(assetId)}/barcode.png`, {
+    query: { width: "600" },
+    blob: true,
+  });
+}
+
 export function createAsset(input: AssetInput) {
   return request<AssetDetail>("/assets", { method: "POST", body: input });
 }
@@ -402,6 +451,16 @@ export function setAssetPhoto(id: string, photo: File) {
 }
 
 /* ---------------------------------------------------------- categories ---- */
+
+/**
+ * POST /categories/import: an indented outline (the examples/ Markdown files)
+ * or a type,category,model CSV. All or nothing; a refusal names the line.
+ */
+export function importCategories(file: File) {
+  const form = new FormData();
+  form.set("file", file);
+  return request<CategoryImportResult>("/categories/import", { method: "POST", form });
+}
 
 export function createCategory(input: CategoryInput) {
   return request<Category>("/categories", { method: "POST", body: input });
