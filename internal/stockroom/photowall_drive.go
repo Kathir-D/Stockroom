@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -175,7 +178,11 @@ type DrivePhotoSource struct {
 	// with no internet must not fill the log with noise nobody asked for.
 	lastErr   error
 	lastErrAt time.Time
-	now       func() time.Time
+	// authWarned is whether the one expired-sign-in warning (§9) has been
+	// logged for the current outage. Cleared by any success, so a token that
+	// is reconnected and later expires again is warned about again.
+	authWarned bool
+	now        func() time.Time
 }
 
 // PhotoWallSourceStatus is the read §7's admin screen is built on. It carries
@@ -329,12 +336,20 @@ func (s *DrivePhotoSource) Probe(ctx context.Context, folderID string) error {
 		return fmt.Errorf("%w: no folder id to check", ErrInvalid)
 	}
 	if err := s.probe(ctx, s.driveRoot(folderID)); err != nil {
+		err = s.explain(folderID, err)
+		// An expired sign-in is not the link's fault, and blaming the folder's
+		// sharing would send the admin to fix the one thing that is fine. It
+		// is the server's credential, so it is a 503 carrying the fix.
+		if errors.Is(err, errPhotoDriveAuth) {
+			return fmt.Errorf("%w: %v", ErrNotConfigured, err)
+		}
 		// Named causes rather than a generic failure: these two are what it
 		// almost always is, and an admin who is told which one can fix it in
 		// Drive without a support conversation.
 		return fmt.Errorf("%w: that folder isn't reachable with the configured Drive account — check that it is shared with that account, or set to anyone-with-the-link. rclone said: %s",
-			ErrInvalid, oneLine(err.Error()))
+			ErrInvalid, err.Error())
 	}
+	s.clearAuthWarning()
 	return nil
 }
 
@@ -481,6 +496,7 @@ func (s *DrivePhotoSource) buildManifest(ctx context.Context, folderID string) {
 	m := &photoManifest{FolderID: folderID, BuiltAt: s.now(), Entries: entries}
 	s.manifest = m
 	s.lastErr, s.lastErrAt = nil, time.Time{}
+	s.authWarned = false
 	s.nextAttempt = time.Time{}
 	if len(entries) == 0 {
 		// Permitted -- the folder may be mid-upload -- but worth reporting,
@@ -507,7 +523,7 @@ func (s *DrivePhotoSource) buildManifest(ctx context.Context, folderID string) {
 func (s *DrivePhotoSource) listFolder(ctx context.Context, folderID string) ([]photoEntry, error) {
 	body, wait, err := s.list(ctx, s.driveRoot(folderID))
 	if err != nil {
-		return nil, err
+		return nil, s.explain(folderID, err)
 	}
 	defer body.Close()
 
@@ -516,12 +532,26 @@ func (s *DrivePhotoSource) listFolder(ctx context.Context, folderID string) ([]p
 	// pipe nobody is reading and the wait never returns.
 	_, _ = io.Copy(io.Discard, body)
 	if err := wait(); err != nil {
-		return nil, fmt.Errorf("list the Drive folder: %w", err)
+		return nil, s.explain(folderID, fmt.Errorf("list the Drive folder: %w", err))
 	}
 	if decodeErr != nil {
-		return nil, fmt.Errorf("read the Drive listing: %w", decodeErr)
+		return nil, s.explain(folderID, fmt.Errorf("read the Drive listing: %w", decodeErr))
 	}
 	return entries, nil
+}
+
+// photoListingEntry is the subset of one `rclone lsjson` line the wall reads.
+//
+// Its own type rather than target_drive.go's rcloneEntry, and deliberately
+// without ModTime: this listing passes --no-modtime, under which rclone still
+// prints the key but as "", and a time.Time field refuses to decode "" -- so
+// sharing the backup's struct failed every real listing on its first line.
+// The two read the same command with different flags; declaring only what is
+// read keeps a field one of them needs from breaking the other.
+type photoListingEntry struct {
+	Path  string `json:"Path"`
+	Size  int64  `json:"Size"`
+	IsDir bool   `json:"IsDir"`
 }
 
 // decodeListing walks the JSON array rclone streams, counting as it goes.
@@ -534,7 +564,7 @@ func (s *DrivePhotoSource) decodeListing(r io.Reader) ([]photoEntry, error) {
 	entries := []photoEntry{}
 	seen := 0
 	for dec.More() {
-		var e rcloneEntry
+		var e photoListingEntry
 		if err := dec.Decode(&e); err != nil {
 			return nil, err
 		}
@@ -591,7 +621,7 @@ func (s *DrivePhotoSource) NextPhoto(ctx context.Context) ([]byte, error) {
 		// full-resolution original is never written to disk (§3).
 		raw, err := s.fetch(ctx, s.driveRoot(folderID, entry.Path), entry.Path)
 		if err != nil {
-			lastErr = err
+			lastErr = s.explain(folderID, err)
 			continue
 		}
 		tile, err := normalizePhoto(bytes.NewReader(raw))
@@ -599,6 +629,7 @@ func (s *DrivePhotoSource) NextPhoto(ctx context.Context) ([]byte, error) {
 			lastErr = err
 			continue
 		}
+		s.clearAuthWarning()
 		return tile, nil
 	}
 	if lastErr == nil {
@@ -627,14 +658,114 @@ func (s *DrivePhotoSource) notReadyErr() error {
 	defer s.mu.Unlock()
 	switch {
 	case s.folderID == "":
-		return fmt.Errorf("%w: no Drive folder has been chosen for the sign-in photo wall", ErrNotConfigured)
+		return warmingUp(fmt.Errorf("%w: no Drive folder has been chosen for the sign-in photo wall", ErrNotConfigured))
 	case s.listing:
-		return fmt.Errorf("the Drive folder is still being listed (%d files so far)", s.listed)
+		return warmingUp(fmt.Errorf("the Drive folder is still being listed (%d files so far)", s.listed))
 	case s.lastErr != nil:
+		// Not warming up: the listing failed, or the folder holds nothing
+		// usable. Those are real, and the reel counting them toward its rest
+		// is what stops a machine with no internet from asking every ten
+		// seconds forever.
 		return s.lastErr
 	default:
-		return errors.New("the photo manifest has not been built yet")
+		return warmingUp(errors.New("the photo manifest has not been built yet"))
 	}
+}
+
+// errPhotoWallWarmingUp marks the not-ready answers that are a *normal state*
+// rather than a failure: no folder chosen yet, or the first listing still
+// running. §9 lists both as normal, and the reel must not count them.
+//
+// It did, once. At one attempt every two seconds, the minute a first listing
+// takes was 25 "failures" and a five-minute rest before the listing had even
+// finished -- and since any failure past the cap buys another rest, the wall
+// came up about twelve minutes after boot on a folder that was ready in one.
+// Found on the first run against a real Drive folder (§10's manual pass).
+var errPhotoWallWarmingUp = errors.New("the sign-in photo wall is warming up")
+
+type warmingUpError struct{ err error }
+
+func (e warmingUpError) Error() string        { return e.err.Error() }
+func (e warmingUpError) Unwrap() error        { return e.err }
+func (e warmingUpError) Is(target error) bool { return target == errPhotoWallWarmingUp }
+
+// warmingUp tags err as a normal not-yet state, keeping its message and
+// anything it already wraps (ErrNotConfigured, for the no-folder case).
+func warmingUp(err error) error { return warmingUpError{err} }
+
+/* ---------------------------------------------------- rclone's words ----- */
+
+// errPhotoDriveAuth marks an rclone failure that is the machine's Google
+// sign-in rather than the folder or the network (§9's "OAuth token expired"
+// row). It is the one failure here an admin fixes at a terminal rather than
+// in Drive, so it gets its own sentence and its own log line.
+var errPhotoDriveAuth = errors.New("the Drive sign-in on this machine has expired")
+
+var (
+	// rcloneTimestamp is the date and time rclone puts before every line of
+	// its log output. Noise once the lines are joined into one message.
+	rcloneTimestamp = regexp.MustCompile(`\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} `)
+	// rcloneClientIDNotice is the line rclone 1.7x prints before *every*
+	// command on a remote using its shared client id. Left in, it is the first
+	// thing in every error message and the actual cause is buried behind it.
+	// The retirement it announces is tracked in CLAUDE.md §13, not here.
+	rcloneClientIDNotice = regexp.MustCompile(`NOTICE: \S+: This remote uses rclone's shared Google Drive client_id.*?making-your-own-client-id\s*`)
+	// rcloneRequestURL is a Drive API request rclone quotes when a call fails.
+	// It carries the folder id in its query string, and is reduced to a word.
+	rcloneRequestURL = regexp.MustCompile(`"https?://[^"]*"`)
+)
+
+// explain turns an rclone failure into something fit to store, show and log.
+//
+// Stored is the important one. Every error kept here reaches GET
+// /admin/photo-wall as last_error, and rclone's own messages carry the folder
+// id: a failed call quotes the Drive API request it made, whose query string
+// is `'<id>' in parents`, URL-encoded. An expired token or a dropped network
+// connection would have put the id on the admin screen -- the one thing §7
+// promises no response ever carries. Verified against rclone 1.75.1 with a
+// revoked token before this was written.
+//
+// It must be called without s.mu held: an expired sign-in takes the lock to
+// decide whether this is the first time it has been seen.
+func (s *DrivePhotoSource) explain(folderID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := rcloneClientIDNotice.ReplaceAllString(err.Error(), "")
+	msg = rcloneTimestamp.ReplaceAllString(msg, "")
+	msg = rcloneRequestURL.ReplaceAllString(msg, "Drive")
+	if folderID != "" {
+		for _, form := range []string{folderID, url.QueryEscape(folderID), url.PathEscape(folderID)} {
+			msg = strings.ReplaceAll(msg, form, "<folder>")
+		}
+	}
+	msg = oneLine(msg)
+
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "invalid_grant") || strings.Contains(lower, "couldn't fetch token") ||
+		strings.Contains(lower, "cannot fetch token") || strings.Contains(lower, "token expired") {
+		// rclone's own advice names the remote as `gdrive{AbCdE}:`, its
+		// internal name for a connection string -- not something anybody can
+		// type. The remote as configured is.
+		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. On this machine run `rclone config reconnect %s:` and sign in again; nothing needs restarting",
+			errPhotoDriveAuth, s.remote)
+		s.mu.Lock()
+		first := !s.authWarned
+		s.authWarned = true
+		s.mu.Unlock()
+		if first {
+			log.Printf("warning: sign-in photo wall: %v", authErr)
+		}
+		return authErr
+	}
+	return errors.New(msg)
+}
+
+// clearAuthWarning re-arms the expired-sign-in warning after something worked.
+func (s *DrivePhotoSource) clearAuthWarning() {
+	s.mu.Lock()
+	s.authWarned = false
+	s.mu.Unlock()
 }
 
 /* ------------------------------------------------------------- rclone ----- */
