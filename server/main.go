@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,10 +36,10 @@ func main() {
 	// live in app_settings now (docs/design/backup.md §C.2), seeded from .env
 	// below on first boot only; passing the environment through as an override
 	// would mean every restart quietly out-voting the settings screen.
-	db, err := stockroom.Open(ctx, cfg.DatabaseURL, stockroom.Options{
+	db, err := openWithRetry(ctx, cfg.DatabaseURL, stockroom.Options{
 		SessionIdle: time.Duration(cfg.SessionIdleMinutes) * time.Minute,
 		UploadsDir:  cfg.UploadsDir,
-	})
+	}, dbConnectBudget)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
@@ -190,4 +191,73 @@ func photoSource(s *stockroom.DrivePhotoSource) stockroom.PhotoSource {
 		return nil
 	}
 	return s
+}
+
+// dbConnectBudget is how long the server waits for Postgres to answer before
+// giving up at start-up.
+//
+// Two minutes rather than the single attempt this used to make, because the
+// closet PC's failure mode is a reboot, not a misconfiguration: the service
+// starts in seconds while Docker Desktop takes the better part of a minute to
+// have a container ready, so the database is *reliably* absent at exactly the
+// moment the server first asks for it. Exiting there is worse than it looks --
+// the nightly backup is a goroutine inside this process (docs/design/backup.md
+// §E.6), so "the server did not come back" and "the machine stopped backing
+// up" are the same event, and neither is visible until somebody needs the
+// backup. A wrong DATABASE_URL still fails, two minutes later, with every
+// attempt in the log saying so.
+const dbConnectBudget = 2 * time.Minute
+
+// openWithRetry is stockroom.Open with a deadline instead of one attempt.
+//
+// It lives here rather than inside Open because the other three callers want
+// the opposite behaviour: both test helpers should fail immediately against a
+// database that is not running, and cmd/restore is a person at a terminal
+// during a disaster, for whom a fast, legible error beats two minutes of
+// silence. Only the long-running server benefits from waiting.
+func openWithRetry(ctx context.Context, url string, opts stockroom.Options, budget time.Duration) (*stockroom.DB, error) {
+	deadline := time.Now().Add(budget)
+	// Backoff starts short and caps low: Docker usually appears within a
+	// minute, and a five-second ceiling keeps the log readable without
+	// turning a ready database into a five-second wait.
+	const (
+		firstWait = time.Second
+		maxWait   = 5 * time.Second
+	)
+
+	wait := firstWait
+	for attempt := 1; ; attempt++ {
+		db, err := stockroom.Open(ctx, url, opts)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("database: connected on attempt %d", attempt)
+			}
+			return db, nil
+		}
+
+		// A cancelled context is Ctrl+C or SIGTERM, not a database that is
+		// still starting. Retrying it would ignore the signal for two minutes.
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		if !time.Now().Add(wait).Before(deadline) {
+			return nil, fmt.Errorf("after %s: %w", budget, err)
+		}
+
+		// Logged every time rather than once, so somebody reading the log
+		// during a slow boot can see it is waiting rather than wedged.
+		log.Printf("database not ready (attempt %d), retrying in %s: %v", attempt, wait, err)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		if wait < maxWait {
+			wait *= 2
+			if wait > maxWait {
+				wait = maxWait
+			}
+		}
+	}
 }
