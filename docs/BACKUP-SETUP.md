@@ -96,14 +96,17 @@ missing and repeat the command for your machine.
 > revoke the connection silently, and the first sign anyone would get is
 > Stockroom's staleness warning two days later.
 
-> **If rclone mentions its client ID, ignore it for now.** rclone prints a
-> notice saying the shared Google client ID it ships with is being retired
-> during 2026. It still works, and there is nowhere in Stockroom to put a
-> replacement yet, so there is nothing to do on this screen. It is on the
-> open list in `CLAUDE.md` §13 to be sorted out when this machine is
-> provisioned properly — do not go and make your own client ID without
-> reading that entry first, because an OAuth consent screen left in Google's
-> default "Testing" mode stops working after seven days.
+> **If rclone mentions its client ID, you can carry on with setup.** rclone
+> prints a notice saying the shared Google client ID it ships with is being
+> retired during 2026. It still works today, and there is nowhere in Stockroom
+> to put a replacement yet, so there is nothing to do on this screen. This is
+> a temporary limitation, not a permanent all-clear: once Google retires the
+> shared ID, the Drive backup may stop working (you would see it as a failed
+> **Test connection** or a staleness warning), and each Drive remote will need
+> reconnecting after Stockroom gains support for its own client ID. That work
+> is on the open list in `CLAUDE.md` §13 — do not go and make your own client
+> ID without reading that entry first, because an OAuth consent screen left in
+> Google's default "Testing" mode stops working after seven days.
 
 ---
 
