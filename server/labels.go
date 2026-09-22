@@ -41,6 +41,7 @@ func (d deps) handleLabelLayouts(w http.ResponseWriter, r *http.Request, actor s
 func (d deps) handlePrintAssetLabels(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var req stockroom.LabelRequest
 	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 	pdf, err := d.db.AssetLabelsPDF(r.Context(), actor, req)
@@ -58,6 +59,7 @@ func (d deps) handlePrintUserCards(w http.ResponseWriter, r *http.Request, actor
 		UserIDs []string `json:"user_ids"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 	pdf, err := d.db.UserCardsPDF(r.Context(), actor, req.UserIDs)

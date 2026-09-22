@@ -88,6 +88,7 @@ func (d deps) handleImportAssets(w http.ResponseWriter, r *http.Request, actor s
 func (d deps) handleBulkPreview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in stockroom.BulkAddInput
 	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
 		return
 	}
 	res, err := d.db.BulkPreviewSerials(r.Context(), actor, in)
@@ -103,6 +104,7 @@ func (d deps) handleBulkPreview(w http.ResponseWriter, r *http.Request, actor st
 func (d deps) handleBulkAdd(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in stockroom.BulkAddInput
 	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
 		return
 	}
 	res, err := d.db.BulkAddAssets(r.Context(), actor, in)
@@ -118,10 +120,20 @@ func (d deps) handleBulkAdd(w http.ResponseWriter, r *http.Request, actor stockr
 // class its field filters out. Unauthenticated for the same reason
 // /signin/photos is -- the screen that asks for a session cannot hold one --
 // and it reveals nothing a sign-in attempt would not.
+//
+// needs_setup is true while there are no accounts at all, which turns the
+// sign-in screen into "create the first admin" (internal/stockroom/setup.go).
+// A database error reads as false: the ordinary sign-in screen is the safe
+// thing to show when the answer is unknown.
 func (d deps) handleSignInConfig(w http.ResponseWriter, r *http.Request) {
 	format, _ := stockroom.StudentNumberRule()
-	writeJSON(w, http.StatusOK, map[string]string{
+	needs, err := d.db.NeedsFirstAdmin(r.Context())
+	if err != nil {
+		needs = false
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
 		"student_number_format": string(format),
 		"student_number_filter": stockroom.StudentNumberFilterPattern(),
+		"needs_setup":           needs,
 	})
 }

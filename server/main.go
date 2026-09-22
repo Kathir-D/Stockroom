@@ -46,6 +46,9 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer db.Close()
+	// Where the setup wizard writes the failsafe admin (setup.go). Only ever
+	// the file this process was configured from.
+	db.EnvPath = cfg.EnvPath
 
 	// The schema, before anything reads it. An installed Stockroom has no
 	// Supabase CLI, so this is the only thing that applies a migration on that

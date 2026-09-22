@@ -232,3 +232,8 @@ insert into kit_items (kit_id, asset_id) values
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000105'), -- Canon 70-200mm f/2.8
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000107'), -- DJI Wireless Lavalier
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000112'); -- Backpack
+
+-- The development database is set up already; do not send the seeded admin
+-- through the first-run wizard on every reset. (It is still reachable from
+-- Admin -> Settings -> "Run the setup guide again".)
+update app_settings set setup_completed_at = now() where id = true;

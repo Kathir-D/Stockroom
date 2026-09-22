@@ -48,6 +48,7 @@ func newRouter(d deps) http.Handler {
 	// that was never built, which is the common case -- see server/photowall.go.
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
 	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
+	mux.HandleFunc("POST /setup/admin", d.handleCreateFirstAdmin)
 	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))
 
 	// A limited session (scan login, no password yet) may only set its
@@ -128,6 +129,11 @@ func newRouter(d deps) http.Handler {
 	// internal/stockroom. The restore routes are the destructive ones and each
 	// carries its own typed confirmation, checked in the package rather than
 	// here so the CLI is held to it too.
+	mux.Handle("GET /setup", d.withSession(d.handleGetSetup, fullOnly))
+	mux.Handle("PUT /setup", d.withSession(d.handleSaveSetup, fullOnly))
+	mux.Handle("POST /setup/failsafe", d.withSession(d.handleConfigureFailsafe, fullOnly))
+	mux.Handle("POST /setup/examples", d.withSession(d.handleLoadExamples, fullOnly))
+	mux.Handle("DELETE /setup/examples", d.withSession(d.handleRemoveExamples, fullOnly))
 	mux.Handle("GET /admin/settings", d.withSession(d.handleGetSettings, fullOnly))
 	mux.Handle("PUT /admin/settings", d.withSession(d.handleSaveSettings, fullOnly))
 	mux.Handle("POST /admin/settings/test", d.withSession(d.handleTestTarget, fullOnly))

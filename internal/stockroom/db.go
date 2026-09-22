@@ -52,6 +52,11 @@ type DB struct {
 	BackupDir      string
 	PhotoBackupDir string
 
+	// EnvPath is the .env file the server was configured from, which the
+	// setup wizard writes the failsafe admin into (Config.EnvPath). Empty
+	// means there was none, and that step answers ErrNotConfigured.
+	EnvPath string
+
 	// PhotoWall is the sign-in photo wall's reel
 	// (docs/design/signin-photo-wall.html §2), or nil when the feature is
 	// off. Every method on it is nil-safe, so callers do not branch on this.

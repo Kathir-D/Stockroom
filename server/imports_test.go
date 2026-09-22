@@ -111,3 +111,20 @@ func TestSignInConfigIsPublic(t *testing.T) {
 		t.Fatalf("GET /signin/config = %d %v", code, body)
 	}
 }
+
+// decodeJSON returns its error rather than writing it, and the handlers that
+// only returned answered malformed JSON with an empty 200.
+func TestMalformedJSONIsA400(t *testing.T) {
+	h, d := testDeps(t)
+	token := adminToken(t, h, d)
+	for _, path := range []string{"/assets/bulk-preview", "/assets/bulk", "/assets/labels.pdf", "/users/cards.pdf"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{not json"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s with malformed JSON = %d %q, want 400", path, rec.Code, rec.Body.String())
+		}
+	}
+}
