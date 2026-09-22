@@ -82,12 +82,20 @@ pnpm-lock.yaml
 yarn.lock
 
 # ------------------------------------------------------------- JS builds ---
-# Vite output. desktop-app/frontend/dist keeps a tracked .gitkeep because
-# desktop-app/main.go does `//go:embed all:frontend/dist`, and the directory
-# has to exist on a fresh clone for `go build ./...` to work at all.
+# Vite output. Both dist directories keep a tracked .gitkeep, because both are
+# embedded into a Go binary -- desktop-app/main.go does
+# `//go:embed all:frontend/dist` and web-app/embed.go does `//go:embed all:dist`
+# -- and an embed directive whose directory does not exist fails the build. So
+# on a fresh clone, before anybody has run `npm run build`, `go build ./...`
+# needs the directories to be there and empty.
 desktop-app/frontend/dist/*
 !desktop-app/frontend/dist/.gitkeep
-web-app/dist/
+web-app/dist/*
+!web-app/dist/.gitkeep
+
+# scripts/install.sh builds the release binary here before copying it into the
+# install directory. A 13 MB artefact, rebuilt on every run.
+.build/
 
 # Per-run service logs written by scripts/dev.sh and dev.ps1
 .run-logs/

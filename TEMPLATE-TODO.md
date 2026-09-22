@@ -36,19 +36,27 @@ The code is more portable than the project is. Almost nothing in `internal/stock
 
 | # | Blocker | Where it lives | Phase |
 |---|---|---|---|
-| 1 | **Installing it means being a developer** | `scripts/dev.sh`, the whole toolchain | **A** |
+| 1 | ~~Installing it means being a developer~~ — **mostly closed 2026-09-22** | `deploy/`, `scripts/install.sh` | **A** |
 | 2 | There is **no way to produce a barcode**, and the product is barcode-driven | nothing exists | **B** |
 | 3 | The seed *is* one school's inventory, and ships a known admin login | `supabase/seed.sql` | **B** |
 | 4 | A school with IDs like `AB12345` cannot sign in at all | `password.go`, `sign-in.svelte` | **B** |
 
-(1) is the project. (2) is the one that was previously misfiled as polish — see the note in
-Phase B.
+(2) is the one that was previously misfiled as polish — see the note in Phase B.
+
+**What changed on 2026-09-22.** Phase A is built for macOS and Linux: one `postgres:17` container
+instead of the Supabase stack, the migrations and the web UI compiled into a single binary that
+applies its own schema at boot, an installer that is also the upgrade path, and a launchd agent /
+systemd unit that restarts the server on crash. Proven on a scratch database with no Supabase
+anywhere: ten migrations applied, an admin signed in through the browser, a restart re-applied
+nothing. What is *not* done is Windows, and fetching a release binary rather than building from a
+checkout — so it still takes Go and Node on the machine you install **from**. See `docs/INSTALL.md`.
 
 ---
 
 ## Phase A — Make it installable
 
-This is the project. Everything else is a day's work once this exists.
+This is the project. Everything else is a day's work once this exists. **Mostly done 2026-09-22**;
+what is left is Windows and the release-binary download path, both marked below.
 
 - [x] **Wait for Postgres at start-up instead of exiting.** *(done 2026-09-22, `ef2fb92`)*
       `Open` pinged once and `main` called `log.Fatalf`, which is right for a developer who typed
@@ -60,64 +68,117 @@ This is the project. Everything else is a day's work once this exists.
       nothing on any screen connecting them. `openWithRetry` gives it a two-minute budget with
       1s→5s backoff. It lives in `server/` rather than in `Open` because the other three callers —
       two test helpers and `cmd/restore` — want the opposite behaviour.
-- [ ] **A plain Postgres container for installs; keep the Supabase CLI for development.**
-      One service, `postgres:17`, in a `docker-compose.yml` with nothing else. Kong, GoTrue,
-      PostgREST, Realtime, Storage and Studio are all running today and all unused (§4 says so
-      outright), and shipping them means the teacher installs the Supabase CLI *as well as* Docker
-      and the closet PC runs ~12 containers for the benefit of one.
+- [x] **A plain Postgres container for installs; keep the Supabase CLI for development.**
+      *(done 2026-09-22, `deploy/docker-compose.yml`)* One `postgres:17`, bound to
+      `127.0.0.1:54322` explicitly rather than with the short `54322:5432` form — Docker's default
+      publishes on every interface and opens the host firewall while doing it, which would put the
+      database on the school network. `POSTGRES_PASSWORD` has **no default**, so a compose file that
+      is run without one refuses to start rather than booting a closet machine with a guessable
+      superuser password and never mentioning it. Verified end to end: migrations applied, the
+      server ran, an admin signed in through the browser, with no Supabase CLI anywhere.
+      - Kong, GoTrue, PostgREST, Realtime, Storage and Studio were all running and all unused (§4
+        says so outright), so shipping the stack meant the teacher installs the CLI *as well as*
+        Docker and the closet PC runs ~12 containers for the benefit of one.
       - Development is **completely unchanged**: `supabase start`, `db reset`, `seed.sql`, Studio
-        and the pgTAP suite all stay exactly as they are. The CLI just does not travel to a school.
-      - **The host port stays 54322 everywhere**, mapped `54322:5432`. The teacher never types it,
-        so "5432 is conventional" buys nothing real, while a second value means every doc, script,
-        comment and CI reference is a place to miss one. It also avoids colliding with whatever
-        Postgres the school might already have.
-      - Set a **generated** Postgres password in the compose environment at install time.
-        `postgres:postgres` is correct for a localhost dev stack and wrong on a machine in a closet
-        that students walk past. Store it in the install directory's `.env` with tight permissions
-        and never show it to anybody.
-- [ ] **Embed the migrations in the Go binary.** `//go:embed supabase/migrations/*.sql` plus a
-      sequential runner and a `schema_migrations` table. The server applies whatever is pending at
-      boot. Roughly a hundred lines, and the highest-leverage item in this file.
-      - This is also the **upgrade story**: a school downloads a new binary and their database
-        moves with it. Without it, every install *and every release forever* is a support ticket
-        that starts "run these SQL files in this order".
-      - The runner must read the same files the CLI reads, or dev and production schemas drift.
-      - The restore path already checks a schema version (`--force` exists for a mismatch), so
-        there is a version concept to hang this on.
-- [ ] **Embed the web UI in the Go binary.** `//go:embed web-app/dist`, served at `/`. The desktop
-      app already does exactly this (`desktop-app/main.go`), so the pattern is in the repo. Then
-      the deliverable is **one binary**: API, UI and migrations.
-      - Serving same-origin also makes the CORS allow-list irrelevant for an install, which deletes
-        the single most confusing failure mode in the system (§13, 2026-09-15: a blocked preflight
-        and a dead server are indistinguishable in the browser).
-      - `packages/ui` hardcodes `DEFAULT_BASE_URL = http://127.0.0.1:8080`; same-origin serving
-        means a relative base, which is also why `SERVER_ADDR` stops being load-bearing. The
-        desktop host still has to be told explicitly.
-      - Keep the Wails app as the nicer local window, not as a requirement.
-- [ ] **A release workflow.** `.github/workflows/release.yml` on tag push (`v*`), a `go build`
-      matrix producing `stockroom_windows_amd64.exe`, `stockroom_darwin_arm64`,
-      `stockroom_darwin_amd64` and `stockroom_linux_amd64` — each with the UI and migrations
-      embedded — plus `checksums.txt` and auto-generated notes. Without this a school needs Go.
-- [ ] **`install.ps1` and `install.sh`.** Scripts, not an `.exe` (see §Decisions). Each one:
-      - Check for Docker; install it via `winget install Docker.DockerDesktop` or a Homebrew cask
-        when a package manager is present, and otherwise print the download link and what to click.
-      - **If enabling WSL2 needs a restart, say so in one sentence and ask them to run the same
-        command again afterwards.** Not a `RunOnce` resume — see §Cut.
-      - Wait for the daemon, not the binary: poll `docker info` for up to two minutes with an
-        honest "waiting for Docker to start (this takes about a minute the first time)".
-      - Fetch the right binary for the platform from the latest release, write a starter `.env`
-        with a generated database password, start Postgres, start the server, open `/setup`.
-      - **On a second run, detect the existing install: back up first, then replace the binary and
-        restart.** This is the upgrade path, and the backup is the only protection against a
-        migration that goes wrong. It is also why "it broke, I'll run the installer again" is the
-        thing that fixes it.
-- [ ] **Register it as a service** — a Windows service (not a logon task), a launchd plist on
-      macOS, a systemd unit on Linux — with **restart on crash and backoff**. **This is not
-      optional.** The nightly backup lives inside the server, so "the server is running" and
-      "backups happen" are the same fact, and today that depends on somebody having left a terminal
-      window open. Offer an optional "restart now to check everything comes back on its own" at the
-      end of the install; a school finding out on day forty that it never auto-started is a school
-      that lost forty days of backups.
+        and the pgTAP suite all stay exactly as they are — verified by a full `db reset` and a green
+        suite after the change. The CLI just does not travel to a school.
+      - **The host port stays 54322 everywhere.** Nobody ever types it, so "5432 is conventional"
+        buys nothing real, while a second value means every doc, script, comment and CI reference is
+        a place to miss one. It also avoids colliding with whatever Postgres a school may already
+        run.
+      - The password is generated by `install.sh` into the install directory's `.env` at mode 600,
+        and is never shown to anybody.
+- [x] **Embed the migrations in the Go binary.** *(done 2026-09-22, `supabase/embed.go`,
+      `internal/stockroom/migrate.go`)* The server applies whatever is pending at boot, and it is
+      **fatal** where the failsafe admin and the backup settings are not: a schema that is not the
+      one the binary was built against fails on its first real query, at a counter, with a student
+      holding a camera.
+      - The embed lives in `supabase/`, so the runner reads the **same files the CLI reads**. A copy
+        under `internal/` was the alternative and is two schemas that agree until somebody edits
+        one.
+      - The bookkeeping table is **Supabase's own** `supabase_migrations.schema_migrations`, not a
+        second one. Two tables means a database migrated by the CLI looks unmigrated to the server,
+        so the first production start after a `db reset` would replay `create table profiles` over a
+        live schema. It is also the table `schemaVersion` already reads for the backup manifest, so
+        the restore's version check keeps working on an install the CLI has never touched.
+      - `20260826180000_grant_service_role.sql` had to be made portable: `service_role`, `anon` and
+        `authenticated` do not exist on a plain Postgres, so unguarded it stopped a fresh install at
+        migration two of ten with an error naming a Supabase concept the reader had deliberately
+        never installed. Now guarded on the roles existing, via `execute` — a literal `GRANT` inside
+        an `if exists` still fails at parse time.
+      - One transaction per file, and an advisory lock over the run. A file whose name has no
+        version prefix is an **error, not a skip**: a migration silently not running is the failure
+        the whole mechanism exists to prevent.
+      - This is also the **upgrade story**: a new binary carries the files and the database moves
+        with it. Without it, every install *and every release forever* is a support ticket that
+        starts "run these SQL files in this order".
+- [x] **Embed the web UI in the Go binary.** *(done 2026-09-22, `web-app/embed.go`,
+      `server/ui.go`)* The deliverable is one binary: API, UI and migrations, 19 MB.
+      - Vite's `assetsDir` had to move from `assets` to `static`. The API already owns
+        `GET /assets` and `GET /assets/{id}`, so a default build puts `/assets/index-a1b2c3.js`
+        inside the equipment catalogue's route and the router answers a JavaScript request with
+        "asset not found". Renaming the bundle directory is the fix; renaming a documented endpoint
+        to suit a bundler is not.
+      - `dist/.gitkeep` is tracked, mirroring `desktop-app/frontend/dist`, because `go:embed` fails
+        the build when its directory is absent and `go build ./...` has to work on a fresh clone.
+        `webapp.Present()` is what tells "nobody ran npm run build" apart from "the UI is missing" —
+        same bytes, very different problems — and the server says so in words instead of serving a
+        blank page.
+      - The UI reads its base URL off `window.location.origin` in a production build, so
+        `SERVER_ADDR` stops being load-bearing and CORS never comes into it: a same-origin request
+        is not subject to CORS at all. The allow-list stays for the dev loop and the Wails window,
+        which are genuinely separate origins; the desktop host is still told its base URL
+        explicitly. That deletes the single most confusing failure mode in the system for an
+        install (§13, 2026-09-15: a blocked preflight and a dead server are indistinguishable in
+        the browser).
+      - The Wails app stays the nicer local window, not a requirement.
+- [x] **A release workflow.** *(written 2026-09-22, `.github/workflows/release.yml`)* The four
+      targets, `checksums.txt` and generated notes, on a `v*` tag. `workflow_dispatch` builds the
+      matrix **without publishing**, so the workflow can be proven before a tag depends on it, and
+      the UI build runs before the Go build with a `test -f web-app/dist/index.html` gate after it —
+      the other order silently ships the tracked empty directory.
+      - **Not yet exercised.** No tag has been pushed and no artefact has been downloaded onto a
+        machine that is not this one, so `install.sh` still builds from a checkout rather than
+        fetching a release. Writing the download path against binaries that do not exist would be
+        an untested path in the one place a school meets this project first.
+- [~] **`install.sh` (done), `install.ps1` (not started).** *(2026-09-22, `scripts/install.sh`)*
+      macOS and Linux. It checks Docker is **running** rather than installed, builds the UI and the
+      binary, writes a `.env` with a generated database password at mode 600, prompts for the
+      failsafe admin, starts Postgres, installs the service and waits for `/health` before claiming
+      success. A second run is the upgrade path and **takes a `pg_dump` first, from inside the
+      container** so no Postgres client is needed on the host; a dump that fails stops the upgrade
+      rather than continuing, because it is the only protection against a migration that goes wrong.
+      `.env` is never overwritten — backup settings live in the database, and an installer that
+      rewrote the seeds every release would be the "a value an admin typed reverts on the next
+      restart" failure Phase 7 rules out.
+      - **Still to do.** It requires Go and Node to be installed, because it builds from a
+        checkout rather than downloading a release binary — the deliberate gap noted under the
+        release workflow above. It does not *install* Docker (`winget install
+        Docker.DockerDesktop`, a Homebrew cask, otherwise the download link and what to click); it
+        only checks for it and waits. And it opens `/`, not the first-run wizard, because the
+        wizard is Phase B.
+      - **`install.ps1` is not started**, and with it the WSL2-restart sentence ("restart, then run
+        the same command again" — not a `RunOnce` resume, see §Cut).
+- [x] **Register it as a service** *(macOS and Linux done 2026-09-22,
+      `deploy/com.stockroom.server.plist.template`, `deploy/stockroom.service.template`; Windows
+      not started)* — with **restart on crash and backoff**, and one shared entry point,
+      `deploy/stockroom-run.sh`, so there is no macOS copy and a Linux copy to drift apart. It waits
+      for the **Docker daemon** (not the binary) for three minutes, brings the container up, and
+      `exec`s the server so the service manager supervises the real process rather than a live
+      wrapper around a dead one.
+      - **The Mac is a LaunchAgent, not a LaunchDaemon, and that is a real cost.** Docker Desktop
+        only runs inside a user session, so a boot-time daemon would start, find no Docker and give
+        up. The agent starts at login instead, which means the closet Mac must be set to log in
+        automatically or a power cut leaves it at the login window — running nothing, backing up
+        nothing, and saying so nowhere. `docs/INSTALL.md` says this in those words. Linux has no
+        such problem and gets a real system unit.
+      - Why it was never optional: the nightly backup lives inside the server, so "the server is
+        running" and "backups happen" are the same fact, and until now that depended on somebody
+        having left a terminal window open.
+      - **Still to do:** offer "restart now to check everything comes back on its own" at the end
+        of the install, and actually reboot this machine once to confirm it. A school finding out
+        on day forty that it never auto-started is a school that lost forty days of backups, and
+        that is not something a passing install script has proven.
 
 ---
 
@@ -260,9 +321,9 @@ This is the project. Everything else is a day's work once this exists.
 - [ ] **Fill in the repository description and topics.** `school`, `inventory`, `checkout`,
       `barcode`, `education`, `equipment`, `go`, `svelte`, `self-hosted`. Topics are the only
       discovery mechanism GitHub gives you and they cost thirty seconds.
-- [ ] **`docs/INSTALL.md`** — the twenty-minute path, Windows first, a screenshot per step, no
-      assumed knowledge. Cannot be written until Phase A exists; writing it against today's
-      toolchain would produce a document that is obsolete on delivery. Document the PowerShell
+- [~] **`docs/INSTALL.md`** — *written 2026-09-22 for macOS and Linux, against the Phase A
+      install path that now exists.* Still to do: Windows, a screenshot per step, and the
+      twenty-minute timing claim, none of which can be honest yet. Document the PowerShell
       execution-policy prompt with the exact words on the button, and the manual path for somebody
       who would rather pre-fill settings than use the wizard.
 - [ ] **`docs/STUDENT-GUIDE.md`** — one page, printable, sticky-taped to the wall above the PC.

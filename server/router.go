@@ -143,6 +143,19 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /users/{id}", d.withSession(d.handleDeleteUser, fullOnly))
 	mux.Handle("POST /users/{id}/password", d.withSession(d.handleSetUserPassword, fullOnly))
 
+	// The web UI, last and least specific. Go's ServeMux prefers the most
+	// specific pattern, so every route above still wins over this one and the
+	// catch-all only ever sees paths no endpoint claims (server/ui.go).
+	//
+	// Serving the UI from the same origin as the API is what makes an install
+	// one process and one port, and it takes withCORS out of the picture
+	// entirely for that deployment: a same-origin request is not subject to
+	// CORS. The allow-list stays because the dev loop and the Wails window are
+	// still separate origins.
+	ui := uiHandler()
+	mux.Handle("GET "+uiPrefix, ui)
+	mux.Handle("GET /", ui)
+
 	return logRequests(withCORS(mux))
 }
 

@@ -1,0 +1,39 @@
+# Linux service definition. scripts/install.sh substitutes __STOCKROOM_HOME__
+# and __USER__ and writes the result to /etc/systemd/system/stockroom.service.
+#
+# A system unit rather than a user one, because on Linux the Docker daemon is
+# itself a system service that starts at boot -- so unlike macOS there is no
+# reason to tie Stockroom to somebody logging in. See
+# com.stockroom.server.plist.template for why the Mac cannot do the same.
+[Unit]
+Description=Stockroom equipment checkout server
+# Ordering only, not a hard requirement: docker.service may be socket-activated
+# or slow, and stockroom-run.sh waits for the daemon itself for three minutes
+# rather than relying on systemd's idea of "started".
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__STOCKROOM_HOME__
+ExecStart=__STOCKROOM_HOME__/stockroom-run.sh
+
+# Restart on anything, including a clean exit. The nightly backup lives inside
+# this process (CLAUDE.md §11), so a server that is not running is a machine
+# that is not backing up, and the two are indistinguishable from outside.
+Restart=always
+RestartSec=10
+
+# Bound the crash loop rather than letting it spin: five failures inside two
+# minutes stops the unit, which is a state `systemctl status` reports plainly.
+# Without this a binary that cannot reach its database restarts forever and the
+# journal says the same thing ten thousand times.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+StandardOutput=append:__STOCKROOM_HOME__/logs/server.log
+StandardError=append:__STOCKROOM_HOME__/logs/server.log
+
+[Install]
+WantedBy=multi-user.target

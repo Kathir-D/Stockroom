@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13). Amended 2026-09-18: Phase 8, kits — the last item on the build list — built and shipped (Sections 2, 6.2, 7, 8, 8.1, 12, 13; `docs/adr/0002`), and the backup system backtested end to end against a live database, which found and fixed three reporting defects (Section 13).
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13). Amended 2026-09-18: Phase 8, kits — the last item on the build list — built and shipped (Sections 2, 6.2, 7, 8, 8.1, 12, 13; `docs/adr/0002`), and the backup system backtested end to end against a live database, which found and fixed three reporting defects (Section 13). Amended 2026-09-22: **the production install path** — a plain `postgres:17` container instead of the Supabase stack, the migrations and the web UI compiled into one binary that applies its own schema at boot, and an OS service that restarts it (Sections 3, 4, 5, 8, 8.1, 9, 13; `docs/INSTALL.md`, `TEMPLATE-TODO.md` Phase A). **Development is unchanged**: the Supabase CLI is still the dev database and `scripts/dev.sh` is still the dev loop.
 
 ---
 
@@ -49,13 +49,23 @@ Stockroom is a fully local equipment checkout/check-in system for the school's m
 
 ## 3. Deployment model
 
-One dedicated Windows PC lives in the camera closet, always on. Development happens on macOS. Three things run on the machine:
+One dedicated PC lives in the camera closet, always on. Development happens on macOS.
 
-1. **Supabase local stack** (Docker). Used purely as the Postgres host (+ Studio for poking at data). Its REST API and Auth services are unused.
-2. **Go HTTP server** (`server/`). The only process that talks to the database. Listens on localhost. All business logic, account handling, and role checks live here (in `internal/stockroom`).
-3. **Frontends**. Two thin UIs that only speak HTTP to the Go server:
-   - **Wails desktop app** (`desktop-app/`). Primary interface, native window, Svelte 5 + TypeScript. Wails' Go side is just a window host; it does not touch the DB.
-   - **Web app** (`web-app/`). Vite + Svelte 5 + TypeScript, served on `localhost`, mirrors the desktop app. Localhost only, not exposed on the LAN.
+**The development stack and the installed stack are deliberately different**, and since 2026-09-22 they are different in one specific way: development runs the Supabase CLI's whole Docker stack, and an install runs **one plain Postgres container and one binary** (`deploy/docker-compose.yml`, `docs/INSTALL.md`). The decisive reason is not the container count — the CLI ships Kong, GoTrue, PostgREST, Realtime, Storage and Studio, all of which Stockroom has never used (§4) — it is that shipping it puts **Studio on the closet PC, on port 54323, with no authentication**: full read and write on every table, the roster included, for anyone who walks past and opens a browser.
+
+**On a developer's machine:**
+
+1. **Supabase local stack** (Docker). Used purely as the Postgres host (+ Studio for poking at data), plus migrations, `seed.sql` and the pgTAP suite. Its REST API and Auth services are unused.
+2. **Go HTTP server** (`server/`), run from the repo. The only process that talks to the database.
+3. **Frontends**, each on its own Vite/Wails origin: the **Wails desktop app** (`desktop-app/`) and the **web app** (`web-app/`) on `localhost:5173`. Both render `<StockroomApp>` out of `packages/ui` and speak HTTP to the Go server.
+
+**On the machine it is installed on:**
+
+1. **One `postgres:17` container** (`deploy/docker-compose.yml`), bound to `127.0.0.1:54322`, with a password generated at install time.
+2. **One binary** — the API, the web UI and every migration, compiled together. It applies whatever migrations are pending at boot, and serves the UI at `/` from the same origin as the API, so CORS never comes into it and `SERVER_ADDR` stops being load-bearing.
+3. **A service** — a launchd agent on macOS, a systemd unit on Linux — that starts it and restarts it if it dies. Not optional: the nightly backup is a goroutine inside the server, so "the server is running" and "backups happen" are the same fact. The Wails desktop app stays available as the nicer local window, not as a requirement.
+
+Windows is not covered by the installer yet (`TEMPLATE-TODO.md` Phase A).
 
 The USB barcode scanner plugs into this machine. Nightly, a goroutine inside the Go server exports every table to CSV into a local folder and pushes it to whichever off-site targets are configured: `rclone copy` to Google Drive, the REST API to GitHub, or both. `rclone` owns the Drive OAuth token and refresh handling (set up once from the admin panel, which drives `rclone authorize`); the Go code never talks to the Drive API directly. Specified, not yet built — see §11.
 
@@ -80,7 +90,7 @@ Why this shape:
 
 | Layer | Technology |
 |---|---|
-| Database | PostgreSQL, hosted by the Supabase local stack (Docker); migrations + seed via Supabase CLI |
+| Database | PostgreSQL 17. **Development**: the Supabase local stack (Docker), with migrations, `seed.sql` and pgTAP via the CLI. **Installed**: one `postgres:17` container (`deploy/docker-compose.yml`), migrations applied by the server itself at boot |
 | DB access | Go, `pgx/v5` + `pgxpool`, direct connection on port 54322 |
 | Backend / API | Go `net/http` server (`server/`) on localhost, JSON endpoints; logic in `internal/stockroom` |
 | Auth | Scan login (student number, no password) or typed login (student number + bcrypt password); in-memory session map in the Go server; `is_admin` flag gates the admin panel |
@@ -90,6 +100,8 @@ Why this shape:
 | Web app | Vite + Svelte 5 + TypeScript, Tailwind CSS v4. Renders the same `<StockroomApp>`; localhost only |
 | Barcode scanner | Standard USB HID keyboard-wedge scanner. Not yet tested with real hardware |
 | Backup | A scheduler goroutine in the Go server → CSV per table + sequences + manifest + zip → local folder → `rclone copy` to Google Drive and/or the GitHub REST API. No OS scheduler, no `cmd/backup`. Restore is an admin-panel feature over one `RestoreFromZip`, with `cmd/restore` as the session-free floor (§11) |
+| Schema | `supabase/migrations/*.sql`, read by **two** things: the CLI in development, and `stockroom.Migrate` at server start-up, which embeds the same directory (`supabase/embed.go`) and records into the same `supabase_migrations.schema_migrations` table |
+| Install | `scripts/install.sh` (macOS, Linux). Builds the binary, generates `.env` with a fresh database password, starts Postgres, registers the service. Re-running it is the upgrade, and it dumps the database first. `docs/INSTALL.md` |
 | Config | `.env` at repo root (Section 9), loaded into `stockroom.Config`; `Open` takes the parts the package needs as `Options`. Backup configuration is the exception: it lives in the `app_settings` row, with `.env` only seeding it on first boot |
 
 ---
@@ -209,16 +221,25 @@ stockroom/
 │   ├── photowall_drive.go     # its source: the Drive folder's manifest, and one `rclone cat`
 │   ├── photowall_image.go     # its normalizer: EXIF, ratio gate, crop, resize to one 900x600 JPEG
 │   ├── photowall_admin.go    # its admin surface: link parsing, the Drive probe, the folder switch
+│   ├── migrate.go             # applies pending migrations at boot; Supabase's own bookkeeping table
 │   └── RESTORE.md             # embedded in every zip; the instructions travel with the backup
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
+│   ├── ui.go                  # serves the embedded web UI at / and /static/; the catch-all route
 │   └── auth.go, users.go, assets.go, custody.go, kits.go, admin.go, photowall.go
+├── deploy/                    # what an INSTALL runs, as opposed to what development runs
+│   ├── docker-compose.yml     # one postgres:17, 127.0.0.1 only, password from .env, no default
+│   ├── stockroom-run.sh       # the one service entry point: wait for Docker, up the db, exec
+│   ├── com.stockroom.server.plist.template   # launchd (an AGENT: Docker Desktop needs a session)
+│   └── stockroom.service.template            # systemd (a system unit; Linux has no such problem)
 ├── cmd/restore/               # disaster CLI: calls the same RestoreFromZip as
 │                              # the admin panel, passing stockroom.LocalCLIActor() -- so RequireAdmin still
 │                              # holds, and it works with zero accounts in the database (§11)
 │                              # NB: no cmd/backup. Phase 7 schedules the backup inside the server (§11)
 ├── uploads/                   # profile + asset photos (gitignored), served at /files/
 ├── package.json               # npm workspaces: packages/*, web-app, desktop-app/frontend
+├── supabase/embed.go          # the migrations, as a Go package. ONE directory, two readers (§4)
+├── web-app/embed.go           # the built UI, as a Go package. dist/.gitkeep is tracked
 ├── packages/ui/               # @stockroom/ui: ALL frontend code. Both hosts are five lines each
 │   ├── components.json        # shadcn-svelte config; aliases are package-absolute, not $lib
 │   └── src/lib/
@@ -238,7 +259,8 @@ stockroom/
 ├── web-app/                   # Vite + Svelte 5 secondary UI
 ├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
 ├── .githooks/                 # pre-commit: runs `scripts/dev.sh test`; installed by `dev.sh deps` via core.hooksPath
-├── scripts/                   # dev.sh: the one script (up|deps|test|stop|status). dev.ps1 is its Windows
+├── scripts/                   # install.sh: the PRODUCTION install and upgrade (macOS, Linux)
+│                              # dev.sh: the one DEVELOPMENT script (up|deps|test|stop|status). dev.ps1 is its Windows
 │                              # counterpart (untested on Windows). Plus Start Stockroom.command (a
 │                              # double-click wrapper for dev.sh up)
 ├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system, backup spec)
@@ -288,6 +310,7 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `GET /admin/photo-wall`, `PUT /admin/photo-wall`, `POST /admin/photo-wall/rebuild`, `GET /admin/photo-wall/preview` | admin | the sign-in photo wall's Drive folder. **No response ever carries the folder id or a Drive URL** — a share link is a capability, so the field is write-only and the screen gets a typed label, counts and a preview strip instead. `PUT` takes `{link, label}` and parses → probes Drive → writes → tears the reel down; a folder it cannot reach writes nothing and leaves the previous one live. The preview does not mark tiles served |
 | `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
 | `GET /signin/photos` | nobody | the sign-in photo wall's batch: `{photos: [...], ttl_seconds}`. **Always 200**, with `[]` whenever the wall is off, unconfigured, warming up or drained — every one of those means "draw no columns" to the only caller, and the sign-in screen must never look broken (`docs/design/signin-photo-wall.html` §5, §9) |
+| `GET /`, `GET /static/...` | nobody | the embedded web UI (`server/ui.go`, `web-app/embed.go`). `GET /` is the **least specific pattern on the mux**, so every route above still wins and the catch-all only ever sees paths no endpoint claims; a path that is not a file in `dist` answers `index.html`, which is what makes a bookmarked `#/kits` work. The bundle directory is `static`, **not** Vite's default `assets`, because `GET /assets/{id}` is already an endpoint and a default build would have the router answer a JavaScript request with "asset not found". A binary built with an empty `dist` answers 503 in words rather than a blank page |
 | `GET /signin-photos/...` | nobody | the tiles, off `SIGNIN_PHOTOS_DIR/tiles/`. The **subdirectory**, never the cache root: the root holds `manifest.json`, which is a listing of the Drive folder, and `http.FileServer` serves any named file in a directory even though it refuses to list one |
 
 **Statuses.** `ErrNotFound` 404, `ErrInvalid` 400, `ErrUnauthorized`/`ErrBadCredentials`/`ErrPasswordNotSet` 401, `ErrForbidden` 403, `ErrConflict`/`ErrOverdueBlocked` 409, anything else 500 with the detail logged, not sent. **`ErrNotConfigured` is 503** with its message intact: an unset `UPLOADS_DIR` or `BACKUP_DIR` is neither the client's fault nor a bug, and the admin reading the response is the person who edits `.env`.
@@ -295,6 +318,15 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 ---
 
 ## 9. Setup instructions
+
+There are **two** paths now and they are not the same thing.
+
+**Installing it on the machine it will live on** — `docs/INSTALL.md`, `./scripts/install.sh`. One
+plain Postgres container, one binary, a service that restarts it. No Supabase CLI, no `seed.sql`,
+no Studio; the database starts empty and the only account is the `.env` failsafe admin. Re-running
+the installer is the upgrade, and it dumps the database before it touches anything.
+
+**Setting up to work on it** — everything below, unchanged.
 
 **Easiest path.** See `README.md`: `./scripts/dev.sh` (macOS) or `scripts\dev.ps1` (Windows) brings the whole environment up. Ctrl+C stops everything and preserves data. The same script carries every other working-copy command as a subcommand: `deps`, `test`, `stop`, `status`.
 
@@ -319,7 +351,7 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 
    `docs/BACKUP-SETUP.md` is the click-by-click setup for a non-technical admin.
 
-3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The seed creates two development accounts, both with the typed-login password `password` and both able to sign in by scanning their number instead:
+3. `supabase start` (repo root). Postgres + Studio (`http://127.0.0.1:54323`); migrations + seed apply automatically. The server would apply the same migrations itself if the CLI had not (`stockroom.Migrate`, into the same `supabase_migrations.schema_migrations` table), so this finds nothing to do and the two tools cannot disagree about what has run. The seed creates two development accounts, both with the typed-login password `password` and both able to sign in by scanning their number instead:
 
    | Student number | Name | Role |
    |---|---|---|
@@ -548,7 +580,102 @@ The Drive target was pointed at a real Google account for the first time and the
 - [x] **A test that only passed because nobody had configured Drive.** `TestSettingsAndStatusRoutes` asserted that testing an unconfigured target answers 503 — true until somebody connected a real Google account to the shared dev database, after which it was a red build saying nothing about the code. It now clears the Drive settings for that one assertion and restores them in a `defer`. The rule it stands for: a test that reads shared configuration has to establish the state it is asserting about, not hope for it.
 
 
+**Closed (2026-09-22, the production install path; `TEMPLATE-TODO.md` Phase A)**
+The one thing standing between this and a machine that runs unattended was that installing it meant
+being a developer, and that running it meant somebody having left a terminal window open. Five
+decisions, all verified against a scratch database with no Supabase anywhere.
+- [x] **Supabase is a development tool, not a deployment.** An install runs one `postgres:17`
+      (`deploy/docker-compose.yml`) and development is completely unchanged — `supabase start`, `db
+      reset`, `seed.sql`, Studio and pgTAP all still work, verified by a full reset and a green
+      suite after the change. The container count was the obvious argument and not the decisive
+      one: shipping the stack puts **Studio on the closet PC, on port 54323, with no
+      authentication** — read and write on every table, the roster included, for anyone who walks
+      past and opens a browser. The port binding is written `127.0.0.1:54322:5432` rather than the
+      short form for the same class of reason: Docker's default publishes on every interface *and
+      punches its own hole through the host firewall*, so the short form would have put the database
+      on the school network. `POSTGRES_PASSWORD` has no default, so a compose file run without one
+      refuses to start rather than booting a closet machine with `postgres:postgres` and never
+      mentioning it.
+- [x] **The migrations are embedded, and they are the same files, in the same table.** The embed
+      lives in `supabase/embed.go` — the directory the CLI already reads — rather than a copy under
+      `internal/`, because two copies are two schemas that agree until somebody edits one, and the
+      failure then is a production database shaped differently from every test that passed against
+      it. The bookkeeping table is **Supabase's own** `supabase_migrations.schema_migrations`, not a
+      second one: with two tables, a database migrated by the CLI looks unmigrated to the server, so
+      the first production start after a `db reset` would replay `create table profiles` over a live
+      schema. It is also the table `schemaVersion` already reads for the backup manifest, so the
+      restore's version check keeps working on an install that has never had the CLI near it.
+      `Migrate` is **fatal** where the failsafe admin and the backup settings are not — those are
+      features that can be absent, while a wrong schema is a server that fails on its first real
+      query, at a counter, with a student holding a camera. A file whose name carries no version
+      prefix is an error rather than a skip, because a migration silently not running is the exact
+      failure the mechanism exists to prevent.
+- [x] **`20260826180000_grant_service_role.sql` had to be made portable, by editing an applied
+      migration.** `service_role`, `anon` and `authenticated` are created by the Supabase stack and
+      do not exist on a plain Postgres, so unguarded this file stopped a fresh install at migration
+      two of ten — with an error naming a Supabase concept the person reading it had deliberately
+      never installed. It is now guarded on the roles existing, via `execute`: a literal `GRANT`
+      inside an `if exists` still fails at *parse* time, because the role is an identifier compiled
+      with the block. Editing an applied migration is safe here precisely because both readers track
+      by version and not by content.
+- [x] **One binary, serving the UI from the same origin as the API.** `web-app/embed.go` mirrors
+      what `desktop-app/main.go` has always done. Vite's `assetsDir` had to move from `assets` to
+      `static`, because the API already owns `GET /assets` and `GET /assets/{id}` — a default build
+      puts `/assets/index-a1b2c3.js` inside the equipment catalogue's route and the router answers a
+      JavaScript request with "asset not found". Renaming the bundle directory is the fix; renaming
+      a documented endpoint (§8.1) to suit a bundler is not. Same-origin serving also takes CORS out
+      of an install entirely — a same-origin request is not subject to it — which removes the single
+      most confusing failure this system can produce (§13, 2026-09-15: a blocked preflight and a
+      dead server raise the same `fetch` error, so the UI blames the server). The allow-list stays,
+      because the dev loop and the Wails window really are separate origins. `dist/.gitkeep` is
+      tracked so `go build ./...` works on a fresh clone, and `webapp.Present()` distinguishes
+      "nobody ran `npm run build`" from "the UI is missing" — identical bytes, very different
+      problems — so the server says which, in words, instead of serving a blank page.
+- [x] **The service is not optional, and on macOS it is an Agent rather than a Daemon.** The nightly
+      backup is a goroutine inside the server (§11), so "the server is running" and "backups happen"
+      are one fact, and until now it depended on somebody having left a terminal open. Both
+      platforms start `deploy/stockroom-run.sh` — one entry point, so there is no macOS copy and a
+      Linux copy to drift — which waits for the **Docker daemon** rather than the binary (the
+      difference is the whole failure mode on a machine that has just booted) and then `exec`s the
+      server, so the service manager supervises the real process rather than a live wrapper around a
+      dead one. The Mac gets a LaunchAgent because **Docker Desktop only runs inside a user
+      session**: a boot-time daemon would start, find no Docker, and give up. The accepted cost is
+      that the closet Mac has to be set to log in automatically, or a power cut leaves it at the
+      login window — running nothing, backing up nothing, saying so nowhere. `docs/INSTALL.md` says
+      that in those words. Linux has no such constraint and gets a real system unit.
+- [x] **Durability was measured, not assumed.** The question "if everything shuts down for whatever
+      reason, is the data still there" has a real answer and it was worth getting empirically. The
+      database container was SIGKILLed outright, with no clean shutdown of any kind, after an asset
+      had been created through the API; on restart Postgres ran WAL crash recovery ("redo starts at
+      0/14EF878 ... redo done") and the row was intact. The Go server's pgx pool reconnected on its
+      own once the database answered again, with no restart of the server. And launchd was watched
+      bringing the server back **two seconds** after a `kill -9`. What this leaves: `docker kill` is
+      deliberately treated by Docker as a *manual* stop, so `restart: unless-stopped` does not fire
+      for it — it fires for a genuine crash and for the machine coming back, which are the cases
+      that matter. `stop_grace_period` is set to a minute because Docker's default is **ten
+      seconds** before it SIGKILLs, and a fast shutdown whose checkpoint has a lot of dirty buffers
+      can want longer; being cut short is not data loss, it is crash recovery on every restart and a
+      frightening log on a morning when nothing is wrong.
+- [x] **Re-running the installer is the upgrade, and it dumps the database first.** From inside the
+      container, so no Postgres client is needed on a host that by design has none. A dump that
+      fails **stops** the upgrade rather than continuing: it is the only protection against a
+      migration that goes wrong, and an upgrade that skips it silently is not a trade anybody would
+      agree to if asked. `.env` is never overwritten, because the backup folder, the Drive remote
+      and the photo-wall folder are first-boot seeds that `app_settings` owns from then on — an
+      installer that rewrote them every release would be the "a value an admin typed reverts on the
+      next restart" failure the Phase 7 decision rules out.
+
 **Still open**
+- [ ] **The installer builds from a checkout**, so it needs Go and Node on the machine it is run
+      from. `.github/workflows/release.yml` exists and produces the four platform binaries, but no
+      tag has been pushed and nothing has been downloaded onto a machine that is not this one, so
+      the release-fetch path is deliberately unwritten rather than written untested
+- [ ] **Windows has no installer and no service.** `install.ps1` is not started, and `dev.ps1` has
+      still never run on real Windows hardware
+- [ ] **The machine has not been rebooted to prove the service comes back.** A `kill -9` of the
+      server was verified (launchd restarted it in two seconds) and so was the database surviving a
+      SIGKILL, but a real reboot exercises automatic login, Docker Desktop starting, and
+      `restart: unless-stopped` all at once, and none of those has been watched
 - [ ] Barcode scanner model (Week 7). Must be plain HID keyboard-wedge
 - [ ] Scan-vs-typed keystroke threshold. Ships as a named/configurable constant defaulted to 50ms; tune with real hardware in Week 7
 - [ ] Exact backup folder, photo-mirror disk and target credentials on the closet PC (blocked on the PC being provisioned). All of it is admin-panel configuration, so none of it blocked the code — `docs/BACKUP-SETUP.md` is the walkthrough for the day the machine exists

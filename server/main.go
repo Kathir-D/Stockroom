@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"stockroom/internal/stockroom"
+	"stockroom/supabase"
 )
 
 // main wires the server together in order: load config, connect to Postgres,
@@ -44,6 +46,28 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer db.Close()
+
+	// The schema, before anything reads it. An installed Stockroom has no
+	// Supabase CLI, so this is the only thing that applies a migration on that
+	// machine -- and it is also the upgrade path: a new binary carries the
+	// files, the server applies whatever is pending, and nobody is ever asked
+	// to run SQL by hand (TEMPLATE-TODO Phase A).
+	//
+	// Fatal, unlike the failsafe admin and the backup settings below. Those
+	// two are features that can be absent; a schema that is not the one this
+	// binary was built against is a server that will fail on its first real
+	// query, at a counter, with a student holding a camera. Failing here says
+	// so once, in the log, with the migration that broke named.
+	//
+	// Development is untouched: `supabase db reset` has already applied these,
+	// they are recorded in the same table, and this finds nothing to do.
+	switch applied, err := stockroom.Migrate(ctx, db.Pool, supabase.Migrations); {
+	case err != nil:
+		log.Fatalf("database schema: %v", err)
+	case len(applied) > 0:
+		log.Printf("database schema: applied %d migration(s): %s",
+			len(applied), strings.Join(applied, ", "))
+	}
 
 	// The failsafe admin (CLAUDE.md §7) is re-applied on every start so a
 	// forgotten password or a bad roster import can never lock out the admin
