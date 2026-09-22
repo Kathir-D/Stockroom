@@ -341,6 +341,20 @@
       </p>
     </div>
     <span class="flex-1"></span>
+    <Button
+      variant="ghost"
+      size="sm"
+      onclick={async () => {
+        try {
+          await api.saveSetup(1, false)
+          router.go({ name: "setup" })
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : String(err))
+        }
+      }}
+    >
+      Run the setup guide again
+    </Button>
     <Button variant="ghost" size="icon-sm" aria-label="Reload settings" onclick={load}>
       <RefreshIcon aria-hidden="true" />
     </Button>

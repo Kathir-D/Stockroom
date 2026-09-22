@@ -49,4 +49,19 @@ describe('web host', () => {
     expect(calls.every((url) => allowed.some((path) => url.endsWith(path)))).toBe(true)
     expect(await screen.findByPlaceholderText(/student number/i)).toBeInTheDocument()
   })
+
+  // A fresh install has no accounts, and the server says so on the one
+  // request sign-in already makes. The screen becomes "create the first admin"
+  // (the setup wizard's step 2) instead of asking for an ID nobody has.
+  it('offers to create the first admin on an install with no accounts', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      String(url).endsWith('/signin/config')
+        ? Promise.resolve(new Response(JSON.stringify({
+            needs_setup: true, student_number_format: 'digits', student_number_filter: '[^0-9]',
+          })))
+        : Promise.reject(new Error('no server in tests'))))
+    render(App)
+    expect(await screen.findByRole('button', {name: 'Create my account'})).toBeInTheDocument()
+    expect(screen.queryByText('Scan your student ID.')).not.toBeInTheDocument()
+  })
 })

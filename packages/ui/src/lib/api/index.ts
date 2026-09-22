@@ -39,6 +39,9 @@ import type {
   BulkPreview,
   CategoryImportResult,
   LabelLayout,
+  FirstAdminInput,
+  SetupState,
+  ExamplesResult,
   ScanResult,
   SignInPhotos,
   Settings,
@@ -108,6 +111,20 @@ export async function loginByScan(studentNumber: string) {
     method: "POST",
     anonymous: true,
     body: { student_number: studentNumber },
+  });
+  setToken(result.token);
+  return result;
+}
+
+/**
+ * The first admin, on an install with no accounts at all. The only write the
+ * server accepts with no session, and it refuses once anybody exists.
+ */
+export async function createFirstAdmin(input: FirstAdminInput) {
+  const result = await request<LoginResult>("/setup/admin", {
+    method: "POST",
+    anonymous: true,
+    body: input,
   });
   setToken(result.token);
   return result;
@@ -507,6 +524,34 @@ export function backupVersions(target: "local" | "drive" | "github") {
 /* ------------------------------------------------------------ settings ---- */
 
 /** The secrets come back blank, with a `_set` boolean beside them. */
+/* ---------------------------------------------------------------- setup ---- */
+
+export function getSetup() {
+  return request<SetupState>("/setup");
+}
+
+export function saveSetup(step: number, completed: boolean) {
+  return request<SetupState>("/setup", { method: "PUT", body: { step, completed } });
+}
+
+/** Writes the failsafe admin into the server's settings file (CLAUDE.md §7). */
+export function configureFailsafe(studentNumber: string, password: string) {
+  return request<{ ok: boolean }>("/setup/failsafe", {
+    method: "POST",
+    body: { student_number: studentNumber, password },
+  });
+}
+
+export function loadExamples() {
+  return request<ExamplesResult>("/setup/examples", { method: "POST" });
+}
+
+export function removeExamples() {
+  return request<{ assets: number; people: number; people_kept: number }>("/setup/examples", {
+    method: "DELETE",
+  });
+}
+
 export function getSettings() {
   return request<Settings>("/admin/settings");
 }

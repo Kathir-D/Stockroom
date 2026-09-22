@@ -24,6 +24,7 @@
   import { Label } from "@stockroom/ui/components/ui/label"
   import PasswordInput from "../components/app/password-input.svelte"
   import PhotoWall from "../components/app/photo-wall.svelte"
+  import FirstAdmin from "../components/app/first-admin.svelte"
   import * as api from "../api/index"
   import { attachScanner } from "../scanner"
   import {
@@ -60,9 +61,18 @@
    * cannot answer this cannot sign anybody in either.
    */
   let rule = $state<StudentNumberRule>(DIGITS_RULE)
+  /**
+   * No accounts exist yet: this screen becomes "create the first admin"
+   * (the setup wizard's step 2). The same request as the rule, so a fresh
+   * install costs sign-in nothing extra.
+   */
+  let needsSetup = $state(false)
   $effect(() => {
     api.signInConfig().then(
-      (raw) => (rule = ruleFrom(raw)),
+      (raw) => {
+        rule = ruleFrom(raw)
+        needsSetup = (raw as { needs_setup?: unknown } | null)?.needs_setup === true
+      },
       () => {},
     )
   })
@@ -313,9 +323,16 @@
     <!-- Wordmark. Left-aligned like the rest of the app; the input below it is
          what the eye needs to land on. -->
     <p class="text-2xl font-semibold tracking-tight text-fg">Stockroom</p>
-    <p class="mt-1 text-fg-muted">Media department equipment checkout</p>
+    <p class="mt-1 text-fg-muted">Equipment checkout</p>
 
-    {#if step === "number"}
+    {#if needsSetup}
+      <FirstAdmin
+        onCreated={async (result) => {
+          await session.adopt(result)
+          onSignedIn()
+        }}
+      />
+    {:else if step === "number"}
       <form
         class="mt-8 flex flex-col gap-2"
         onsubmit={(event) => {

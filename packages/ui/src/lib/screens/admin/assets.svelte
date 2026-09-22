@@ -222,6 +222,32 @@
 
   /* ------------------------------------------- barcodes and bulk ways in ---- */
 
+  /**
+   * Fake cameras that outlive setup are worse than no demo at all, because
+   * the catalogue looks authoritative and is wrong. So while the examples are
+   * loaded this screen says so, every time, with the button to remove them.
+   */
+  let examplesPresent = $state(false)
+  $effect(() => {
+    api.getSetup().then(
+      (s) => (examplesPresent = s.examples_present),
+      () => {},
+    )
+  })
+  async function removeExamples() {
+    try {
+      const r = await api.removeExamples()
+      examplesPresent = false
+      toast.success(
+        `Removed ${r.assets} example items and ${r.people} example people` +
+          (r.people_kept ? `; kept ${r.people_kept} who appear in a real item's history` : ""),
+      )
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   let barcodeTarget = $state<AssetListItem | null>(null)
   let barcodeOpen = $state(false)
 
@@ -284,6 +310,16 @@
       New asset
     </Button>
   </div>
+
+  {#if examplesPresent}
+    <div class="flex items-center gap-3 rounded-xl border border-line-strong bg-surface p-3 text-sm">
+      <p class="flex-1 text-fg-muted">
+        The example items and people from setup are still here. Remove them once your own equipment
+        is in, so nobody tries to borrow a camera that doesn't exist.
+      </p>
+      <Button variant="secondary" onclick={removeExamples}>Remove the examples</Button>
+    </div>
+  {/if}
 
   {#if error}
     <EmptyState title="Couldn't load assets" description={error}>

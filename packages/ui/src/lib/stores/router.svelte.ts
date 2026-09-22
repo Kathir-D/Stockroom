@@ -14,6 +14,7 @@ export type Route =
   | { name: "cart" }
   | { name: "kits" }
   | { name: "history" }
+  | { name: "setup" }
   | { name: "admin"; tab: AdminTab }
 
 export type AdminTab =
@@ -45,6 +46,8 @@ function parse(hash: string): Route {
       return { name: "kits" }
     case "history":
       return { name: "history" }
+    case "setup":
+      return { name: "setup" }
     case "admin": {
       const tab = rest[0]
       return { name: "admin", tab: ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : "assets" }
@@ -64,6 +67,8 @@ function serialise(route: Route): string {
       return "#/kits"
     case "history":
       return "#/history"
+    case "setup":
+      return "#/setup"
     case "admin":
       return `#/admin/${route.tab}`
     case "browse":

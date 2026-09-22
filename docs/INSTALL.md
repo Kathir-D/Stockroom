@@ -87,27 +87,39 @@ systemd unit that starts at boot.
 
 ## After it is running
 
-Open `http://127.0.0.1:8080` and sign in as the failsafe admin.
+Open `http://127.0.0.1:8080`. **The database is empty** — no categories, no
+equipment, no accounts except the failsafe admin if you gave the installer one.
+That is correct; it is the difference between an install and the development
+seed, which never loads here.
 
-**The database is empty.** There are no categories, no assets and no other
-accounts — that is correct, and it is the difference between an install and the
-development seed. In order:
+A **setup guide** walks through the rest, and saves as it goes, so you can stop
+and come back:
 
-1. **Admin → Settings** → set the backup folder, then press **Back up now** and
-   confirm the files landed where you expect. A backup folder must be a **full
-   path**; a relative one is refused rather than quietly resolved against
-   whatever directory the service started in.
-2. **Admin → Categories** → build your Type → Category → Model tree.
-   `examples/categories.media-department.md` is the media department's, as an example of the shape.
-3. **Admin → Assets** → add your equipment. Each unit needs a serial number;
-   that is what the barcode encodes and what a scan looks up.
-4. **Admin → Users** → import your roster CSV.
+- **If you skipped the failsafe admin**, the page asks you to create the first
+  admin account right there — what your ID numbers look like, your number,
+  your name and a password. That form only exists while there are no accounts
+  at all.
+- **If you gave the installer a failsafe admin**, sign in as it and the guide
+  opens by itself.
 
-> **You cannot print barcodes yet.** Nothing in Stockroom generates one, for an
-> asset or for an ID card — it is the first item of `TEMPLATE-TODO.md` Phase B.
-> Until it exists, a unit is scannable only if it already carries a unique
-> barcode from its manufacturer (plenty of gear does, and that barcode is a
-> perfectly good serial number), or if you produce stickers some other way.
+The guide then covers: the spare "safety net" account (written into `.env` for
+you, so it survives the database being lost), lending rules, your equipment
+(upload a category list and a spreadsheet, add batches of identical items, or
+load a few obviously-fake examples to try it out first), your class list, and a
+backup folder — finishing with **Run a backup now and show me it worked**. A
+backup folder must be a **full path**; a relative one is refused rather than
+quietly resolved against whatever directory the service started in.
+
+Afterwards, **Admin → Assets → Print labels** makes a PDF of barcode stickers
+at the exact size of the sheet you bought. Print it at 100%, never "fit to
+page". Anything that already carries a unique barcode from its manufacturer can
+use that as its serial and needs no sticker. **Admin → Users → Print ID cards**
+does the same for student cards, for schools whose cards carry no barcode.
+
+The files in [`examples/`](../examples/) show every upload's shape.
+
+Skipping the guide is fine: **Admin → Settings → Run the setup guide again**
+brings it back, and everything it does is also on the ordinary admin screens.
 
 ---
 

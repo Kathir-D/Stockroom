@@ -623,3 +623,30 @@ export interface LabelLayout {
   max_serial_chars: number;
   hint: string;
 }
+
+/* ----------------------------------------------------- the setup wizard ---- */
+
+export interface FirstAdminInput {
+  student_number: string;
+  first_name: string;
+  last_name: string;
+  password: string;
+  student_number_format: "digits" | "alphanumeric" | "custom";
+  student_number_pattern: string;
+}
+
+export interface SetupState {
+  needs_admin: boolean;
+  step: number;
+  completed: boolean;
+  failsafe_configured: boolean;
+  failsafe_writable: boolean;
+  examples_present: boolean;
+}
+
+export interface ExamplesResult {
+  categories: CategoryImportResult;
+  assets: AssetImportResult;
+  people: RosterResult;
+  skipped?: string[];
+}
