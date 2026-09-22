@@ -183,13 +183,28 @@ func ensureCategoryPath(ctx context.Context, tx pgx.Tx, created map[string]strin
 				MaxCategoryDepth, depth+1)
 		}
 
+		// A savepoint per insert. Without one, the first unique violation
+		// aborts the whole transaction and every later row fails with
+		// "current transaction is aborted" -- so the report counted rows that
+		// had nothing wrong with them as failures, and named the real problem
+		// only by luck of it being first. The import still commits nothing
+		// when anything failed; this only keeps the report honest.
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return "", madeAny, mapPgError("create category", err)
+		}
 		var id string
-		err := tx.QueryRow(ctx, `
+		err = sp.QueryRow(ctx, `
 			insert into categories (name, parent_id, sort_order)
 			values ($1, $2, coalesce(
 				(select max(sort_order) + 1 from categories
 				  where parent_id is not distinct from $2), 0))
 			returning id`, name, parentID).Scan(&id)
+		if err == nil {
+			err = sp.Commit(ctx)
+		} else {
+			_ = sp.Rollback(ctx)
+		}
 		if err != nil {
 			mapped := mapPgError("create category", err)
 			if errors.Is(mapped, ErrConflict) {

@@ -1,6 +1,8 @@
 package stockroom
 
 import (
+	"github.com/jackc/pgx/v5"
+
 	"context"
 	"encoding/csv"
 	"errors"
@@ -40,6 +42,9 @@ type AssetImportRow struct {
 	Name         string `json:"name"`
 	Action       string `json:"action"` // created | updated | failed
 	Error        string `json:"error,omitempty"`
+	// Note says what an update replaced, naming the item that already had
+	// this serial, so an upsert is never a silent overwrite.
+	Note string `json:"note,omitempty"`
 }
 
 // ImportAssets upserts units from a CSV keyed on serial_number.
@@ -122,7 +127,8 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 			continue
 		}
 
-		action, err := db.importAssetRow(ctx, tree, byName, get, row)
+		action, note, err := db.importAssetRow(ctx, actor, tree, byName, get, row)
+		row.Note = note
 		switch {
 		case err != nil:
 			row.Action = "failed"
@@ -148,17 +154,17 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 // eight megabytes is a whole school's inventory many times over.
 const maxAssetImportBytes = 8 << 20
 
-func (db *DB) importAssetRow(ctx context.Context, tree categoryTree, byName map[string][]string, get func(string) string, row AssetImportRow) (RosterAction, error) {
+func (db *DB) importAssetRow(ctx context.Context, actor Actor, tree categoryTree, byName map[string][]string, get func(string) string, row AssetImportRow) (RosterAction, string, error) {
 	if row.SerialNumber == "" {
-		return "", errors.New("no serial number, and the serial is what the barcode encodes")
+		return "", "", errors.New("no serial number, and the serial is what the barcode encodes")
 	}
 	if row.Name == "" {
-		return "", errors.New("no name")
+		return "", "", errors.New("no name")
 	}
 
 	categoryID, err := resolveImportCategory(tree, byName, get("category"), get("model"))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	desc := optional(get("description"))
@@ -184,35 +190,43 @@ func (db *DB) importAssetRow(ctx context.Context, tree categoryTree, byName map[
 			 where id = $1`,
 			existingID, row.Name, desc, cond, categoryID)
 		if err != nil {
-			return "", mapPgError("update asset", err)
+			return "", "", mapPgError("update asset", err)
 		}
-		return RosterUpdated, nil
+		// The sentence the work list asked for: what was already there, and
+		// since when, so a serial typed twice by mistake is visible in the
+		// report rather than discovered as a renamed camera next term.
+		return RosterUpdated, fmt.Sprintf("You already had an item with this serial: %s (added %s). It was updated to match this row.",
+			existingName, createdAt.Format("2 Jan 2006")), nil
 
-	case errors.Is(mapPgError("read asset", err), ErrNotFound):
+	// pgx.ErrNoRows, not mapPgError: that maps constraint codes and passes
+	// ErrNoRows through untouched, so matching ErrNotFound here sent every
+	// NEW serial to the default branch and the import could only ever
+	// update -- a file of three hundred new items failed three hundred times.
+	case errors.Is(err, pgx.ErrNoRows):
 		status := strings.ToLower(get("status"))
 		if status == "" {
 			status = string(StatusAvailable)
 		}
 		if status != string(StatusAvailable) && status != string(StatusUnavailable) {
-			return "", fmt.Errorf("status %q is not one this import accepts (available or unavailable); an item becomes checked_out by being checked out, not by a spreadsheet", get("status"))
+			return "", "", fmt.Errorf("status %q is not one this import accepts (available or unavailable); an item becomes checked_out by being checked out, not by a spreadsheet", get("status"))
 		}
 		_, err := db.Pool.Exec(ctx, `
-			insert into assets (name, description, serial_number, condition, category_id, status)
-			values ($1, $2, $3, $4, $5, $6)`,
-			row.Name, desc, row.SerialNumber, cond, categoryID, status)
+			insert into assets (name, description, serial_number, condition, category_id, status, created_by)
+			values ($1, $2, $3, $4, $5, $6, $7)`,
+			row.Name, desc, row.SerialNumber, cond, categoryID, status, actor.ID)
 		if err != nil {
 			mapped := mapPgError("create asset", err)
 			if errors.Is(mapped, ErrConflict) {
 				// Two rows in the same file sharing a serial: the first
 				// created it, so the read above missed it.
-				return "", fmt.Errorf("serial %q appears more than once in this file", row.SerialNumber)
+				return "", "", fmt.Errorf("serial %q appears more than once in this file", row.SerialNumber)
 			}
-			return "", mapped
+			return "", "", mapped
 		}
-		return RosterCreated, nil
+		return RosterCreated, "", nil
 
 	default:
-		return "", mapPgError("read asset", err)
+		return "", "", mapPgError("read asset", err)
 	}
 }
 

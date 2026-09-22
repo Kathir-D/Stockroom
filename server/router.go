@@ -47,6 +47,7 @@ func newRouter(d deps) http.Handler {
 	// there is no session to require yet. Both routes are nil-safe on a reel
 	// that was never built, which is the common case -- see server/photowall.go.
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
+	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
 	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))
 
 	// A limited session (scan login, no password yet) may only set its
@@ -113,6 +114,10 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /users/cards.pdf", d.withSession(d.handlePrintUserCards, fullOnly))
 	mux.Handle("GET /assets/{id}/barcode.png", d.withSession(d.handleAssetBarcodePNG, fullOnly))
 
+	mux.Handle("POST /assets/import", d.withSession(d.handleImportAssets, fullOnly))
+	mux.Handle("POST /assets/bulk-preview", d.withSession(d.handleBulkPreview, fullOnly))
+	mux.Handle("POST /assets/bulk", d.withSession(d.handleBulkAdd, fullOnly))
+	mux.Handle("POST /categories/import", d.withSession(d.handleImportCategories, fullOnly))
 	mux.Handle("POST /categories", d.withSession(d.handleCreateCategory, fullOnly))
 	mux.Handle("PUT /categories/{id}", d.withSession(d.handleUpdateCategory, fullOnly))
 	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
