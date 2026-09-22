@@ -17,8 +17,12 @@ on:
   # itself can be proven before a tag depends on it.
   workflow_dispatch:
 
+# Read-only by default. The build job runs `npm ci`, which runs dependency
+# lifecycle scripts, so a write token there is a write token handed to every
+# package in the lockfile. Only `publish` -- which runs no third-party code
+# beyond the release action -- gets to write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -35,6 +39,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -83,9 +89,11 @@ jobs:
     # Only a tag publishes. A manual run stops after the matrix, which is what
     # makes this workflow safe to exercise.
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    # No checkout: this job only downloads the artefacts and creates the
+    # release, and a checkout would be one more place the token is persisted.
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           path: artifacts

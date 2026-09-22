@@ -13,6 +13,16 @@ Description=Stockroom equipment checkout server
 After=network-online.target docker.service
 Wants=network-online.target
 
+# These two are [Unit] options; systemd silently ignores them under
+# [Service], which is where they first sat.
+#
+# Bound the crash loop rather than letting it spin: five failures inside two
+# minutes stops the unit, which is a state `systemctl status` reports plainly.
+# Without this a binary that cannot reach its database restarts forever and the
+# journal says the same thing ten thousand times.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=__USER__
@@ -24,13 +34,6 @@ ExecStart=__STOCKROOM_HOME__/stockroom-run.sh
 # that is not backing up, and the two are indistinguishable from outside.
 Restart=always
 RestartSec=10
-
-# Bound the crash loop rather than letting it spin: five failures inside two
-# minutes stops the unit, which is a state `systemctl status` reports plainly.
-# Without this a binary that cannot reach its database restarts forever and the
-# journal says the same thing ten thousand times.
-StartLimitIntervalSec=120
-StartLimitBurst=5
 
 StandardOutput=append:__STOCKROOM_HOME__/logs/server.log
 StandardError=append:__STOCKROOM_HOME__/logs/server.log

@@ -14,6 +14,11 @@
 #     ./scripts/install.sh                 # install or upgrade in ~/Stockroom
 #     ./scripts/install.sh --home /opt/stockroom
 #     ./scripts/install.sh --no-service    # set it up but don't register it
+#     ./scripts/install.sh --admin-number 123456 --admin-password-file pw.txt
+#
+# The failsafe password is read from a file (or `-` for stdin), never from an
+# argument: arguments are readable by every local user through `ps` and
+# /proc/<pid>/cmdline, and they land in shell history.
 #
 # Running it a second time is the UPGRADE path: it takes a database dump
 # first, rebuilds, swaps the binary and restarts the service. That is why "it
@@ -45,7 +50,8 @@ err()  { echo "  [ERROR] $*" >&2; }
 die()  { err "$@"; exit 1; }
 
 usage() {
-  sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  # The header comment, however long it grows: line 3 to the first non-comment.
+  awk 'NR>=3 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
   exit 0
 }
 
@@ -54,7 +60,14 @@ while [ $# -gt 0 ]; do
     --home)           STOCKROOM_HOME="$2"; shift 2 ;;
     --addr)           SERVER_ADDR="$2"; shift 2 ;;
     --admin-number)   ADMIN_NUMBER="$2"; shift 2 ;;
-    --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
+    --admin-password-file)
+      # First line only, so a trailing newline in the file is not part of it.
+      if [ "$2" = - ]; then IFS= read -r ADMIN_PASSWORD || true
+      else IFS= read -r ADMIN_PASSWORD < "$2" || [ -n "$ADMIN_PASSWORD" ] || die "could not read $2"
+      fi
+      shift 2 ;;
+    --admin-password)
+      die "--admin-password is not accepted: an argument is visible to every user on this machine. Use --admin-password-file FILE (or - for stdin)." ;;
     --no-service)     INSTALL_SERVICE=0; shift ;;
     --no-open)        OPEN_BROWSER=0; shift ;;
     -h|--help)        usage ;;
@@ -112,25 +125,39 @@ if [ -x "$STOCKROOM_HOME/stockroom" ]; then
   say "Found an existing install. This is an upgrade."
 
   mkdir -p "$STOCKROOM_HOME/backups"
+  chmod 700 "$STOCKROOM_HOME/backups"
   dump="$STOCKROOM_HOME/backups/pre-upgrade-$(date +%Y%m%d-%H%M%S).sql"
 
   # pg_dump from inside the container, so no Postgres client is needed on the
-  # host -- there isn't one on a machine installed this way, by design. If the
-  # container is not running there is nothing to dump and nothing at risk.
-  if docker compose -f "$STOCKROOM_HOME/docker-compose.yml" --env-file "$STOCKROOM_HOME/.env" ps --status running --quiet db 2>/dev/null | grep -q .; then
-    say "  Taking a database dump first: $(basename "$dump")"
-    if docker compose -f "$STOCKROOM_HOME/docker-compose.yml" --env-file "$STOCKROOM_HOME/.env" \
-         exec -T db pg_dump -U postgres postgres > "$dump" 2>/dev/null; then
-      ok "dumped $(wc -c < "$dump" | tr -d ' ') bytes"
-    else
-      rm -f "$dump"
-      # Stop rather than continue. The dump is the only thing standing between
-      # a bad migration and a lost inventory, and an upgrade that skips it
-      # silently is exactly the trade nobody would agree to if asked.
-      die "could not dump the database. Not upgrading. Start the database and try again, or pass --no-service and upgrade by hand."
-    fi
+  # host -- there isn't one on a machine installed this way, by design.
+  compose() { docker compose -f "$STOCKROOM_HOME/docker-compose.yml" --env-file "$STOCKROOM_HOME/.env" "$@"; }
+
+  # A stopped container is not an absent database: the named volume is still
+  # there, and step 6 starts it and the new binary migrates it. So a stopped
+  # database is started and dumped like a running one, and one that cannot be
+  # started stops the upgrade -- "nothing to dump" was never knowable from here.
+  if ! compose ps --status running --quiet db 2>/dev/null | grep -q .; then
+    say "  The database is stopped; starting it so it can be dumped first..."
+    compose up -d db >/dev/null 2>&1 || die "could not start the existing database to dump it. Not upgrading. If 'supabase start' is running on this machine, run 'supabase stop' and try again."
+  fi
+  deadline=$(( $(date +%s) + 60 ))
+  until compose exec -T db pg_isready -U postgres -q 2>/dev/null; do
+    [ "$(date +%s)" -lt "$deadline" ] || die "the database did not become ready within a minute. Not upgrading."
+    sleep 2
+  done
+
+  say "  Taking a database dump first: $(basename "$dump")"
+  # umask in a subshell so the dump is created 600 from its first byte: it is
+  # the whole roster, and the caller's umask is usually 022. Setting it for
+  # the whole script would leave the build tree and node_modules private too.
+  if ( umask 077; compose exec -T db pg_dump -U postgres postgres > "$dump" 2>/dev/null ); then
+    ok "dumped $(wc -c < "$dump" | tr -d ' ') bytes"
   else
-    warn "the database container is not running, so there is nothing to dump"
+    rm -f "$dump"
+    # Stop rather than continue. The dump is the only thing standing between
+    # a bad migration and a lost inventory, and an upgrade that skips it
+    # silently is exactly the trade nobody would agree to if asked.
+    die "could not dump the database. Not upgrading. Start the database and try again, or pass --no-service and upgrade by hand."
   fi
 fi
 
@@ -204,9 +231,24 @@ else
     read -r ADMIN_NUMBER
     if [ -n "$ADMIN_NUMBER" ]; then
       printf "  Failsafe admin password (8 characters or more, hidden): "
-      read -rs ADMIN_PASSWORD
+      IFS= read -rs ADMIN_PASSWORD
       echo ""
     fi
+  fi
+
+  # The value is written single-quoted, which both godotenv and Compose read
+  # literally: unquoted, godotenv expands `$HOME` inside a password and the
+  # password typed here stops being the one that signs in. A single quote is
+  # the one character that form cannot hold, so it is refused by name.
+  case "$ADMIN_PASSWORD$ADMIN_NUMBER" in
+    *"'"*) die "the failsafe admin number and password cannot contain a single quote (') -- choose another." ;;
+  esac
+  # 8 to 72, the range every other password in the system is held to (§7).
+  # The failsafe does not fail the server on a bad value, it logs and skips --
+  # which here would mean an install that finishes with no way in.
+  if [ -n "$ADMIN_PASSWORD" ]; then
+    pwbytes=$(printf '%s' "$ADMIN_PASSWORD" | LC_ALL=C wc -c | tr -d ' ')
+    [ "$pwbytes" -ge 8 ] && [ "$pwbytes" -le 72 ] || die "the failsafe admin password must be 8 to 72 characters."
   fi
 
   umask 077
@@ -228,8 +270,8 @@ SERVER_ADDR=${SERVER_ADDR}
 
 # The failsafe admin (CLAUDE.md §7). Blank is allowed; the server logs a
 # warning and starts anyway, and the backup screen says so out loud.
-ADMIN_STUDENT_NUMBER=${ADMIN_NUMBER}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
+ADMIN_STUDENT_NUMBER='${ADMIN_NUMBER}'
+ADMIN_PASSWORD='${ADMIN_PASSWORD}'
 
 UPLOADS_DIR=${STOCKROOM_HOME}/uploads
 

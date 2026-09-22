@@ -58,8 +58,11 @@ It will:
 6. register the service and wait until `/health` answers before it says it is
    done.
 
-Useful flags: `--home /some/path`, `--no-service`, `--no-open`,
-`--admin-number` / `--admin-password` for an unattended run.
+Useful flags: `--home /some/path`, `--no-service`, `--no-open`, and
+`--admin-number 123456 --admin-password-file pw.txt` for an unattended run (use
+`-` instead of a file name to pipe the password in). There is deliberately no
+`--admin-password`: anything on a command line is visible to every user of the
+machine and ends up in shell history.
 
 ### The failsafe admin
 
@@ -125,7 +128,10 @@ swaps the binary and restarts the service. The server applies any new
 migrations at start-up. Your `.env` is never overwritten — backup settings live
 in the database now, not in that file.
 
-If the dump fails, the upgrade stops rather than continuing. That is the only
+If the database container is stopped, the installer starts it and dumps it
+anyway — a stopped container still holds all your data, and the new version is
+about to migrate it. If the dump fails, or the database cannot be started, the
+upgrade stops rather than continuing. That is the only
 protection against a migration that goes wrong, and an upgrade that skips it
 silently is not a trade anybody would agree to if asked.
 
