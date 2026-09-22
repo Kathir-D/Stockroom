@@ -3,15 +3,14 @@ package stockroom
 import (
 	"errors"
 	"fmt"
-	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 // Password and student-number bounds, enforced by every path that sets a
-// password or accepts a student number.
+// password or accepts a student number. What a student number may *contain*
+// is a setting rather than a constant -- see student_number.go.
 const (
 	// MinPasswordLength and MaxPasswordLength are the 8-to-72 range CLAUDE.md
 	// §7 sets for every place a password is chosen: first-login setup, admin
@@ -91,23 +90,4 @@ func CheckPassword(hash *string, password string) error {
 		// with a misleading message.
 		return fmt.Errorf("check password: %w", err)
 	}
-}
-
-// NormalizeStudentNumber trims whitespace and checks the value is all digits,
-// which is what the ID-card barcode encodes (CLAUDE.md §1). The number is kept
-// as text so leading zeros survive.
-func NormalizeStudentNumber(s string) (string, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", fmt.Errorf("%w: student number is required", ErrInvalid)
-	}
-	if len(s) > MaxStudentNumberLength {
-		return "", fmt.Errorf("%w: student number is at most %d digits", ErrInvalid, MaxStudentNumberLength)
-	}
-	for _, r := range s {
-		if !unicode.IsDigit(r) {
-			return "", fmt.Errorf("%w: student number must be digits only", ErrInvalid)
-		}
-	}
-	return s, nil
 }

@@ -101,6 +101,18 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /assets/{id}", d.withSession(d.handleDeleteAsset, fullOnly))
 	mux.Handle("POST /assets/{id}/status", d.withSession(d.handleSetAssetStatus, fullOnly))
 	mux.Handle("POST /assets/{id}/photo", d.withSession(d.handleSetAssetPhoto, fullOnly))
+	// Barcodes and printable sheets (TEMPLATE-TODO Phase B). Admin-only,
+	// enforced inside internal/stockroom. `labels.pdf` and `cards.pdf` are
+	// POSTs because the id list can be hundreds of UUIDs; see server/labels.go.
+	//
+	// `GET /assets/{id}/barcode.png` is registered before nothing in
+	// particular -- Go's mux prefers the most specific pattern, so it wins over
+	// `GET /assets/{id}` without either needing to know about the other.
+	mux.Handle("GET /labels/layouts", d.withSession(d.handleLabelLayouts, fullOnly))
+	mux.Handle("POST /assets/labels.pdf", d.withSession(d.handlePrintAssetLabels, fullOnly))
+	mux.Handle("POST /users/cards.pdf", d.withSession(d.handlePrintUserCards, fullOnly))
+	mux.Handle("GET /assets/{id}/barcode.png", d.withSession(d.handleAssetBarcodePNG, fullOnly))
+
 	mux.Handle("POST /categories", d.withSession(d.handleCreateCategory, fullOnly))
 	mux.Handle("PUT /categories/{id}", d.withSession(d.handleUpdateCategory, fullOnly))
 	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
