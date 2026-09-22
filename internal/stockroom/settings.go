@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -213,9 +215,15 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	next := cur
 	if in.BackupDir != nil {
 		next.BackupDir = strings.TrimSpace(*in.BackupDir)
+		if err := validateDir("backup_dir", next.BackupDir); err != nil {
+			return Settings{}, err
+		}
 	}
 	if in.PhotoBackupDir != nil {
 		next.PhotoBackupDir = strings.TrimSpace(*in.PhotoBackupDir)
+		if err := validateDir("photo_backup_dir", next.PhotoBackupDir); err != nil {
+			return Settings{}, err
+		}
 	}
 	if in.KeepDays != nil {
 		next.KeepDays = *in.KeepDays
@@ -345,6 +353,39 @@ func (s Settings) validate() error {
 	return nil
 }
 
+// validateDir refuses a folder that is not a full path.
+//
+// It is called from SaveSettings per field rather than from validate(), which
+// re-checks the whole merged row: every card on the settings screen saves on
+// its own (§13, 2026-09-17), so a bad value left in one card must not be able
+// to refuse an unrelated save in another and report it against a field the
+// admin cannot see from there.
+func validateDir(field, dir string) error {
+	if dir == "" || filepath.IsAbs(dir) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s must be a full path, %s, got %q", ErrInvalid, field, absHint, dir)
+}
+
+// absHint says what a full path looks like on this machine. "Must be absolute"
+// is jargon; the admin is reading a Finder or Explorer window, and the mistake
+// this catches is copying a path out of one and losing the leading separator.
+//
+// Why a relative folder is refused rather than resolved: it is interpreted
+// against whatever directory the server happened to be started in, which is
+// the repository root under `dev.sh`, `System32` under a Windows service, and
+// `/` under launchd. The run then succeeds -- files are written, the manifest
+// checks out, every screen says the backup worked -- while the archive sits
+// somewhere nobody will ever look. That is precisely the failure mode this
+// whole subsystem exists to make impossible (docs/design/backup.md §A), and it
+// is worth one refusal beside the field to prevent.
+var absHint = func() string {
+	if runtime.GOOS == "windows" {
+		return `starting with a drive letter, for example C:\Stockroom\backups`
+	}
+	return "starting with a slash, for example /Users/you/Stockroom-backups"
+}()
+
 // validateRepo checks the owner/repository shape the GitHub target pastes into
 // its URLs. Catching it here turns a 404 from api.github.com at 2 a.m. into a
 // message beside the field the admin is typing into.
@@ -401,7 +442,7 @@ func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) 
 			drive_remote     = coalesce(drive_remote,     nullif($3, '')),
 			env_seeded       = true
 		where id = true and not env_seeded`,
-		strings.TrimSpace(cfg.BackupDir), strings.TrimSpace(cfg.PhotoBackupDir),
+		absoluteDir(cfg.BackupDir), absoluteDir(cfg.PhotoBackupDir),
 		strings.TrimSpace(cfg.RcloneRemote))
 	if err != nil {
 		return Settings{}, fmt.Errorf("seed settings from environment: %w", err)
@@ -434,6 +475,28 @@ func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) 
 	return db.loadSettings(ctx)
 }
 
+// absoluteDir resolves a folder from .env against the working directory, so the
+// column ends up holding the same kind of value SaveSettings insists on. A
+// relative BACKUP_DIR is reasonable in a developer's .env (`./backups`, beside
+// the repo) and meaningless once the same binary is started by a service from
+// a different directory; resolving it at seed time fixes the meaning to the
+// place the person who wrote it meant.
+//
+// It never fails: EnsureSettings runs on the start-up path, and a folder that
+// cannot be resolved must not be able to stop the API from starting, the same
+// way a malformed failsafe admin does not (CLAUDE.md §7).
+func absoluteDir(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return abs
+}
+
 // backupDir resolves where this run writes: the DB field first, the settings
 // row second.
 //
@@ -454,6 +517,18 @@ func (db *DB) backupDir(ctx context.Context) (string, Settings, error) {
 	if dir == "" {
 		return "", s, fmt.Errorf("%w: no backup folder is set. Open Admin → Settings and choose where backups should be written", ErrNotConfigured)
 	}
+	// The stored value is re-checked here, not only where it was typed.
+	// validateDir has refused a relative folder at the settings screen since
+	// 2026-09-21, but the database that produced that decision already held
+	// one, and nothing rewrites a column on upgrade. Resolving it now against
+	// whatever directory the server started in is exactly the silent success
+	// the decision rules out -- a complete archive, a manifest that verifies,
+	// every screen reporting a healthy backup, and the files somewhere nobody
+	// looks. Refusing before the run starts makes it an unconfigured folder,
+	// which the backup screen and the sign-in warning already say out loud.
+	if !filepath.IsAbs(dir) {
+		return "", s, fmt.Errorf("%w: the backup folder %q is not a full path, so which folder it means depends on where the server was started. Open Admin → Settings and enter one %s", ErrNotConfigured, dir, absHint)
+	}
 	return dir, s, nil
 }
 
@@ -462,8 +537,17 @@ func (db *DB) backupDir(ctx context.Context) (string, Settings, error) {
 // "photos are not being mirrored" -- so this returns "" rather than
 // ErrNotConfigured and lets each caller decide.
 func (db *DB) photoBackupDir(s Settings) string {
-	if db.PhotoBackupDir != "" {
-		return db.PhotoBackupDir
+	dir := db.PhotoBackupDir
+	if dir == "" {
+		dir = s.PhotoBackupDir
 	}
-	return s.PhotoBackupDir
+	// A folder that is not a full path is the unconfigured state here too, for
+	// backupDir's reason: a stored relative value predates validateDir, and a
+	// mirror written to a folder that moves with the working directory is the
+	// same silent success. "" is the answer every caller already handles, and
+	// PhotoMirrorStatus says which of the two empties this is.
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	return dir
 }

@@ -1,6 +1,23 @@
 # Stockroom: backend and functionality to-do
 
+> **Closed, 2026-09-21. 126 of 129 items done; none of the three left is blocked on anything in
+> this file.** Two wait on hardware and credentials — a scanner nobody has bought, a GitHub
+> repository nobody has created. The third, the configuration-only run-through from a fresh clone,
+> waits on work as well as credentials: it asks whether the whole system can be set up without
+> opening a text editor, and the install and configuration path that has to be true of is the
+> `TEMPLATE-TODO.md` track, which is still being built.
+>
+> Phases 0 to 8 shipped, which is the whole build list. This file is kept as the record of what was
+> built and why — `CLAUDE.md` §13 and `README.md` both reference it, and it is the only place
+> several implementation decisions are written down.
+>
+> **The active list is [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md)** — turning this into something
+> another school can install. The three items still open below are carried into its Phase T10, so
+> nothing is tracked only here.
+
 Backend/functionality work only (no UI/layout/styling; UI is planned separately). `CLAUDE.md` is the architecture/decision reference; this file is the ordered work list. Phases map to the Week 5 to 9 timeline in CLAUDE.md §12.
+
+**Scope note.** This file is the build of Stockroom *for one department*. Turning it into something another school can install — packaging, configurable policy, the install path, the docs for a non-developer, and the GitHub setup that distributes it — is a separate track in [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md).
 
 **Shape of the work.** All logic lives in Go, in `internal/stockroom`. `server/` exposes it as a localhost JSON API. Both the Wails desktop app and the web-app are thin Svelte UIs calling that API via `fetch` (`lib/api.ts`). No supabase-js, no DB credentials in TypeScript. Postgres keeps running inside the Supabase Docker stack; Go connects on port 54322.
 
@@ -188,7 +205,7 @@ Nothing off-site · photos never backed up · `assets_asset_tag_seq` (`last_valu
 - [x] **The round-trip**: `supabase db reset` → restore → row counts match the manifest, `assets_asset_tag_seq` resumes at **the captured value, not 1** (read it before backing up; it was 89 when Phase 7 was specced and 130 the next day, so never hard-code it), no spurious `activity_log` rows, seeded accounts still sign in. Cover both sequence states — a used sequence over a populated table, and a never-read one (`is_called = false`) over an empty table, where `nextval` must return the start value and not start + 1. Closes CLAUDE.md §11's outstanding restore test.
 
   **Done, twice over.** `TestRestoreRoundTrip` and `TestSequenceStateSurvivesARoundTrip` do it against the live database in the Go suite, `TestBackupThenRestoreOverHTTP` does it over the HTTP routes the admin panel calls, and it was also run by hand through the UI: an asset created *after* the backup was correctly gone afterwards, 86 rows across 13 tables came back, `activity_log` stayed at 0 rows, and `assets_asset_tag_seq` resumed at 267 — its captured value, read at the time, not a constant
-- [ ] Both targets at once; break one, confirm the other still succeeds and the status names which failed. **Blocked on credentials**: no Google account has been connected and no GitHub repository created, so both target implementations are unit-tested and hand-read but never round-tripped against the real services. The local target is verified end to end
+- [ ] Both targets at once; break one, confirm the other still succeeds and the status names which failed. **Blocked on credentials**: Drive has now run against a real Google account (2026-09-21) but no GitHub repository has been created, so the two have never been up together and the REST API path has never been round-tripped. The local target is verified end to end
 - [ ] A config-only run-through from a fresh clone, without opening a text editor. Same blocker
 
 ## Phase 8: Kits (Week 9) — **built 2026-09-18**

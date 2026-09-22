@@ -99,3 +99,5 @@ web-app/dist/
 # Verified by building with the directory absent: svelte-check, vite build and
 # `go build ./...` all pass.
 desktop-app/frontend/wailsjs/
+.backup-test/
+.env.bak.*
