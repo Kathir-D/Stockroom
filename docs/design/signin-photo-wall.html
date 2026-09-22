@@ -1031,23 +1031,79 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <tr><td><code>SIGNIN_PHOTOS_DIR</code> names a directory holding files the server did not write</td><td>Refused at startup, nothing deleted, one warning naming the variable, feature off. The server starts normally (§2).</td></tr>
 <tr><td>Cache directory unwritable (permissions, missing parent, full disk at boot)</td><td>Same: warning, feature off, API up. Nothing about the wall is ever fatal to startup.</td></tr>
 <tr><td><code>rclone</code> not installed</td><td>Logged once at startup as a warning; the reel starts with no source, so it idles empty and hands out nothing. Never fatal — same posture as the failsafe admin (CLAUDE.md §7).</td></tr>
-<tr><td>No Drive folder chosen yet</td><td>Normal, not an error: nothing is listed, the endpoint returns <code>[]</code>, and one line at startup says the wall will stay empty.</td></tr>
-<tr><td>No internet</td><td>Manifest refresh and fetches fail, logged at debug with backoff. The reel drains, the endpoint returns <code>[]</code>, the wall disappears.</td></tr>
-<tr><td>Manifest still building</td><td><code>[]</code> until the first listing completes.</td></tr>
-<tr><td>Folder empty / all files rejected</td><td>Filler backs off after 25 consecutive rejections and logs a single explanatory line.</td></tr>
-<tr><td>OAuth token expired</td><td>rclone refreshes it. If refresh fails, one clear warning naming <code>rclone config reconnect</code>.</td></tr>
+<tr><td>No Drive folder chosen yet</td><td>Normal, not an error: nothing is listed, the endpoint returns <code>[]</code>, and one line at startup says the wall will stay empty. The filler asks again at its ten-second idle tick and does not count it as a failure.</td></tr>
+<tr><td>No internet</td><td>Manifest refresh and fetches fail. After 25 failures in a row the filler rests five minutes between tries and logs <em>one</em> line saying so and why, then one more when a fetch next succeeds — nothing per failure. The reel drains, the endpoint returns <code>[]</code>, the wall disappears, and the admin screen shows the pause and its cause.</td></tr>
+<tr><td>Manifest still building</td><td><code>[]</code> until the first listing completes. Not a failure: the filler waits at the idle tick without counting, so the first tile follows the finished listing by seconds — 16 s, measured against a real folder.</td></tr>
+<tr><td>Folder empty / all files rejected</td><td>Filler rests after 25 consecutive rejections, logs a single explanatory line, and the admin screen names the 3:2 gate.</td></tr>
+<tr><td>OAuth token expired</td><td>rclone refreshes it. If refresh fails: one warning in the log and the same sentence on the admin screen, naming <code>rclone config reconnect &lt;remote&gt;:</code> with the remote as configured. Once per outage; nothing needs restarting. A Photo wall save attempted meanwhile answers <code>503</code> with the same fix rather than blaming the folder's sharing.</td></tr>
+<tr><td>Any rclone failure at all</td><td>Its message is cleaned before it is kept: the folder ID, the Drive API request that carries it, rclone's timestamps and its client-id notice are removed. Only then does it reach the log, the admin screen or a <code>400</code>.</td></tr>
 <tr><td>Reel drained by a sign-in burst</td><td>Fewer tiles returned; the component repeats what it has to fill the column.</td></tr>
 <tr><td>Tile 404s (raced the reaper)</td><td><code>onerror</code> hides that <code>&lt;img&gt;</code>. Never a broken-image icon.</td></tr>
 <tr><td>Pasted text isn't a Drive folder link</td><td><code>400</code> naming the accepted forms (§7). Nothing is written.</td></tr>
 <tr><td>Pasted folder not reachable with the credential</td><td><code>400</code> naming the likely cause — not shared, or wrong account. Nothing is written; the previous folder stays live.</td></tr>
 <tr><td>Folder replaced, manifest rebuilding</td><td>Wall empty; the admin screen reports listing progress. Sign-in unaffected.</td></tr>
 <tr><td>New folder holds no usable photos</td><td>Permitted — it may be mid-upload. The filler backs off after 25 rejections and the admin screen reports <code>no usable photos found</code>, naming the 3:2 gate.</td></tr>
-<tr><td>Disk full</td><td>Writes fail, logged, reel stays at whatever size it reached. Bounded at ~6 MB, so this is not the thing that fills the disk.</td></tr>
+<tr><td>Disk full</td><td>Writes fail and count as failures, so a full disk reaches the same single logged rest as no internet; the reel stays at whatever size it reached. Bounded at ~6 MB, so this is not the thing that fills the disk.</td></tr>
 </tbody>
 </table>
 <div class="note">
   <strong>The invariant:</strong> no failure in this subsystem may delay, block or visibly break sign-in. The
   wall is the first thing to go and the last thing to complain.
+</div>
+
+<h3>Settled while running it against a real Drive</h3>
+
+<p>Five of the rows above were written before a real folder existed, and the first run against one
+(2026-09-22, 2,274 files) showed the code honouring the invariant while getting the rows wrong. What changed, and
+the calls made along the way:</p>
+
+<p><strong>Waiting for the manifest is not failing.</strong> The source answered "still being listed" the same
+way it answered "no internet", and the reel counted both. At one try every two seconds, the minute a first
+listing takes was 25 failures and a five-minute rest before the listing had finished — and since any failure past
+the cap buys another rest, the wall came up about twelve minutes after boot on a folder that was ready in one. The
+source now tags its two normal not-yet states (no folder chosen, listing not finished) so the reel neither counts
+them nor sets an error, and asks again at the ten-second idle tick rather than every two seconds. A listing that
+<em>failed</em>, or a folder that holds nothing usable, is still a failure and still counts: that is what keeps a
+machine with no internet from asking every ten seconds forever. After the fix the first tile arrived 16 seconds
+after the listing finished.</p>
+
+<p><strong>The admin screen shows the reel's failure only while it is resting.</strong> The screen read only the
+source's listing errors, so a wall with a manifest of two thousand photographs, zero tiles and a resting filler
+reported nothing wrong at all. It now also reads the reel — but only once a streak has reached the cap, because a
+single failed download among successes is normal (Drive answered <code>directory not found</code> for a file it
+had listed a minute earlier, and the same command succeeded four times in a row after) and a red line on a screen
+whose wall is full is noise. When both have an error, the newer one wins. A streak of ratio-gate rejections gets
+§9's sentence rather than rclone's: <em>no usable photographs found … only landscape photographs close to 3:2 —
+anything outside 4:3 to 16:10, which includes every portrait shot, is skipped</em>.</p>
+
+<p><strong>"Logged at debug" became one line per rest and one per recovery.</strong> The server has no debug
+level — every log line is <code>log.Printf</code> — and adding one for a single subsystem would be a second
+logging convention to keep in step. So nothing is logged per failure, one line is logged at the moment a streak
+reaches the cap, naming the last cause, and one more when a fetch succeeds again. The second line is an addition to
+the row as written: without it the last word in the log is "pausing", and whoever reads it next week cannot tell
+whether the wall ever came back. A full disk and a dropped network take the same path, because both are a fetch
+that did not become a tile.</p>
+
+<p><strong>An expired sign-in is recognised by rclone's own words.</strong> <code>invalid_grant</code>,
+<code>couldn't fetch token</code>, <code>cannot fetch token</code> or <code>token expired</code> — checked against
+rclone 1.75.1 with a revoked token rather than guessed. rclone's message already suggests the fix, but names the
+remote as <code>gdrive-photos{PDhs9}:</code>, its internal name for a connection string, which nobody can type; the
+warning uses the remote as configured instead. It is logged once per outage and re-armed by any success, so a token
+reconnected and later expired again is warned about again. Nothing needs restarting, because rclone reads its
+config on every command. Behind a Photo wall save it is a <code>503</code> carrying the fix, not the
+<code>400</code> that tells the admin to check the folder's sharing — the one thing that is fine.</p>
+
+<div class="note flag">
+  <strong>rclone's error messages carried the folder ID, and every one of them reached the admin screen.</strong>
+  A failed Drive call quotes the request it made, and that request's query string is <code>'&lt;id&gt;' in
+  parents</code>, URL-encoded. An expired token or a dropped network — the two commonest failures there are — would
+  have put the ID into <code>last_error</code>, which <code>GET /admin/photo-wall</code> returns: the one thing §7
+  promises no response carries. Found by reading rclone's real output with a revoked token, not by the test that
+  guards §7, which only ever saw the happy path. Every rclone error the wall keeps now passes through one cleaning
+  step that removes the ID in its raw, query-escaped and path-escaped forms, reduces the quoted request to the word
+  <em>Drive</em>, and drops rclone's timestamps and the client-id retirement notice that now opens every message.
+  The cleaning is the photo wall's alone: the backup's <code>runRclone</code> is shared with six backup call sites
+  that carry no secret ID, and changing the text they report was not this section's to do.
 </div>
 
 <hr />
@@ -1056,7 +1112,7 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <p>Consistent with the suite's "one happy path and one gate per module" shape (CLAUDE.md §13). rclone is stubbed
 behind a small interface so none of this needs a network or a Google account.</p>
 <p class="sub">Everything down to "backoff" is written and passing, in <code>photowall_test.go</code>,
-<code>photowall_drive_test.go</code> and <code>photowall_image_test.go</code> — thirty-one tests, none of which
+<code>photowall_drive_test.go</code> and <code>photowall_image_test.go</code> — forty-one tests, none of which
 touch a network, rclone or Postgres. The endpoint's five live in <code>server/photowall_test.go</code>: the
 empty answer with no wall, reachability with no session or cookie, the batch-then-fetch round trip, the manifest
 and the marker unreachable through the mount, and <code>/files/</code> still working after
@@ -1066,8 +1122,12 @@ leaving the server, switch-invalidates, preview-does-not-consume — are written
 the four admin calls is admin-only, the off state does not panic, and the probe does not fall through to the
 recursive listing. Two more sit at the HTTP boundary in <code>server/photowall_test.go</code>: the four routes
 refuse a student and never name a <code>folder_id</code>, and three previews over HTTP leave the reel
-untouched. <strong>Only the manual pass on the real Drive is outstanding</strong>, and it waits on the folder
-existing.</p>
+untouched.</p>
+<p class="sub">The first half of the manual pass was run on 2026-09-22 and found four defects the suite could not
+have: the listing crash, the twelve-minute warm-up, the reel's failures reaching no screen, and the folder ID in
+rclone's errors (§9). Each fix has a test, and each test was checked by breaking its fix and watching it fail.
+<strong>Still outstanding: pulling the network, and a full cycle in the Wails window on the slowest machine
+available.</strong></p>
 <ul>
   <li><strong>Normalizer, happy path</strong> — a 3000×2000 JPEG comes out exactly 900×600.</li>
   <li><strong>Ratio gate</strong> — a 1:1 and a 21:9 are rejected; a 4:3 is accepted and cropped.</li>
@@ -1103,9 +1163,32 @@ existing.</p>
     <code>served</code> tiles survive, the manifest is discarded and the generation advanced.</li>
   <li><strong>Preview does not consume</strong> — two preview calls leave the tiles <code>ready</code> and still
     available to <code>/signin/photos</code>.</li>
+  <li><strong>The listing as rclone actually prints it</strong> — every field present, and <code>ModTime</code>
+    an empty string. Under <code>--no-modtime</code> rclone still prints the key; every other fixture left it out,
+    which is the one shape rclone never produces, so the suite passed while the first real listing failed on its
+    first line. The listing now decodes into its own three-field struct rather than the backup's, whose
+    <code>time.Time</code> refuses <code>""</code> and which lists without that flag.</li>
+  <li><strong>Waiting for the manifest is not failing</strong> — twice the cap's worth of "still listing" leaves
+    the reel with no failures, no error and nothing logged, and the first try after the manifest lands a tile. The
+    source side is its own test: no folder and an unfinished listing are tagged as warming up, a failed listing and
+    an empty folder are not.</li>
+  <li><strong>One line per rest</strong> — seventy-five failures log exactly one line, naming the cause; the next
+    success logs exactly one more.</li>
+  <li><strong>The admin screen explains a resting reel</strong> — 24 failures show nothing, the 25th shows the
+    3:2 sentence for a ratio streak and "paused" with the cause for anything else.</li>
+  <li><strong>Errors never carry the folder ID</strong> — rclone 1.75.1's own text for a revoked token and a
+    dropped network, with the ID in the request URL and bare in a 404, through a download, a listing and the probe:
+    none of it reaches an error, the status or the log. The expired sign-in names <code>rclone config reconnect
+    gdrive:</code>, is warned about once over three failures, and again after a success re-arms it.</li>
   <li><strong>Manual, on the real Drive</strong> — run the manifest build against the actual folder and time it;
     confirm the reel fills; pull the network cable and confirm sign-in is untouched; watch the wall in the Wails
-    window for a full cycle on the slowest machine available.</li>
+    window for a full cycle on the slowest machine available. <em>Done 2026-09-22 on the development machine, up
+    to the network pull:</em> 2,274 files listed and 2,073 kept in about 60 s cold and 22 s warm; the first tile 16 s
+    after the listing; tiles exactly 900×600, 54–109 KB, no GPS; a batch of 16 over HTTP with the tile served
+    <code>private, max-age=900</code> and the manifest a 404 through the mount. The reel fills at roughly one tile
+    every 20–25 s — sixteen in the first six and a half minutes, so about twenty minutes to 48. Not a failure mode
+    (§9's drained-reel row covers it), but the obvious next speed-up: every fetch is a fresh <code>rclone cat</code>
+    resolving the path folder by folder, and a portrait is downloaded in full before the gate refuses it.</li>
 </ul>
 
 <hr />
@@ -1118,15 +1201,17 @@ returns real URLs.</p>
   <code>NewPhotoWall</code> called from <code>server/main.go</code>, the cache dir created, marked and cleared at
   startup. Verified: the server starts, the directory appears, junk in it disappears, and a directory holding
   anything the server did not write is refused with the files intact and the API up.</p></li>
-<li><h3>rclone remote, by hand</h3><p><code>rclone config</code> with <code>drive.readonly</code> and
+<li><h3>rclone remote, by hand <span class="pill new">done</span></h3><p><code>rclone config</code> with <code>drive.readonly</code> and
   <code>root_folder_id</code> left blank (§3); confirm <code>rclone lsjson 'gdrive,root_folder_id=&lt;ID&gt;:' -R
   --files-only</code> lists the intended folder. The folder's sharing setting is not checked here or anywhere
-  else — §0 closed that question.</p></li>
+  else — §0 closed that question. Done on the development machine 2026-09-22 as <code>gdrive-photos</code>, on
+  rclone's shared client id, whose retirement during 2026 is tracked in CLAUDE.md §13 rather than here. The
+  closet PC needs the same step.</p></li>
 <li><h3>Manifest build + refresh <span class="pill new">built</span></h3><p>Background, staged write, weekly timer,
   streamed listing with a running count, reload after a restart, and <code>SetFolder</code> so §7's switch has
   something to call. rclone sits behind two function fields, so the tests need neither the binary nor an account.
-  Still waiting on a real Drive folder: <code>manifest.json</code> appearing with a plausible entry count, and the
-  time of the first run, are step 2's verification and cannot be faked.</p></li>
+  Verified against a real folder on 2026-09-22 — once a crash in decoding rclone's actual output was fixed (§10):
+  <code>manifest.json</code> with 2,073 entries from 2,274 files, in about 60 s on the first run.</p></li>
 <li><h3>Normalizer <span class="pill new">built</span></h3><p>Pure function, <code>io.Reader</code> in,
   <code>[]byte</code> out. All the image tests land here, including the one that matters — the same bytes accepted
   untagged and rejected tagged orientation 6. Easiest piece to get right in isolation and the easiest to get subtly
@@ -1134,13 +1219,13 @@ returns real URLs.</p>
 <li><h3>The reel <span class="pill new">built</span></h3><p>State machine, topper-upper, reaper,
   <code>TakePhotos</code>, and the generation counter — brought forward from §7 because the property it protects
   (a photograph from a replaced folder surfacing minutes later) cannot be retrofitted into the fill path and is
-  unreproducible once it ships. Covered by the reel tests; watching the directory fill to 48 and hold steady
-  waits on a real source in step 4.</p></li>
+  unreproducible once it ships. Covered by the reel tests, and watched filling from a real source on
+  2026-09-22 — after the warm-up fix in §9, without which it sat empty for twelve minutes first.</p></li>
 <li><h3>Endpoint + static mount <span class="pill new">built</span></h3><p>Two router lines and a handler, in
   <code>server/photowall.go</code>. Verified with <code>curl 127.0.0.1:8080/signin/photos</code> — no token —
   which answers <code>{"photos":[],"ttl_seconds":900}</code> and <code>Cache-Control: no-store</code> with the
-  wall off, and by the round trip in the suite with it on. Opening a returned URL by hand waits on a real Drive
-  folder.</p></li>
+  wall off, and by the round trip in the suite with it on. A returned URL opened by hand on 2026-09-22: a 900×600
+  JPEG, <code>private, max-age=900, immutable</code>.</p></li>
 <li><h3><code>app_settings</code> + settings reader + redaction <span class="pill new">built</span></h3><p>Phase 7
   landed the table and <code>settings.go</code> first, so this step shrank to four columns on the existing table
   (<code>20260918100000</code>), one more value in <code>EnsureSettings</code>'s seeding statement, and the folder ID
@@ -1150,7 +1235,8 @@ returns real URLs.</p>
   four routes in §7; the generation counter had already come forward to step 5. Verified with <code>curl</code> and
   an admin token as far as a machine with no Google account allows: the status read, the 400 that names the accepted
   link forms, the 503 when no remote is configured, 401 with no token and 403 as a student. "Paste a good link and
-  watch the cache directory refill from the new folder" is step 2's, and waits on a real Drive folder.</p></li>
+  watch the cache directory refill from the new folder" done through the tab on 2026-09-22: the probe answered in
+  0.6 s and the reel filled from the new folder.</p></li>
 <li><h3>The Svelte component <span class="pill new">built</span></h3><p><code>photo-wall.svelte</code> +
   <code>signInPhotos()</code> + two lines in <code>sign-in.svelte</code>. Verified in a browser: the input is at
   the same offset with the wall up and shed, it still holds focus with the columns running, and the wall's

@@ -1,8 +1,10 @@
 package stockroom
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,6 +288,85 @@ func TestPhotoWallFillBacksOff(t *testing.T) {
 	w.fillOne(context.Background())
 	if w.backingOff() || w.lastErr != nil {
 		t.Errorf("a successful fetch did not clear the failure state (fails=%d, lastErr=%v)", w.fails, w.lastErr)
+	}
+}
+
+// captureLog points the standard logger at a buffer for one test, so a test
+// can count the lines §9 promises instead of trusting a comment about them.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	flags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+		log.SetFlags(flags)
+	})
+	return &buf
+}
+
+// TestPhotoWallWaitsOutTheManifest: until the first listing finishes the
+// source has nothing to hand out, and §9 calls that normal, not a failure.
+// Counted as failures, it rested the reel for five minutes before the listing
+// had even finished, and the wall came up twelve minutes after boot on a
+// folder that was ready in one -- seen on the first run against a real Drive.
+func TestPhotoWallWaitsOutTheManifest(t *testing.T) {
+	src := &stubSource{err: warmingUp(errors.New("the Drive folder is still being listed (500 files so far)"))}
+	w, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: src})
+	logged := captureLog(t)
+
+	for i := 0; i < 2*photoWallFailureCap; i++ {
+		w.fillOne(context.Background())
+	}
+	if w.backingOff() || w.fails != 0 || w.lastErr != nil {
+		t.Fatalf("waiting for the manifest was counted as failing: fails=%d, lastErr=%v", w.fails, w.lastErr)
+	}
+	if !w.isWarming() {
+		t.Error("the reel does not know it is waiting, so Run asks every two seconds rather than at the idle tick")
+	}
+	if logged.Len() != 0 {
+		t.Errorf("waiting for the manifest logged %q; a normal state is not news", logged.String())
+	}
+
+	src.mu.Lock()
+	src.err, src.data = nil, []byte("tile bytes")
+	src.mu.Unlock()
+	w.fillOne(context.Background())
+	if ready, _ := w.Counts(); ready != 1 {
+		t.Fatalf("ready = %d on the first try after the manifest arrived, want 1", ready)
+	}
+	if w.isWarming() {
+		t.Error("still marked as waiting after a tile arrived")
+	}
+}
+
+// TestPhotoWallLogsOncePerRest is §9's "logs a single explanatory line": one
+// when a streak reaches the cap, none for the failures after it, and one when
+// a success ends it -- so the last word in the log is never "pausing" for a
+// wall that has long since recovered.
+func TestPhotoWallLogsOncePerRest(t *testing.T) {
+	src := &stubSource{err: errors.New("download a.jpg: dial tcp: lookup www.googleapis.com: no such host")}
+	w, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: src})
+	logged := captureLog(t)
+
+	for i := 0; i < 3*photoWallFailureCap; i++ {
+		w.fillOne(context.Background())
+	}
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "pausing") || !strings.Contains(lines[0], "no such host") {
+		t.Fatalf("after %d failures the log holds %q, want one line saying it is pausing and why", 3*photoWallFailureCap, logged.String())
+	}
+
+	logged.Reset()
+	src.mu.Lock()
+	src.err, src.data = nil, []byte("tile bytes")
+	src.mu.Unlock()
+	w.fillOne(context.Background())
+	w.fillOne(context.Background())
+	lines = strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "fetching again") {
+		t.Fatalf("recovering logged %q, want exactly one line saying it is fetching again", logged.String())
 	}
 }
 
