@@ -111,6 +111,7 @@ type migrationFile struct {
 // versionPrefix matches the leading timestamp the CLI writes and sorts on.
 var versionPrefix = regexp.MustCompile(`^([0-9]+)_(.+)\.sql$`)
 
+// migrationFilenames returns the valid SQL migrations in version order.
 func migrationFilenames(fsys fs.FS) ([]migrationFile, error) {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
@@ -160,6 +161,7 @@ func ensureMigrationsTable(ctx context.Context, q querier) error {
 	return nil
 }
 
+// appliedVersions returns the migration versions recorded by Supabase.
 func appliedVersions(ctx context.Context, q querier) (map[string]bool, error) {
 	rows, err := q.Query(ctx, `select version from supabase_migrations.schema_migrations`)
 	if err != nil {
