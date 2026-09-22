@@ -409,6 +409,10 @@ export interface Settings {
   archive_passphrase: string;
   photo_min_free_gb: number;
   photo_max_generations: number;
+  /** What a student number may look like (lib/student-number.ts). */
+  student_number_format: "digits" | "alphanumeric" | "custom";
+  /** Only meaningful when the format is custom; kept when switching away. */
+  student_number_pattern: string;
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;

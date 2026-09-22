@@ -83,6 +83,14 @@ export function signInPhotos() {
   return request<SignInPhotos>("/signin/photos", { anonymous: true });
 }
 
+/**
+ * What the sign-in field filters, fetched before anybody has a session
+ * (`lib/student-number.ts`). Returned raw: `ruleFrom` owns the fallback.
+ */
+export function signInConfig() {
+  return request<unknown>("/signin/config", { anonymous: true });
+}
+
 /* ---------------------------------------------------------------- auth ---- */
 
 /**

@@ -298,6 +298,27 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		return Settings{}, err
 	}
 
+	// A rule the existing accounts do not satisfy is refused, not saved with
+	// a warning: the accounts it strands cannot sign in to read one. Only
+	// checked when the rule actually changes, so an unrelated card's save is
+	// never blocked by it.
+	if next.StudentNumberFormat != cur.StudentNumberFormat ||
+		next.StudentNumberPattern != cur.StudentNumberPattern {
+		count, examples, err := accountsRefusedBy(ctx, tx,
+			StudentNumberFormat(next.StudentNumberFormat), next.StudentNumberPattern)
+		if err != nil {
+			return Settings{}, err
+		}
+		if count > 0 {
+			who := strings.Join(examples, ", ")
+			if count > len(examples) {
+				who += ", …"
+			}
+			return Settings{}, fmt.Errorf("%w: %d existing account(s) have student numbers this rule would refuse, so they could not sign in (%s). Change their numbers first, or pick a rule that fits them",
+				ErrInvalid, count, who)
+		}
+	}
+
 	if err := next.validate(); err != nil {
 		return Settings{}, err
 	}

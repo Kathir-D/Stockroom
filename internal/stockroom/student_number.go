@@ -1,6 +1,7 @@
 package stockroom
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -206,4 +207,62 @@ func normalizeDigits(s string) (string, error) {
 
 func isASCIILetterOrDigit(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+// studentNumberMatcher reports whether a stored number satisfies a rule that
+// is not installed yet. The same tests NormalizeStudentNumber runs, minus the
+// trimming and the length bound every stored number has already passed.
+func studentNumberMatcher(format StudentNumberFormat, pattern string) (func(string) bool, error) {
+	re, _, err := compileStudentNumberFormat(format, pattern)
+	if err != nil {
+		return nil, err
+	}
+	return func(s string) bool {
+		switch format {
+		case FormatAlphanumeric:
+			for _, r := range s {
+				if !isASCIILetterOrDigit(r) {
+					return false
+				}
+			}
+			return true
+		case FormatCustom:
+			return re.MatchString(s)
+		default:
+			_, err := normalizeDigits(s)
+			return err == nil
+		}
+	}, nil
+}
+
+// accountsRefusedBy lists the accounts a new rule would lock out, first few
+// only, so a format change cannot quietly strand them. Switching "letters and
+// numbers" back to "digits" at a school with `AB12345` IDs would otherwise
+// leave every one of those students -- and quite possibly the admin pressing
+// Save -- unable to sign in, with nothing on any screen saying why.
+func accountsRefusedBy(ctx context.Context, q querier, format StudentNumberFormat, pattern string) (count int, examples []string, err error) {
+	matches, err := studentNumberMatcher(format, pattern)
+	if err != nil {
+		return 0, nil, err
+	}
+	rows, err := q.Query(ctx, `
+		select student_number, coalesce(nullif(full_name, ''), student_number)
+		  from profiles where student_number is not null order by full_name`)
+	if err != nil {
+		return 0, nil, mapPgError("check student numbers", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var number, name string
+		if err := rows.Scan(&number, &name); err != nil {
+			return 0, nil, mapPgError("check student numbers", err)
+		}
+		if !matches(number) {
+			count++
+			if len(examples) < 3 {
+				examples = append(examples, name)
+			}
+		}
+	}
+	return count, examples, rows.Err()
 }

@@ -27,7 +27,7 @@ describe('desktop host', () => {
     expect(await screen.findByText('Scan your student ID.')).toBeInTheDocument()
   })
 
-  it('reaches the network only for the decorative photo wall, and survives it failing', async () => {
+  it('reaches the network only for the photo wall and the ID format, and survives both failing', async () => {
     render(App)
     await screen.findByText('Scan your student ID.')
 
@@ -40,7 +40,11 @@ describe('desktop host', () => {
     // Without the first, `every` passes vacuously on an empty list and the
     // assertion stops meaning anything the day the wall stops fetching.
     expect(calls).toContainEqual(expect.stringContaining('/signin/photos'))
-    expect(calls.every((url) => url.endsWith('/signin/photos'))).toBe(true)
+    // The one other allowed call is the student-number format
+    // (lib/student-number.ts), which is just as optional: it rejects here too,
+    // and the field falls back to digits and still renders.
+    const allowed = ['/signin/photos', '/signin/config']
+    expect(calls.every((url) => allowed.some((path) => url.endsWith(path)))).toBe(true)
     expect(await screen.findByPlaceholderText(/student number/i)).toBeInTheDocument()
   })
 })

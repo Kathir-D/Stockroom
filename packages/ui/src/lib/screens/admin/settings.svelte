@@ -46,13 +46,16 @@
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
   import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
+  import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
+  import IdCardIcon from "@lucide/svelte/icons/id-card"
+  import type { StudentNumberFormat as Format } from "../../student-number"
   import * as api from "../../api/index"
   import type { Settings, SettingsInput } from "../../api/types"
   import { dateTime } from "../../status"
   import { router } from "../../stores/router.svelte"
 
   /** Which card is mid-save, so only that card's button says "Saving…". */
-  type Card = "folders" | "schedule" | "photos" | "drive" | "github" | "encryption"
+  type Card = "signin" | "folders" | "schedule" | "photos" | "drive" | "github" | "encryption"
 
   let settings = $state<Settings | null>(null)
   let loading = $state(true)
@@ -95,6 +98,8 @@
     drive_path: "",
     github_enabled: false,
     github_repo: "",
+    student_number_format: "digits" as Format,
+    student_number_pattern: "",
   })
 
   /** Secrets live outside `draft`: blank means unchanged, not blank-it-out. */
@@ -119,6 +124,8 @@
       drive_path: next.drive_path,
       github_enabled: next.github_enabled,
       github_repo: next.github_repo,
+      student_number_format: next.student_number_format,
+      student_number_pattern: next.student_number_pattern,
     }
     // The secret fields are cleared on every adopt, including after a save that
     // just stored one. Leaving a token sitting in a text box on a shared closet
@@ -181,6 +188,12 @@
       saving = null
     }
   }
+
+  const saveSignIn = () =>
+    save("signin", () => ({
+      student_number_format: draft.student_number_format,
+      student_number_pattern: draft.student_number_pattern.trim(),
+    }))
 
   const saveFolders = () =>
     save("folders", () => ({
@@ -346,6 +359,32 @@
       {/each}
     </div>
   {:else}
+    <!-- ------------------------------------------------------- sign-in ---- -->
+    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+        <IdCardIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        Student numbers
+      </h2>
+      <p class="text-xs text-fg-muted">
+        What your school's ID numbers look like. Sign-in, the roster import and new accounts all
+        follow this. Change it only if IDs at your school are not plain digits — and test a real
+        one below before saving, because a rule that refuses your IDs stops everybody signing in.
+      </p>
+      <StudentNumberFormat
+        idPrefix="settings-sn"
+        bind:format={draft.student_number_format}
+        bind:pattern={draft.student_number_pattern}
+      />
+      {#if cardError.signin}
+        <p class="text-sm text-status-overdue" role="alert">{cardError.signin}</p>
+      {/if}
+      <div>
+        <Button disabled={saving === "signin"} onclick={saveSignIn}>
+          {saving === "signin" ? "Saving…" : "Save student numbers"}
+        </Button>
+      </div>
+    </section>
+
     <!-- ------------------------------------------------------ folders ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
