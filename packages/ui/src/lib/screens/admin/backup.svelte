@@ -32,6 +32,7 @@
   import ImageIcon from "@lucide/svelte/icons/image"
   import TrashIcon from "@lucide/svelte/icons/trash-2"
   import FileTextIcon from "@lucide/svelte/icons/file-text"
+  import DownloadIcon from "@lucide/svelte/icons/download"
   import { toast } from "svelte-sonner"
   import * as AlertDialog from "@stockroom/ui/components/ui/alert-dialog"
   import { Button } from "@stockroom/ui/components/ui/button"
@@ -51,6 +52,7 @@
     PhotoGeneration,
   } from "../../api/types"
   import { ageWords, dateTime, formatBytes } from "../../status"
+  import { saveBlob } from "../../download"
   import { router } from "../../stores/router.svelte"
   import { restoreReport } from "../../stores/restore.svelte"
   import { session } from "../../stores/session.svelte"
@@ -118,6 +120,29 @@
       runError = err instanceof Error ? err.message : String(err)
     } finally {
       running = false
+    }
+  }
+
+  /* ----------------------------------------------------------- export ---- */
+
+  // The same zip a backup writes, straight to this browser's Downloads. It
+  // needs no backup folder, so it sits outside the status chain below and
+  // still works on an install where backups were never set up: leaving
+  // Stockroom must not depend on having configured it.
+  let exporting = $state(false)
+  let exportError = $state<string | null>(null)
+
+  async function exportEverything() {
+    exporting = true
+    exportError = null
+    try {
+      const blob = await api.exportEverything()
+      const day = new Date().toISOString().slice(0, 10)
+      saveBlob(blob, `stockroom-export-${day}.zip`)
+    } catch (err) {
+      exportError = err instanceof Error ? err.message : String(err)
+    } finally {
+      exporting = false
     }
   }
 
@@ -381,6 +406,9 @@
               <Table.Row>
                 <Table.Cell class="text-fg">
                   {TARGET_LABEL[target.target] ?? target.target}
+                  {#if target.target === "github"}
+                    <span class="ml-1 text-xs text-fg-faint">experimental</span>
+                  {/if}
                   {#if !target.enabled}
                     <span class="ml-1 text-xs text-fg-faint">off</span>
                   {/if}
@@ -429,7 +457,8 @@
         Restore from a file
       </h2>
       <p class="text-xs text-fg-muted">
-        A <code class="font-mono">stockroom-backup-*.zip</code> written by this app. Restoring
+        A <code class="font-mono">backup-*.zip</code> or
+        <code class="font-mono">stockroom-export-*.zip</code> written by this app. Restoring
         replaces every record in the database and signs everyone out — it is checked against the
         archive's own checksums first, and nothing is written if a check fails.
       </p>
@@ -544,6 +573,30 @@
       </section>
     {/if}
   {/if}
+
+  <!-- ------------------------------------------------------- export ---- -->
+  <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+    <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+      <DownloadIcon class="size-4 text-fg-muted" aria-hidden="true" />
+      Export everything
+    </h2>
+    <p class="text-xs text-fg-muted">
+      Every record as spreadsheet files in one zip, downloaded to this computer. Open
+      <code class="font-mono">inventory.csv</code> and <code class="font-mono">accounts.csv</code>
+      in Excel, or restore the zip on another machine to move Stockroom there. The file is not
+      encrypted and lists every student number, which signs its owner in with a scan, so keep it
+      somewhere private.
+    </p>
+    <div class="flex flex-wrap items-center gap-3">
+      <Button variant="secondary" disabled={exporting} onclick={exportEverything}>
+        <DownloadIcon aria-hidden="true" />
+        {exporting ? "Exporting…" : "Export everything"}
+      </Button>
+    </div>
+    {#if exportError}
+      <p class="text-sm text-status-overdue" role="alert">{exportError}</p>
+    {/if}
+  </section>
 </div>
 
 <!-- The by-date picker. `id` is opaque: a path on Drive, a commit on GitHub, a

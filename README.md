@@ -971,6 +971,7 @@ one · **any full** is every signed-in user whose password is set — a limited 
 | `GET /labels/layouts` · `POST /assets/labels.pdf` · `POST /users/cards.pdf` | any full · admin · admin | Label sheets and ID cards as PDFs |
 | `GET /assets/{id}/barcode.png` | any full | One barcode, for a sticker that fell off |
 | `POST /admin/backup` | admin | Runs a backup now: CSV per table, sequences, a manifest, then every enabled target |
+| `GET /admin/export` | admin | Downloads the same zip unencrypted, with no backup folder needed: the way out, or the way to another PC |
 | `GET/PUT /admin/settings` · `POST /admin/settings/test` | admin | Backup configuration, and a connection check against one target |
 | `POST /admin/drive/connect` · `POST /admin/drive/finish` | admin | Connects a Google account through `rclone authorize`, no terminal |
 | `GET /admin/backup/status` · `GET /admin/backup/versions` | admin | Per-target state and the dated backups available |
@@ -1010,7 +1011,10 @@ Conventions the code assumes and reviews enforce:
 | [`TODO.md`](TODO.md) | Phase-by-phase build plan for the software itself |
 | [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) | **Turning this into something another school can install**, and the GitHub setup for it |
 | [`TESTING.md`](TESTING.md) | What is tested, what was deliberately cut, and why |
-| [`CI.md`](CI.md) | The GitHub Actions job, branch protection, the pre-commit hook |
+| [`CI.md`](CI.md) | The GitHub Actions jobs (Linux and Windows), branch protection, the pre-commit hook |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | Installing it on the machine it will live on |
+| [`docs/ADMIN-GUIDE.md`](docs/ADMIN-GUIDE.md) | The teacher's manual: equipment, stickers, students, overdue items, handover, exporting everything |
+| [`docs/STUDENT-GUIDE.md`](docs/STUDENT-GUIDE.md) | One printable page for the wall above the PC |
 | [`docs/BACKUP-SETUP.md`](docs/BACKUP-SETUP.md) | Click-by-click backup setup for a non-technical admin |
 | [`docs/design/design-system.md`](docs/design/design-system.md) | The UI: tokens, components, screen specs |
 | [`docs/design/backup.md`](docs/design/backup.md) | The full backup and restore design and its reasoning |

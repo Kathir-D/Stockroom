@@ -510,6 +510,14 @@ export function backupNow() {
   return request<BackupResult>("/admin/backup", { method: "POST" });
 }
 
+/**
+ * The whole database as the backup's zip, never encrypted, for somebody
+ * leaving Stockroom or moving it to another PC. Needs no backup folder.
+ */
+export function exportEverything() {
+  return request<Blob>("/admin/export", { blob: true });
+}
+
 export function backupStatus() {
   return request<BackupStatusResult>("/admin/backup/status");
 }

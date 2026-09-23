@@ -1,6 +1,6 @@
 # CI
 
-One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), one job named `tests`. It runs on every pull request against `main` and on every push to `main`. What it runs, and what it deliberately no longer runs, is in [TESTING.md](TESTING.md).
+One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), with two jobs: `tests` on Ubuntu and `tests-windows` on Windows. It runs on every pull request against `main` and on every push to `main`. What it runs, and what it deliberately no longer runs, is in [TESTING.md](TESTING.md).
 
 ## What the job does
 
@@ -13,6 +13,16 @@ One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/t
 7. `supabase stop`, always, if it was started.
 
 A push to a PR cancels the run already going for it.
+
+## The Windows job
+
+`tests-windows` exists because Windows is the deployment target and, until it was added, nothing had ever built or run Stockroom there. It differs from `tests` in three ways, all forced by the runner:
+
+1. **No Supabase CLI.** The Windows image ships a PostgreSQL service, disabled by default. The job starts it (user `postgres`, password `root`, port 5432).
+2. **The schema comes from the server binary.** The job builds `stockroom.exe`, starts it against the empty database and waits for `/health`, which is exactly what happens on a school's machine: `stockroom.Migrate` applies every migration at boot. Then it loads `supabase/seed.sql` with `psql`, because the Go suite asserts against the demo data.
+3. **No pgTAP.** It needs the CLI, and the Linux job already runs it.
+
+It also parses `scripts/dev.ps1` with PowerShell's own parser, which is the least that can be done for a script nobody has run on Windows yet. It has the same docs-only skip as `tests`.
 
 ## Pre-commit
 
@@ -36,14 +46,14 @@ Filtering inside the job rather than with `on.push.paths` matters for branch pro
 
 The workflow alone blocks nothing. The check has to be marked required.
 
-In the web UI: Settings, Rules, Rulesets, New branch ruleset. Target the default branch. Turn on "Require a pull request before merging", "Require status checks to pass" (add `tests`), and "Require branches to be up to date before merging". Set enforcement to Active. The `tests` check only appears in the search box after the workflow has run once.
+In the web UI: Settings, Rules, Rulesets, New branch ruleset. Target the default branch. Turn on "Require a pull request before merging", "Require status checks to pass" (add `tests` and `tests-windows`), and "Require branches to be up to date before merging". Set enforcement to Active. A check only appears in the search box after the workflow has run once.
 
 Or with `gh`, as classic branch protection, which needs every field:
 
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["tests"] },
+  "required_status_checks": { "strict": true, "contexts": ["tests", "tests-windows"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },
   "restrictions": null

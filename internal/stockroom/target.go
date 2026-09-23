@@ -116,9 +116,8 @@ func targetByName(s Settings, name string) (BackupTarget, error) {
 // carries its own error into the state file and onto the backup screen.
 func (db *DB) pushToTargets(ctx context.Context, settings Settings, dir string, manifest Manifest) []TargetResult {
 	targets := activeTargets(settings)
-	out := make([]TargetResult, 0, len(targets))
 	if len(targets) == 0 {
-		return out
+		return []TargetResult{}
 	}
 	day := filepath.Base(dir)
 	req := pushRequest{
@@ -129,6 +128,13 @@ func (db *DB) pushToTargets(ctx context.Context, settings Settings, dir string, 
 		Encrypted:   settings.Encrypted(),
 		Manifest:    manifest,
 	}
+	return pushEach(ctx, targets, req)
+}
+
+// pushEach is the loop on its own, so a test can hand it targets that fail on
+// purpose. Every target is tried whatever happened to the one before it.
+func pushEach(ctx context.Context, targets []BackupTarget, req pushRequest) []TargetResult {
+	out := make([]TargetResult, 0, len(targets))
 	for _, t := range targets {
 		ref, err := t.Push(ctx, req)
 		if err != nil {

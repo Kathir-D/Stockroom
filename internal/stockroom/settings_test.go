@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -186,14 +188,14 @@ func TestEnsureSettingsSeedsOnceThenLeavesTheAdminAlone(t *testing.T) {
 
 	// First boot against a blank column: this is what the seed is for.
 	setSeeded(false)
-	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
+	if _, err := db.EnsureSettings(ctx, Config{BackupDir: envSeedDir}); err != nil {
 		t.Fatalf("EnsureSettings: %v", err)
 	}
 	seeded, err := db.loadSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seeded.BackupDir != "/from/dot/env" {
+	if seeded.BackupDir != envSeedDir {
 		t.Errorf("backup_dir is %q; an unset folder was not seeded from the environment", seeded.BackupDir)
 	}
 
@@ -203,7 +205,7 @@ func TestEnsureSettingsSeedsOnceThenLeavesTheAdminAlone(t *testing.T) {
 	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
+	if _, err := db.EnsureSettings(ctx, Config{BackupDir: envSeedDir}); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := db.loadSettings(ctx)
@@ -217,20 +219,34 @@ func TestEnsureSettingsSeedsOnceThenLeavesTheAdminAlone(t *testing.T) {
 	// And the original guard still holds on its own: even on a database that
 	// has not been seeded yet, a column an admin has filled in is not null, so
 	// the seed passes over it.
-	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr("/chosen/by/the/admin")}); err != nil {
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{BackupDir: strPtr(adminChosenDir)}); err != nil {
 		t.Fatal(err)
 	}
 	setSeeded(false)
-	if _, err := db.EnsureSettings(ctx, Config{BackupDir: "/from/dot/env"}); err != nil {
+	if _, err := db.EnsureSettings(ctx, Config{BackupDir: envSeedDir}); err != nil {
 		t.Fatal(err)
 	}
 	kept, err := db.loadSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept.BackupDir != "/chosen/by/the/admin" {
+	if kept.BackupDir != adminChosenDir {
 		t.Errorf("backup_dir is %q after a restart; the environment overwrote what an admin set", kept.BackupDir)
 	}
+}
+
+// Two absolute folders that exist nowhere. Written as "/from/dot/env" they
+// would be relative on Windows, where an absolute path needs a drive letter,
+// and the settings code refuses a relative folder (validateDir); so the root
+// is whatever volume the temp directory is on.
+var (
+	envSeedDir     = testAbsDir("from", "dot", "env")
+	adminChosenDir = testAbsDir("chosen", "by", "the", "admin")
+)
+
+func testAbsDir(parts ...string) string {
+	root := filepath.VolumeName(os.TempDir()) + string(filepath.Separator)
+	return filepath.Join(append([]string{root}, parts...)...)
 }
 
 func intPtr(n int) *int    { return &n }
@@ -317,7 +333,7 @@ func TestEnsureSettingsSeedsThePhotoWallFolderOnAnUpgradedDatabase(t *testing.T)
 		return f
 	}
 
-	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr("/chosen/by/the/admin")})
+	restore := withTestSettings(t, db, admin, SettingsInput{BackupDir: strPtr(adminChosenDir)})
 	defer restore()
 
 	// The upgrade: the backup values were seeded by an earlier release, so
@@ -325,7 +341,7 @@ func TestEnsureSettingsSeedsThePhotoWallFolderOnAnUpgradedDatabase(t *testing.T)
 	// copied nothing and said nothing.
 	setMarkers(true, false)
 	if _, err := db.EnsureSettings(ctx, Config{
-		BackupDir:            "/from/dot/env",
+		BackupDir:            envSeedDir,
 		SignInPhotosFolderID: "FOLDER-FROM-ENV",
 	}); err != nil {
 		t.Fatalf("EnsureSettings: %v", err)
@@ -343,7 +359,7 @@ func TestEnsureSettingsSeedsThePhotoWallFolderOnAnUpgradedDatabase(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.BackupDir != "/chosen/by/the/admin" {
+	if s.BackupDir != adminChosenDir {
 		t.Errorf("backup_dir is %q; the photo wall's pass reached a column that is not its own", s.BackupDir)
 	}
 

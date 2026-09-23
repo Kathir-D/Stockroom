@@ -145,3 +145,148 @@ jobs:
         # Skipped quietly when the CLI never installed, so the log's one error
         # is the step that actually failed, not "supabase: command not found".
         run: command -v supabase >/dev/null && supabase stop --no-backup || true
+
+  # Windows is the deployment target (CLAUDE.md §3) and until this job nothing
+  # had ever built or run Stockroom on it. There is no Supabase CLI here: the
+  # runner image ships a PostgreSQL service, disabled by default, and this job
+  # starts it. That is closer to an install than the Linux job is anyway,
+  # because the schema gets applied by the server binary itself at boot
+  # (stockroom.Migrate), exactly as on a school's machine. pgTAP is not run
+  # here: it needs the CLI, and the Linux job already covers it.
+  #
+  # A separate job with its own name, so branch protection can require
+  # `tests` and `tests-windows` independently. Same docs-only skip, same rule:
+  # the job always runs and always reports.
+  tests-windows:
+    name: tests-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # The runner's PostgreSQL: user postgres, password root, port 5432.
+      DATABASE_URL: postgresql://postgres:root@127.0.0.1:5432/postgres
+      PGPASSWORD: root
+      STOCKROOM_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'cmd/**'
+              - 'supabase/**'
+              - 'packages/**'
+              - 'desktop-app/**'
+              - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - '.githooks/**'
+              - '.github/workflows/**'
+              - 'examples/**'
+
+      # dev.ps1 has never run on real Windows hardware (CLAUDE.md §13, still
+      # open). Parsing it is the least this job can do; a syntax error there is
+      # the first thing a Windows developer would otherwise meet.
+      - name: Parse dev.ps1
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD\scripts\dev.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.ToString() }; exit 1 }
+          Write-Host "scripts/dev.ps1 parses cleanly"
+
+      - name: Set up Go
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Start PostgreSQL
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          $svc = Get-Service -Name "postgresql*" | Select-Object -First 1
+          Set-Service -Name $svc.Name -StartupType Manual
+          Start-Service -Name $svc.Name
+          & "$env:PGBIN\pg_isready.exe" -h 127.0.0.1 -p 5432 -t 60
+          & "$env:PGBIN\psql.exe" -h 127.0.0.1 -U postgres -d postgres -c "select version()"
+
+      # The production path on Windows: build the one binary, start it against
+      # an empty database, and wait for /health. Booting is what applies every
+      # migration, so this is also the migration test.
+      - name: Build and boot the server (applies the schema)
+        if: steps.changes.outputs.code == 'true'
+        env:
+          SERVER_ADDR: 127.0.0.1:8080
+        run: |
+          go build -o stockroom.exe ./server
+          $proc = Start-Process -FilePath .\stockroom.exe -PassThru -NoNewWindow `
+            -RedirectStandardOutput server.out.log -RedirectStandardError server.err.log
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            if ($proc.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8080/health -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          Get-Content server.out.log, server.err.log -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if (-not $ok) { Write-Error "the server never answered /health"; exit 1 }
+
+      # The Go suite asserts against the demo data, so load it after the
+      # server has built the schema. On the Linux job `supabase start` does
+      # both halves.
+      - name: Load the seed
+        if: steps.changes.outputs.code == 'true'
+        run: '& "$env:PGBIN\psql.exe" -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -f supabase/seed.sql'
+
+      - name: go vet
+        if: steps.changes.outputs.code == 'true'
+        run: go vet ./...
+
+      # -p 1 for the same reason as the Linux job: one live database, and the
+      # restore tests truncate it.
+      - name: Go tests
+        if: steps.changes.outputs.code == 'true'
+        run: go test ./... -count=1 -p 1
+
+      - name: Install dependencies
+        if: steps.changes.outputs.code == 'true'
+        run: npm ci
+
+      - name: Type check (packages/ui + both hosts)
+        if: steps.changes.outputs.code == 'true'
+        run: npm run check
+
+      - name: "Frontend tests (Vitest: packages/ui + both hosts)"
+        if: steps.changes.outputs.code == 'true'
+        run: npm test
+
+      - name: Frontend build (both hosts)
+        if: steps.changes.outputs.code == 'true'
+        run: npm run build
+
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to build or test."

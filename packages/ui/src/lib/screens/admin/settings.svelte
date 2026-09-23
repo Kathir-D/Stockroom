@@ -625,7 +625,19 @@
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
         <GithubIcon class="size-4 text-fg-muted" aria-hidden="true" />
         GitHub
+        <span class="rounded-(--radius-sm) border border-line px-1.5 text-xs font-normal text-fg-muted">
+          Experimental
+        </span>
       </h2>
+      <!-- Experimental because it has never pushed to a real account: the REST
+           path is unit-tested and read by hand, nothing more (CLAUDE.md §13,
+           still open). A school picking it is choosing where its records go,
+           so the screen says so rather than letting the label imply it works. -->
+      <p class="text-xs text-fg-muted">
+        <strong class="text-fg">Untested against a real GitHub account.</strong> Use it as a
+        second copy beside Google Drive or this machine, not as the only one, and restore from it
+        once before you rely on it.
+      </p>
       <p class="text-xs text-fg-muted">
         Needs nothing installed, which is why it is the target that still works when Drive is
         blocked. <strong class="text-fg">The repository must be private</strong> — the backup

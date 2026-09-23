@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"stockroom/internal/stockroom"
@@ -153,4 +154,23 @@ func (d deps) handleBackupNow(w http.ResponseWriter, r *http.Request, actor stoc
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// GET /admin/export
+// The whole database as the backup's zip, downloaded rather than written to
+// the backup folder. Works with backups never configured, which is the point:
+// leaving Stockroom must not depend on having set it up properly.
+func (d deps) handleExport(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	exp, err := d.db.ExportEverything(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", exp.Filename))
+	// It holds every student number beside its password hash. No cache, on
+	// this machine or any proxy, may keep a copy.
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(exp.Archive)
 }

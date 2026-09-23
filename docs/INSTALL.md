@@ -125,6 +125,35 @@ The files in [`examples/`](../examples/) show every upload's shape.
 Skipping the guide is fine: **Admin → Settings → Run the setup guide again**
 brings it back, and everything it does is also on the ordinary admin screens.
 
+### If you would rather not use the setup guide
+
+Everything the guide does is also on the ordinary admin screens, and a few
+things can be settled before anybody opens a browser.
+
+- **Backups already work.** The installer points the backup folder at
+  `~/Stockroom/backups` and the photo mirror at `~/Stockroom/photo-backups`, so
+  the nightly run needs nothing more. Google Drive and GitHub are
+  Admin → Settings, walked through in [`BACKUP-SETUP.md`](BACKUP-SETUP.md).
+- **The failsafe admin** can be given up front:
+  `./scripts/install.sh --admin-number 123456 --admin-password-file pw.txt`.
+- **Categories, equipment and students** are Admin → Categories → Import,
+  Admin → Assets → Import CSV and Admin → Users → Import roster. The files in
+  [`examples/`](../examples/) show each shape. [`ADMIN-GUIDE.md`](ADMIN-GUIDE.md)
+  covers each screen.
+- **Stop showing this guide**, at the foot of every guide page, marks setup done.
+
+`~/Stockroom/.env` can be edited afterwards, then restart the service (below).
+Only some of it still does anything, though:
+
+| Value | Edit it in `.env`? |
+|---|---|
+| `ADMIN_STUDENT_NUMBER`, `ADMIN_PASSWORD` | Yes. Re-applied at every start |
+| `SESSION_IDLE_MINUTES` | Yes |
+| `SIGNIN_PHOTOS_REMOTE` | Yes. Blank turns the sign-in photo wall off |
+| `SERVER_ADDR` | Yes, but the address you open in the browser changes with it |
+| `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE`, `SIGNIN_PHOTOS_FOLDER_ID` | No. These are read once, on the very first start, and Admin → Settings owns them after that. Editing them here changes nothing |
+| `DATABASE_URL`, `POSTGRES_PASSWORD` | No. They have to match the database the container was created with |
+
 ---
 
 ## Upgrading

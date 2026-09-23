@@ -123,6 +123,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("PUT /categories/{id}", d.withSession(d.handleUpdateCategory, fullOnly))
 	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
 	mux.Handle("POST /admin/backup", d.withSession(d.handleBackupNow, fullOnly))
+	mux.Handle("GET /admin/export", d.withSession(d.handleExport, fullOnly))
 
 	// Backup configuration, status, restore and the photo mirror
 	// (docs/design/backup.md §E.8). Admin-only, enforced inside
