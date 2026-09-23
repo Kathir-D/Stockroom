@@ -47,10 +47,14 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # No Go cache in a release build. The module and build caches are
+      # restored as trusted, and a cache written by any other workflow run
+      # could put its objects into a signed-off binary. npm keeps its cache:
+      # `npm ci` checks every tarball against the lockfile's integrity hash.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       # One install at the repository root. A per-app `npm ci --prefix` is the
       # nested-node_modules bug in the place nobody watches (CLAUDE.md §13,
