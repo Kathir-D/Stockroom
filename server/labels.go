@@ -141,12 +141,16 @@ func etagMatches(header, tag string) bool {
 	return false
 }
 
+// A label sheet is generated per request and must never be re-served: the
+// admin who prints, fixes a typo and prints again has to get the second sheet.
 func writePDF(w http.ResponseWriter, filename string, body []byte) {
-	w.Header().Set("Content-Type", "application/pdf")
+	writeDownload(w, "application/pdf", filename, body)
+}
+
+// writeDownload sends a generated file as an attachment, never cached.
+func writeDownload(w http.ResponseWriter, contentType, filename string, body []byte) {
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	// A label sheet is generated per request and must never be re-served: the
-	// admin who prints, fixes a typo and prints again has to get the second
-	// sheet.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)

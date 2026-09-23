@@ -3,6 +3,7 @@ package stockroom
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/joho/godotenv"
@@ -36,7 +37,9 @@ func TestSetEnvValuesRoundTrips(t *testing.T) {
 	if string(raw[:10]) != "# keep me\n" {
 		t.Errorf("the comment did not survive: %q", raw)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits: Go reports every writable file as
+	// 0666 there, so the mode is only a promise this code can keep elsewhere.
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
 	}
 

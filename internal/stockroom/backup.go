@@ -3,7 +3,6 @@ package stockroom
 import (
 	"context"
 	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -170,123 +169,16 @@ func (db *DB) runBackupLocked(ctx context.Context, baseDir string, settings Sett
 	if err := os.Chmod(staging, 0o755); err != nil {
 		return BackupResult{}, fmt.Errorf("create backup dir: %w", err)
 	}
-	tablesDir := filepath.Join(staging, "tables")
-	if err := os.MkdirAll(tablesDir, 0o755); err != nil {
-		return BackupResult{}, fmt.Errorf("create backup dir: %w", err)
-	}
 
 	res := BackupResult{Dir: dir, RanAt: ranAt, Source: source, Encrypted: settings.Encrypted()}
 
-	// One connection for the whole export: COPY TO STDOUT is a protocol-level
-	// operation on a single connection, and holding one is cheaper than
-	// borrowing a dozen in a row from a pool of eight.
-	conn, err := db.Pool.Acquire(ctx)
-	if err != nil {
-		return BackupResult{}, fmt.Errorf("backup: %w", err)
-	}
-	defer conn.Release()
-
-	// Repeatable read pins every query below to the snapshot the first one
-	// takes, so the table list, the rows, the inventory and the accounts all
-	// describe one instant. A run that read each table at its own moment could
-	// export a custody_events row whose asset landed in assets.csv a moment
-	// too early to be there, and the reload would fail on the foreign key.
-	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return BackupResult{}, fmt.Errorf("backup: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	tables, err := publicTables(ctx, tx)
+	snap, err := db.takeSnapshot(ctx, staging, ranAt, settings.Encrypted())
 	if err != nil {
 		return BackupResult{}, err
 	}
+	res.Tables, res.Rows, res.SchemaVersion = snap.tables, snap.rows, snap.manifest.SchemaVersion
+	manifest, inventory, accounts, archive := snap.manifest, snap.inventory, snap.accounts, snap.archive
 
-	builder := newArchiveBuilder()
-	manifest := Manifest{RanAt: ranAt, Rows: map[string]int64{}, Encrypted: settings.Encrypted()}
-
-	for _, table := range tables {
-		file := filepath.Join(tablesDir, table+".csv")
-		selectSQL, err := tableExportSQL(ctx, tx, table)
-		if err != nil {
-			return BackupResult{}, err
-		}
-		rows, err := copyQueryToFile(ctx, conn.Conn(), selectSQL, file)
-		if err != nil {
-			return BackupResult{}, fmt.Errorf("export %s: %w", table, err)
-		}
-		name := archiveTablesDir + table + ".csv"
-		if err := builder.addFile(name, file); err != nil {
-			return BackupResult{}, err
-		}
-		res.Tables = append(res.Tables, TableExport{Table: table, File: name, Rows: rows})
-		res.Rows += rows
-		manifest.Rows[table] = rows
-	}
-
-	// Sequence state, which the CSVs cannot carry: a restore that reloads
-	// assets.csv but leaves assets_asset_tag_seq at 1 collides on the next
-	// insert into a unique column.
-	sequences, err := readSequences(ctx, tx)
-	if err != nil {
-		return BackupResult{}, err
-	}
-	manifest.Sequences = sequences
-	seqCSV, err := sequencesCSV(sequences)
-	if err != nil {
-		return BackupResult{}, err
-	}
-	if err := builder.addBytes(archiveSequences, seqCSV); err != nil {
-		return BackupResult{}, err
-	}
-
-	manifest.SchemaVersion, err = schemaVersion(ctx, tx)
-	if err != nil {
-		return BackupResult{}, err
-	}
-	res.SchemaVersion = manifest.SchemaVersion
-
-	// The two readable files. They go in the archive *and* stay beside it in
-	// the dated folder, because the whole point of them is that somebody can
-	// double-click one without knowing what a zip of CSVs is for.
-	inventory, err := buildInventoryCSV(ctx, tx)
-	if err != nil {
-		return BackupResult{}, err
-	}
-	accounts, err := buildAccountsCSV(ctx, tx)
-	if err != nil {
-		return BackupResult{}, err
-	}
-	if err := builder.addBytes(archiveInventory, inventory); err != nil {
-		return BackupResult{}, err
-	}
-	if err := builder.addBytes(archiveAccounts, accounts); err != nil {
-		return BackupResult{}, err
-	}
-	if err := builder.addBytes(archiveRestoreDoc, restoreDoc); err != nil {
-		return BackupResult{}, err
-	}
-
-	// The manifest is added last because it carries the digests of everything
-	// added before it, and it is the one file not listed in its own Files map:
-	// nothing can carry its own hash.
-	manifest.Files = builder.files
-	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return BackupResult{}, fmt.Errorf("write manifest: %w", err)
-	}
-	if err := builder.addBytes(archiveManifest, manifestJSON); err != nil {
-		return BackupResult{}, err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return BackupResult{}, fmt.Errorf("backup: %w", err)
-	}
-
-	archive, err := builder.finish()
-	if err != nil {
-		return BackupResult{}, err
-	}
 	if settings.Encrypted() {
 		archive, err = encryptArchive(archive, settings.ArchivePassphrase)
 		if err != nil {
@@ -298,7 +190,7 @@ func (db *DB) runBackupLocked(ctx context.Context, baseDir string, settings Sett
 	// nothing else: the raw tables are inside the zip, where the restore reads
 	// them, and a second loose copy on disk would only be a second thing to
 	// keep in step.
-	if err := os.RemoveAll(tablesDir); err != nil {
+	if err := os.RemoveAll(filepath.Join(staging, "tables")); err != nil {
 		return BackupResult{}, fmt.Errorf("stage backup: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(staging, archiveInventory), inventory, 0o644); err != nil {

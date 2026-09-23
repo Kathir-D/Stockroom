@@ -436,52 +436,61 @@ see the relative-path decision above. "Skip for now" stays a quiet button until 
 > Next: scan your own ID card at the sign-in screen and check something out, so you've seen what
 > your students will see.
 
-*"Print the student instructions" waits on `docs/STUDENT-GUIDE.md` (Phase C).*
+*"Print the student instructions" is not built. `docs/STUDENT-GUIDE.md` exists since Phase C (2026-09-23); the wizard does not link to it yet.*
 
 ---
 
 ## Phase C — Publish and prove
 
-- [ ] **Check the working tree, not just history.** Git history is already clean: no `.env`, no
+- [x] **Check the working tree, not just history.** *Done 2026-09-23: nothing tracked that
+      should not be; `uploads/` is empty and every sensitive path is ignored.* Git history is already clean: no `.env`, no
       `uploads/`, no roster CSV and no backup zip has ever been committed (verified with
       `git log --diff-filter=A`). But `uploads/` *exists* on this machine and may hold real student
       photographs; `.run-logs/`, `.cache/`, any `backup/` folder and any `.env` are the same. One
       `git status --ignored` and a careful read before the first `git add -A` on a public repo.
-- [ ] **Scan the history for secrets anyway.** `gitleaks detect --no-git=false` or
+- [x] **Scan the history for secrets anyway.** *Done 2026-09-23 with gitleaks (in Docker, nothing
+      installed): 109 hits, all the public `supabase-demo` JWT, recorded in `.gitleaksignore`.* `gitleaks detect --no-git=false` or
       `trufflehog git file://.`. Free, two minutes, and the one thing that cannot be undone after
       publishing.
-- [ ] **Search the docs for real names and numbers.** `CLAUDE.md`, `TODO.md` and the design docs
+- [x] **Search the docs for real names and numbers.** *Done 2026-09-23: all sample data except the
+      maintainer's own macOS username, now `<you>`.* `CLAUDE.md`, `TODO.md` and the design docs
       quote real data in places ("Admin Admin or Test User", student numbers, the department's
       inventory). Decide per instance whether it is sample data or somebody's actual name.
-- [ ] **Extend CI to a Windows runner.** `tests.yml` proves it on one runner. **Windows *is* the
+- [x] **Extend CI to a Windows runner.** *Done 2026-09-23: `tests-windows` boots the real binary
+      against the runner's PostgreSQL, runs the Go suite and the frontend checks, and parses
+      `dev.ps1`. It does not run `dev.ps1`, so that half of the gap stays open.* `tests.yml` proves it on one runner. **Windows *is* the
       deployment target and `dev.ps1` has never been run on real Windows hardware** (§9, still
       open). This is a correctness gap, not a polish item — it is the single most likely thing to
       break for the first school that tries.
-- [ ] **Branch protection on `main`**: require a PR and the `tests` check, no direct pushes. You
+- [ ] **Branch protection on `main`** *(`CI.md` now lists `tests-windows` beside `tests`; applying it
+      is a repository setting, left to the owner)*: require a PR and the `tests` check, no direct pushes. You
       already work on `testing` and PR into `main`; this makes the habit structural. Keep the
       docs-only CI skip (`CI.md`).
 - [ ] **Fill in the repository description and topics.** `school`, `inventory`, `checkout`,
       `barcode`, `education`, `equipment`, `go`, `svelte`, `self-hosted`. Topics are the only
       discovery mechanism GitHub gives you and they cost thirty seconds.
 - [~] **`docs/INSTALL.md`** — *written 2026-09-22 for macOS and Linux, against the Phase A
-      install path that now exists.* Still to do: Windows, a screenshot per step, and the
+      install path that now exists; the manual path for somebody who would rather pre-fill settings
+      than use the wizard added 2026-09-23.* Still to do: Windows, a screenshot per step, and the
       twenty-minute timing claim, none of which can be honest yet. Document the PowerShell
-      execution-policy prompt with the exact words on the button, and the manual path for somebody
-      who would rather pre-fill settings than use the wizard.
-- [ ] **`docs/STUDENT-GUIDE.md`** — one page, printable, sticky-taped to the wall above the PC.
+      execution-policy prompt with the exact words on the button once `install.ps1` exists.
+- [x] **`docs/STUDENT-GUIDE.md`** *(2026-09-23)* — one page, printable, sticky-taped to the wall above the PC.
       Scan your card. Find your gear. Add to cart. Pick a date. Scan it back when you return it.
       Cheap, and it closes the most common adoption failure: a system that works and a group of
       students who were never told how to use it.
-- [ ] **`docs/ADMIN-GUIDE.md`** — the teacher's manual. Adding an asset. Importing a roster.
+- [x] **`docs/ADMIN-GUIDE.md`** *(2026-09-23; the scanner-threshold procedure waits on a scanner)* — the teacher's manual. Adding an asset. Importing a roster.
       Building the category tree. Printing stickers. What to do when a student leaves with a
       camera. Reading the overdue list. Handing the system to next year's teacher.
       `docs/BACKUP-SETUP.md` is already written at exactly this register — match it.
-- [ ] **A data-export answer.** An admin-panel **Export everything** button producing the same zip
+- [x] **A data-export answer.** *(2026-09-23: Admin → Backup → Export everything, and the column
+      guide in `docs/ADMIN-GUIDE.md` for `inventory.csv` and `accounts.csv`, the two files a
+      teacher opens. The raw `tables/*.csv` are the database tables as-is and get one paragraph.)* An admin-panel **Export everything** button producing the same zip
       the backup writes, named as an export rather than a backup so a teacher looking for "export"
       finds it — plus one page in the admin guide explaining what each CSV column means. "We want to
       stop using Stockroom" should be a documented path, not a rescue operation; it is also what
       makes adopting it low-risk.
-- [ ] **Mark the GitHub backup target experimental**, in the UI and in the docs. It has never
+- [x] **Mark the GitHub backup target experimental** *(2026-09-23: Settings, the Backup screen and
+      `docs/BACKUP-SETUP.md`)*, in the UI and in the docs. It has never
       talked to a real account — no repository created, the REST path unit-tested and hand-read but
       never round-tripped (§13, still open). Drive is verified as of 2026-09-21. Either test it
       properly or say plainly that it is untested; shipping it silently is the one thing that is
@@ -506,8 +515,10 @@ see the relative-path decision above. "Skip for now" stays a quiet button until 
 - [ ] **Carried over from [`TODO.md`](TODO.md), which is otherwise closed:**
       - [ ] Buy a scanner and tune `SCAN_KEY_THRESHOLD_MS` against it. Everything about scanning is
             currently a reasoned 50 ms guess that has never met hardware. Blocked on hardware.
-      - [ ] Run both backup targets at once, break one, and confirm the other still succeeds and
-            the status names which failed.
+      - [x] Run both backup targets at once, break one, and confirm the other still succeeds and
+            the status names which failed. *(2026-09-23, as a test with fake targets:
+            `TestOneBrokenTargetLeavesTheOtherWorking`. A live run against real Drive and GitHub
+            still waits on a GitHub repository.)*
       - [ ] A configuration-only run-through from a fresh install, without opening a text editor.
 
 ---

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +47,7 @@ func TestBackupRoutesRefuseAStudent(t *testing.T) {
 		{http.MethodPost, "/admin/drive/connect", nil},
 		{http.MethodPost, "/admin/drive/finish", map[string]any{"id": "x", "code": "{}"}},
 		{http.MethodGet, "/admin/backup/status", nil},
+		{http.MethodGet, "/admin/export", nil},
 		{http.MethodGet, "/admin/backup/versions?target=local", nil},
 		{http.MethodPost, "/admin/restore/remote", map[string]any{"target": "local", "id": "x", "confirm": "RESTORE"}},
 		{http.MethodGet, "/admin/photos/generations", nil},
@@ -174,6 +177,38 @@ func TestBackupThenRestoreOverHTTP(t *testing.T) {
 	code, _ = call(t, h, http.MethodGet, "/me", token, nil)
 	if code != http.StatusUnauthorized {
 		t.Errorf("GET /me after a restore = %d, want 401: the sessions were not cleared", code)
+	}
+}
+
+// The export is a download, and it is also a backup: restoring its bytes on
+// another machine is how Stockroom moves to a different PC. So this downloads
+// one and feeds it straight back through the restore upload.
+func TestExportThenRestoreOverHTTP(t *testing.T) {
+	h, d, _ := backupDeps(t)
+	_, sn := seedUser(t, d, true, "admin-route-password")
+	token := login(t, h, sn, "admin-route-password")
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/export", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /admin/export = %d %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Errorf("Content-Type = %q, want application/zip", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "stockroom-export-") {
+		t.Errorf("Content-Disposition = %q, want a stockroom-export filename", cd)
+	}
+
+	path := filepath.Join(t.TempDir(), "export.zip")
+	if err := os.WriteFile(path, rec.Body.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, body := uploadRestore(t, h, token, path, "RESTORE")
+	if code != http.StatusOK {
+		t.Fatalf("restoring the export = %d %v", code, body)
 	}
 }
 

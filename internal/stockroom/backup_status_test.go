@@ -3,6 +3,8 @@ package stockroom
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,5 +273,80 @@ func TestStaleSentenceWording(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fakeTarget pushes or fails on command, so both halves of "one target broke"
+// can be arranged without a Google account or a GitHub token.
+type fakeTarget struct {
+	name string
+	err  error
+}
+
+func (f fakeTarget) Name() string { return f.name }
+func (f fakeTarget) Push(context.Context, pushRequest) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return "pushed-by-" + f.name, nil
+}
+func (f fakeTarget) Versions(context.Context) ([]BackupVersion, error)    { return nil, nil }
+func (f fakeTarget) Fetch(context.Context, string) (io.ReadCloser, error) { return nil, nil }
+func (f fakeTarget) Test(context.Context) error                           { return nil }
+
+// Both targets on, one broken (TODO.md, carried into TEMPLATE-TODO.md Phase
+// C). The point of two targets is that one being blocked leaves the other
+// working, so the broken one must not stop the good one, and the screen must
+// say which one failed rather than that "the backup" did. Drive goes first
+// and fails, so a loop that stopped at the first error would never reach
+// GitHub.
+func TestOneBrokenTargetLeavesTheOtherWorking(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	db.BackupDir = t.TempDir()
+
+	restore := withTestSettings(t, db, admin, SettingsInput{
+		DriveEnabled:  boolPtr(true),
+		DriveRemote:   strPtr("gdrive"),
+		GitHubEnabled: boolPtr(true),
+		GitHubRepo:    strPtr("example/stockroom-backup"),
+		GitHubToken:   strPtr("github_pat_FAKEFORTEST"),
+	})
+	defer restore()
+
+	results := pushEach(ctx, []BackupTarget{
+		fakeTarget{name: driveTargetName, err: errors.New("drive: dial tcp: i/o timeout")},
+		fakeTarget{name: githubTargetName},
+	}, pushRequest{})
+	if len(results) != 2 {
+		t.Fatalf("pushEach returned %d results for two targets: %+v", len(results), results)
+	}
+	if results[0].OK || !results[1].OK {
+		t.Fatalf("results = %+v; want drive failed and github succeeded", results)
+	}
+
+	db.recordBackupRun(db.BackupDir, BackupResult{RanAt: time.Now(), Source: BackupSourceManual, Targets: results}, nil)
+	status, err := db.BackupStatus(ctx, admin)
+	if err != nil {
+		t.Fatalf("BackupStatus: %v", err)
+	}
+	for _, row := range status.Targets {
+		switch row.Target {
+		case driveTargetName:
+			if row.LastError == "" {
+				t.Error("the Drive row carries no error after a failed push")
+			}
+		case githubTargetName:
+			if row.LastSuccess == nil || row.LastError != "" {
+				t.Errorf("the GitHub row = %+v; want a success and no error", row)
+			}
+		}
+	}
+	if !containsSubstring(status.Warnings, "drive backup failed") {
+		t.Errorf("the warnings do not name the target that failed: %v", status.Warnings)
+	}
+	if containsSubstring(status.Warnings, "github backup failed") {
+		t.Errorf("the warnings blame the target that worked: %v", status.Warnings)
 	}
 }

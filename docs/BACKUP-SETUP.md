@@ -110,10 +110,16 @@ missing and repeat the command for your machine.
 
 ---
 
-## Step 4 — GitHub (optional)
+## Step 4 — GitHub (optional, experimental)
 
 GitHub needs nothing installed, which is why it is worth having as well: it is
 the harder of the two for a school firewall to block.
+
+> **This target is experimental.** It has never pushed to a real GitHub
+> account. The code is tested against a fake server and read by hand, and that
+> is all. Settings and the Backup screen both label it. Use it as a second copy
+> beside Google Drive or this machine, never as the only one, and restore from
+> it once (Step 7) before you count on it.
 
 ### 4a. Create the repository
 
