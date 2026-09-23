@@ -83,6 +83,12 @@ func setEnvValues(path string, values map[string]string) error {
 		tmp.Close()
 		return fmt.Errorf("write settings file: %w", err)
 	}
+	// On disk before the rename, or a power cut can keep the rename and lose
+	// the data: an empty .env, which is a server with no DATABASE_URL.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write settings file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
 	}
@@ -90,28 +96,6 @@ func setEnvValues(path string, values map[string]string) error {
 		return fmt.Errorf("write settings file: %w", err)
 	}
 	return nil
-}
-
-// readEnvValue returns the value the last KEY= line in the file sets, with
-// one layer of matching quotes removed, or "" if the key is absent.
-func readEnvValue(path, key string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read settings file: %w", err)
-	}
-	var val string
-	for _, line := range strings.Split(string(raw), "\n") {
-		if envKey(line) != key {
-			continue
-		}
-		_, v, _ := strings.Cut(line, "=")
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-		}
-		val = v
-	}
-	return val, nil
 }
 
 // envKey is the key a KEY=value line sets, or "" for a comment or blank line.

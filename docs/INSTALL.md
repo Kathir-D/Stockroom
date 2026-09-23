@@ -90,7 +90,8 @@ systemd unit that starts at boot.
 
 ## After it is running
 
-Open `http://127.0.0.1:8080`. **The database is empty** — no categories, no
+Open `http://127.0.0.1:8080` — or whatever address you passed with `--addr`; an upgrade keeps
+the `SERVER_ADDR` already in `.env`, and the installer prints the URL when it finishes. **The database is empty** — no categories, no
 equipment, no accounts except the failsafe admin if you gave the installer one.
 That is correct; it is the difference between an install and the development
 seed, which never loads here.

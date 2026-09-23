@@ -244,9 +244,11 @@ what is left is Windows and the release-binary download path, both marked below.
       status`, upserting by serial. A school with 300 items cannot type them into a dialog.
       `roster.go` is already the pattern: per-row errors collected with line numbers, the rest
       still landing. No column-mapping screen, no dry run, no undo token — see §Cut.
-      - **Duplicate detection with a readable message.** A serial that already exists gets
-        *"You already have an item with this serial: Canon 70-200mm (added March 3)"*, not a
-        database constraint error and not a silent overwrite.
+      - **Duplicate detection with a readable message.** A serial that already exists is
+        updated, and the report says what it replaced — *"You already had an item with this
+        serial: Canon 70-200mm (added 3 Mar 2026). It was updated to match this row."* — rather
+        than a database constraint error or a silent overwrite. A serial repeated *within* the
+        file is refused, naming the line it first appeared on.
 - [x] **Bulk add N units of one model.** *"Add 12 × Canon LP-E6 battery"* generates `LPE6-001`
       through `LPE6-012`, **shows the list of serials before committing**, and offers the label
       sheet immediately. Linear stock — batteries, SD cards, bags, cables — is most of the unit

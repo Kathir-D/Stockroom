@@ -228,13 +228,6 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 		return mapPgError("check failsafe number", err)
 	}
 
-	// The number being replaced, if any. Read before the write, because
-	// afterwards the file no longer says.
-	previous, err := readEnvValue(db.EnvPath, "ADMIN_STUDENT_NUMBER")
-	if err != nil {
-		return err
-	}
-
 	if err := setEnvValues(db.EnvPath, map[string]string{
 		"ADMIN_STUDENT_NUMBER": sn,
 		"ADMIN_PASSWORD":       password,
@@ -249,20 +242,24 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 	// Replacing the failsafe has to retire the old one. Nothing re-applies
 	// its password any more, but the account itself would stay an admin with
 	// that password for good -- and "the old one may have leaked" is the
-	// likeliest reason to replace it. Demoted and password cleared rather
+	// likeliest reason to replace it. Every failsafe-created account other
+	// than this one, rather than the number .env held a moment ago: after a
+	// failure between the file write and here, a retry would read the new
+	// number back and retire nothing. Demoted and password cleared rather
 	// than deleted, so any custody history naming it survives.
-	if previous != "" && previous != sn {
-		var oldID string
-		err := db.Pool.QueryRow(ctx, `
-			update profiles set is_admin = false, password_hash = null
-			 where student_number = $1 and full_name = 'Failsafe Admin'
-			returning id`, previous).Scan(&oldID)
-		switch {
-		case err == nil:
-			db.Sessions.DeleteForProfile(oldID)
-		case !errors.Is(err, pgx.ErrNoRows):
-			return mapPgError("retire previous failsafe", err)
-		}
+	rows, err := db.Pool.Query(ctx, `
+		update profiles set is_admin = false, password_hash = null
+		 where full_name = 'Failsafe Admin' and is_admin and student_number <> $1
+		returning id`, sn)
+	if err != nil {
+		return mapPgError("retire previous failsafe", err)
+	}
+	retired, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return mapPgError("retire previous failsafe", err)
+	}
+	for _, id := range retired {
+		db.Sessions.DeleteForProfile(id)
 	}
 	return nil
 }

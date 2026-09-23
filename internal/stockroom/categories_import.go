@@ -77,9 +77,9 @@ func (db *DB) ImportCategories(ctx context.Context, actor Actor, r io.Reader) (C
 		return CategoryImportResult{}, err
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r, maxCategoryImportBytes))
+	body, err := readCapped(r, maxCategoryImportBytes)
 	if err != nil {
-		return CategoryImportResult{}, fmt.Errorf("%w: could not read the file: %v", ErrInvalid, err)
+		return CategoryImportResult{}, err
 	}
 
 	format, paths, err := parseCategoryFile(string(body))

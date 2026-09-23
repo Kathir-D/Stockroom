@@ -141,4 +141,17 @@ func TestConfigureFailsafeWritesTheSettingsFile(t *testing.T) {
 	if stillAdmin {
 		t.Error("the replaced failsafe is still an admin")
 	}
+
+	// A retry after a failure between the file write and the retire step:
+	// .env already holds the new number, and the old account must still go.
+	if _, err := db.Pool.Exec(ctx, `update profiles set is_admin = true where student_number = $1`, number); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ConfigureFailsafe(ctx, admin, second, "second-spare"); err != nil {
+		t.Fatalf("ConfigureFailsafe retry: %v", err)
+	}
+	_ = db.Pool.QueryRow(ctx, `select is_admin from profiles where student_number = $1`, number).Scan(&stillAdmin)
+	if stillAdmin {
+		t.Error("a retry with the new number already in .env left the old failsafe an admin")
+	}
 }

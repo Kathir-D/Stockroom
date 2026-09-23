@@ -184,3 +184,14 @@ func TestParseCategoryText(t *testing.T) {
 		}
 	}
 }
+
+// An upload over the cap is refused whole, not cut off at the limit and
+// imported as if the file ended there.
+func TestReadCappedRefusesOversize(t *testing.T) {
+	if _, err := readCapped(strings.NewReader("12345"), 5); err != nil {
+		t.Errorf("exactly the cap = %v, want nil", err)
+	}
+	if _, err := readCapped(strings.NewReader("123456"), 5); !errors.Is(err, ErrInvalid) {
+		t.Errorf("one byte over = %v, want ErrInvalid", err)
+	}
+}

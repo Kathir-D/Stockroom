@@ -3,6 +3,7 @@ package stockroom
 import (
 	"github.com/jackc/pgx/v5"
 
+	"bytes"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -65,7 +66,11 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 		return AssetImportResult{}, err
 	}
 
-	rd := csv.NewReader(io.LimitReader(r, maxAssetImportBytes))
+	body, err := readCapped(r, maxAssetImportBytes)
+	if err != nil {
+		return AssetImportResult{}, err
+	}
+	rd := csv.NewReader(bytes.NewReader(body))
 	rd.FieldsPerRecord = -1
 	rd.TrimLeadingSpace = true
 
@@ -185,6 +190,22 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 // maxAssetImportBytes bounds the upload. Three hundred rows is about 30 KB;
 // eight megabytes is a whole school's inventory many times over.
 const maxAssetImportBytes = 8 << 20
+
+// readCapped reads a whole upload, refusing one over max rather than cutting
+// it off. A LimitReader alone ends at the limit as if the file did, so the
+// rows past it would vanish from an import that reports success -- and each
+// row commits on its own, so the file has to be refused before any of it is
+// applied.
+func readCapped(r io.Reader, max int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not read the file: %v", ErrInvalid, err)
+	}
+	if int64(len(body)) > max {
+		return nil, fmt.Errorf("%w: that file is over %d MB; split it and import the parts", ErrInvalid, max>>20)
+	}
+	return body, nil
+}
 
 func (db *DB) importAssetRow(ctx context.Context, actor Actor, tree categoryTree, byName map[string][]string, get func(string) string, row AssetImportRow) (RosterAction, string, error) {
 	if row.SerialNumber == "" {
