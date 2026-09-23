@@ -119,17 +119,19 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 
 	router := newRouter(deps{db: db})
 
-	// The reel fills on its own goroutine, so the batch is polled for rather
+	// The reel fills on its own goroutine, so a full reel is waited for rather
 	// than assumed. Three tiles from a source that never fails is microseconds;
 	// the bound is here so a broken filler fails this test instead of hanging.
-	var body signInPhotosResponse
+	// Waited for on the reel's counts, not by polling the endpoint: every call
+	// hands tiles out, and enough early calls would reach the ceiling of twice
+	// the buffer and hold the refill the second half of this test waits for.
 	for i := 0; i < 200; i++ {
-		body = readPhotos(t, do(router, http.MethodGet, "/signin/photos"))
-		if len(body.Photos) == 3 {
+		if ready, _ := wall.Counts(); ready == 3 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	body := readPhotos(t, do(router, http.MethodGet, "/signin/photos"))
 	if len(body.Photos) != 3 {
 		t.Fatalf("the endpoint handed out %d tiles after 2s, want 3", len(body.Photos))
 	}
@@ -154,16 +156,31 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 		}
 	}
 
-	// A second call must not be handed the same tiles: they were flipped to
-	// served under the reel's mutex on the way out.
-	if again := readPhotos(t, do(router, http.MethodGet, "/signin/photos")); len(again.Photos) > 0 {
-		for _, u := range again.Photos {
-			for _, first := range body.Photos {
-				if u == first {
-					t.Errorf("tile %s was handed out twice", u)
-				}
-			}
+	// A second call with nothing fresh ready is the drained reel (§2,
+	// "Draining"): it gets the first batch again rather than an empty wall,
+	// each tile still fetchable, and ttl_seconds no longer than the first
+	// hand-out allowed. The filler is stopped first so a refill cannot race
+	// the call; that fresh tiles are never handed out twice is the reel's own
+	// TestPhotoWallTakeIsAtomic.
+	cancel()
+	again := readPhotos(t, do(router, http.MethodGet, "/signin/photos"))
+	if len(again.Photos) != len(body.Photos) {
+		t.Fatalf("a drained reel handed out %d tiles, want the %d already out", len(again.Photos), len(body.Photos))
+	}
+	first := map[string]bool{}
+	for _, u := range body.Photos {
+		first[u] = true
+	}
+	for _, u := range again.Photos {
+		if !first[u] {
+			t.Errorf("repeat %s was never handed out", u)
 		}
+		if rec := do(router, http.MethodGet, u); rec.Code != http.StatusOK {
+			t.Errorf("GET repeat %s = %d, want 200", u, rec.Code)
+		}
+	}
+	if again.TTLSeconds <= 0 || again.TTLSeconds > 900 {
+		t.Errorf("ttl_seconds = %d, want the time the repeats have left", again.TTLSeconds)
 	}
 }
 

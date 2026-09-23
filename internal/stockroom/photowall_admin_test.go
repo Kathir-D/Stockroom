@@ -190,6 +190,42 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 	}
 }
 
+// Re-pasting the live link -- to rename it, or to be sure -- is a label edit,
+// not a switch. Tearing the reel down for it would empty the wall for the
+// minutes a refill takes, and every tile it threw away was from the right
+// folder. Found in review: SetFolder already reported "nothing changed" for
+// exactly this case, and nothing read the answer.
+func TestPhotoWallRepastingTheLiveFolderKeepsTheReel(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	defer restorePhotoWallFolder(t, db)()
+
+	const id = "1SAMEfolderIDbbbbbbbbbbbbbb"
+	source := probeSource(t, id, nil)
+	db.PhotoWallSource = source
+	wall, _ := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 2, Source: &stubSource{data: []byte("tile")}})
+	db.PhotoWall = wall
+	t.Cleanup(func() { db.PhotoWall, db.PhotoWallSource = nil, nil })
+
+	fill(t, wall)
+	genBefore := wall.gen
+
+	status, err := db.SetPhotoWallFolder(ctx, admin, "https://drive.google.com/drive/folders/"+id, "Renamed")
+	if err != nil {
+		t.Fatalf("SetPhotoWallFolder: %v", err)
+	}
+	if status.FolderLabel != "Renamed" {
+		t.Errorf("label = %q, want the new one", status.FolderLabel)
+	}
+	if ready, _ := wall.Counts(); ready != 4 {
+		t.Errorf("%d ready tiles after re-pasting the live folder, want all 4", ready)
+	}
+	if wall.gen != genBefore {
+		t.Error("the generation advanced for a folder that did not change")
+	}
+}
+
 // The test that keeps the privacy property from quietly regressing when
 // somebody later adds a debug field: neither the read nor the write ever says
 // the folder id or a Drive URL out loud.

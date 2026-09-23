@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -168,6 +169,12 @@ type DrivePhotoSource struct {
 	// indistinguishable from a broken feature unless the screen says why.
 	listing bool
 	listed  int
+	// cancelListing stops the listing in progress, and is what SetFolder
+	// calls: a listing of the folder that was just replaced is minutes of
+	// Drive traffic whose result will be thrown away, and the refresher is
+	// one goroutine, so the new folder's listing would otherwise wait behind
+	// it. Nil when nothing is listing.
+	cancelListing context.CancelFunc
 	// rebuildRequested is §7's Rebuild button, waiting to be acted on. It is
 	// what lets that button keep the current manifest: without it, "rebuild
 	// now" and "the manifest is stale" would have to be the same state, and
@@ -217,7 +224,11 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 		return nil, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then restart the server", ErrNotConfigured)
 	}
 	s := &DrivePhotoSource{
-		remote:   strings.TrimSpace(opts.Remote),
+		// A trailing colon is how rclone *prints* a remote ("gdrive:"), so it
+		// is a natural thing to type into .env -- and left on, driveRoot would
+		// build "gdrive:,root_folder_id=...:", which rclone reads as a path
+		// inside the remote rather than as a connection string.
+		remote:   strings.TrimSuffix(strings.TrimSpace(opts.Remote), ":"),
 		dir:      opts.Dir,
 		interval: opts.RefreshInterval,
 		list:     streamRcloneList,
@@ -248,7 +259,8 @@ func (s *DrivePhotoSource) driveRoot(folderID string, file ...string) string {
 }
 
 // SetFolder points the source at a different Drive folder, discards the
-// manifest for the old one and asks the refresher to list the new one now.
+// manifest for the old one, cancels any listing of it still running, and asks
+// the refresher to list the new one now.
 //
 // It reports whether anything changed, so §7 can skip the reel teardown when
 // an admin pastes the link that is already live. The reel's half of a switch
@@ -270,6 +282,9 @@ func (s *DrivePhotoSource) SetFolder(folderID string) bool {
 	s.listed = 0
 	s.lastErr, s.lastErrAt = nil, time.Time{}
 	s.nextAttempt = time.Time{}
+	if s.cancelListing != nil {
+		s.cancelListing()
+	}
 	s.mu.Unlock()
 
 	// Buffered and non-blocking: a nudge that finds the channel full has
@@ -473,23 +488,33 @@ func (s *DrivePhotoSource) loadManifest() {
 // screen say "rebuilding -- 12,400 files listed so far" instead of showing an
 // empty wall with no explanation for several minutes.
 func (s *DrivePhotoSource) buildManifest(ctx context.Context, folderID string) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	s.mu.Lock()
 	s.listing, s.listed = true, 0
+	s.cancelListing = cancel
 	s.mu.Unlock()
 
 	entries, err := s.listFolder(ctx, folderID)
 
 	s.mu.Lock()
 	s.listing = false
-	if err != nil {
-		s.lastErr, s.lastErrAt = err, s.now()
-		s.nextAttempt = s.now().Add(photoManifestRetry)
+	s.cancelListing = nil
+	// The folder may have been replaced while this listing ran -- usually
+	// because SetFolder cancelled it. Checked before the error, not after: a
+	// listing of the old folder that failed (or was cancelled) is not news
+	// about the new one, and recording it would put a stale error on the admin
+	// screen and push the new folder's first listing behind the five-minute
+	// retry gate. Filing a *successful* result would be worse: photographs
+	// from the folder that was just replaced.
+	if folderID != s.folderID {
 		s.mu.Unlock()
 		return
 	}
-	// The folder may have been replaced while this listing ran. Filing the
-	// result under the new folder would show photographs from the old one.
-	if folderID != s.folderID {
+	if err != nil {
+		s.lastErr, s.lastErrAt = err, s.now()
+		s.nextAttempt = s.now().Add(photoManifestRetry)
 		s.mu.Unlock()
 		return
 	}
@@ -827,8 +852,15 @@ func probeRcloneFolder(ctx context.Context, remote string) error {
 
 // catRclone downloads one file to memory. The path argument is only for the
 // error message; remote already carries it.
+//
+// --head stops the download one byte past the ceiling. The manifest already
+// skips anything listed as oversized, but runRclone buffers everything rclone
+// prints, so a file that grew after the listing would otherwise be held in
+// memory whole before normalizePhoto's own limit ever saw it. One byte over is
+// all normalizePhoto needs to refuse it.
 func catRclone(ctx context.Context, remote, file string) ([]byte, error) {
-	out, err := runRclone(ctx, photoFetchTimeout, "cat", remote)
+	out, err := runRclone(ctx, photoFetchTimeout, "cat", remote,
+		"--head", strconv.Itoa(photoMaxSourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", path.Base(file), err)
 	}

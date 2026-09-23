@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -338,8 +339,11 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	if label == "" {
 		return PhotoWallStatus{}, fmt.Errorf("%w: give the folder a short name. It is what this screen and the log show in place of the link, which is never displayed", ErrInvalid)
 	}
-	if len(label) > maxPhotoWallLabel {
-		return PhotoWallStatus{}, fmt.Errorf("%w: that name is %d characters; keep it under %d", ErrInvalid, len(label), maxPhotoWallLabel)
+	// Counted in characters, not bytes: the field's maxlength counts what the
+	// admin sees, and "Fotos del partido — otoño" must not be refused as too
+	// long by a server measuring it in UTF-8.
+	if n := utf8.RuneCountInString(label); n > maxPhotoWallLabel {
+		return PhotoWallStatus{}, fmt.Errorf("%w: that name is %d characters; keep it under %d", ErrInvalid, n, maxPhotoWallLabel)
 	}
 	if db.PhotoWallSource == nil {
 		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall has no Drive source on this server. Set SIGNIN_PHOTOS_REMOTE, install rclone, and restart", ErrNotConfigured)
@@ -364,8 +368,14 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	// Tiles already *served* are deliberately left to expire on their TTL.
 	// Their URLs sit in a browser that has already rendered them, and 404ing a
 	// live page to save fifteen minutes is the worse trade.
-	db.PhotoWallSource.SetFolder(folderID)
-	db.PhotoWall.Invalidate()
+	//
+	// Only when the folder actually changed. Re-pasting the live link -- to
+	// rename it, or to be sure -- is a label edit, and tearing the reel down
+	// for it would empty the wall for the minutes a refill takes while every
+	// tile it threw away was from the right folder.
+	if db.PhotoWallSource.SetFolder(folderID) {
+		db.PhotoWall.Invalidate()
+	}
 
 	f, err := db.loadPhotoWallFolder(ctx)
 	if err != nil {
