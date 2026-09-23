@@ -2,7 +2,7 @@
 
 This file is the master reference for the project: what it is, how it's built, how to set it up, and the build timeline. Keep it updated as decisions get made. It's meant to be the single source of truth for anyone (human or AI) picking up this codebase. `TODO.md` tracks the phase-by-phase backend work; this file explains the *why* and the *shape*.
 
-Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13). Amended 2026-09-18: Phase 8, kits — the last item on the build list — built and shipped (Sections 2, 6.2, 7, 8, 8.1, 12, 13; `docs/adr/0002`), and the backup system backtested end to end against a live database, which found and fixed three reporting defects (Section 13). Amended 2026-09-22: **the production install path** — a plain `postgres:17` container instead of the Supabase stack, the migrations and the web UI compiled into one binary that applies its own schema at boot, and an OS service that restarts it (Sections 3, 4, 5, 8, 8.1, 9, 13; `docs/INSTALL.md`, `TEMPLATE-TODO.md` Phase A). **Development is unchanged**: the Supabase CLI is still the dev database and `scripts/dev.sh` is still the dev loop.
+Last major revision: 2026-09-04 (product flow, auth model, and backend architecture pinned down; Section 13). Amended 2026-09-13: browse-list ordering, custodian-field visibility, and the backend deepening pass (one `DB` handle, one category tree, endpoint table in Section 8; Section 13). Amended 2026-09-14: the frontend, built as the single `packages/ui` workspace package both hosts render (Sections 4, 5, 8, 9, 13). Amended 2026-09-14: the Phase 7 backup & restore design, specified in `docs/design/backup.md` (Sections 8, 9, 11, 13), and a pre-commit hook that runs the suite. Amended 2026-09-15: the four shell/PowerShell scripts consolidated into one `scripts/dev.sh` (+ `dev.ps1`) with subcommands (Sections 8, 9, 13). Amended 2026-09-18: Phase 8, kits — the last item on the build list — built and shipped (Sections 2, 6.2, 7, 8, 8.1, 12, 13; `docs/adr/0002`), and the backup system backtested end to end against a live database, which found and fixed three reporting defects (Section 13). Amended 2026-09-22: **the production install path** — a plain `postgres:17` container instead of the Supabase stack, the migrations and the web UI compiled into one binary that applies its own schema at boot, and an OS service that restarts it (Sections 3, 4, 5, 8, 8.1, 9, 13; `docs/INSTALL.md`, `TEMPLATE-TODO.md` Phase A). **Development is unchanged**: the Supabase CLI is still the dev database and `scripts/dev.sh` is still the dev loop. Amended 2026-09-22: **Phase B, the first-run experience** — a setup wizard, barcode labels and ID cards, the category/asset imports and bulk add, a configurable student-number format, and `examples/` (Sections 6.2, 8, 8.1, 13; `TEMPLATE-TODO.md` Phase B).
 
 ---
 
@@ -125,13 +125,15 @@ The base schema was designed for a broader feature set than v1 ships. One additi
 - `password_hash` is now actually used: bcrypt hash, **null until the user sets one** (see Section 7)
 
 **`assets`**
-- `create unique index on assets(serial_number)`. The serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7IBAT-001`, `T5IBAT-001`, `SD-014`.
+- `create unique index on assets(serial_number)`. The serial is the scan key. Barcode stickers encode it. Linear items (batteries, bags, SD cards) use model-prefixed serials like `T7B-001`, `T5B-001`, `SD-014`. **Keep serials short**: the small label (for batteries, SD cards and lens barrels) fits about 9 characters on a US Letter sheet and 7 on A4 before its bars get too thin to scan, so the old examples here, `T7IBAT-001` at 10, would not have printed on the one label they were meant for. `GET /labels/layouts` reports each layout's `max_serial_chars`, and the print dialog warns past it.
 - **`serial_number` is `not null` and `asset_tag` is generated** (`20260914120000_asset_tag_autogen.sql`). The two columns had been doing one job: `asset_tag` came from the base schema, written before the barcode flow existed, and `serial_number` then took the identifier role. Entering real inventory would have meant typing two unique codes per unit, one of which nothing ever reads. Now `asset_tag` defaults to `'AST-' || lpad(nextval('assets_asset_tag_seq'), 6, '0')` — **in the column default, not in Go**, so the admin panel, `seed.sql`, a CSV import and a hand-written `INSERT` in Studio all get one without knowing they have to. `AssetInput` carries no `asset_tag`, `UpdateAsset` never touches it, and the detail dialog shows it to admins only. The serial is the one identifier anybody types or reads.
 - `photo_path text`
 - `asset_status` enum gains `'unavailable'`. The catch-all for broken/missing/retired. v1 uses only `available` / `checked_out` / `unavailable`; the other enum values are left in place, unused.
 
 **`categories`.** One addition, `sort_order integer not null default 0` (`20260913090000_category_sort_order.sql`). It is a row's position among its *siblings*, ascending, with the name breaking a tie, and it exists because the browse screen sorts by `examples/categories.media-department.md`'s document order rather than alphabetically (§13, 2026-09-12) and nothing in the table recorded that order. Gaps and duplicates are harmless; the numbers never have to restart at 1 under a parent. Phase 5's category CRUD maintains it. Otherwise unchanged: used as a strict 3-level tree via `parent_id`:
 `Type` (e.g. Lenses) → `Category` (e.g. Zooms) → `Subcategory / Model` (e.g. Canon 70-200mm f/2.8). Each physical unit is an `asset` whose `category_id` points at a Model node. Seeded from `examples/categories.media-department.md`, whose Type and Model names are used verbatim. That file names the Categories under `Lenses` (Zooms, Primes, Accessories) and `Cameras/Bodies` (Camera Model) but lists models straight under the other six types, so the seed invents a middle Category there (Lights → Studio Lights + Light Modifiers, Audio Stuff → Wireless Mics + Wired Mics, and so on); those six are the seed's own naming and are safe to rename. Branches may stop short of depth 3 when a Category has no models yet: `Primes` is seeded empty because `examples/categories.media-department.md` records none in inventory. `categories.name` is unique across the whole table, not per parent, so generic names are worth avoiding.
+
+**`app_settings`, Phase B (`20260922100000`, `20260922110000`).** `student_number_format` (`digits` \| `alphanumeric` \| `custom`, default `digits`) and `student_number_pattern` (a Go regexp, used only for `custom`, anchored by the server) decide what a student number may look like; the sign-in field filters to the same rule via `GET /signin/config`. A save that existing accounts would fail is refused and names them. `setup_step` and `setup_completed_at` are the wizard's resume point and its done-marker; the migration marks any database that already has accounts as done, so an upgrade never sends a working install through the wizard.
 
 **Unused in v1 (tables kept, no code written against them).** `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, `assets.custom_fields`, `assets.location_id`.
 
@@ -195,16 +197,24 @@ stockroom/
 │   ├── errors.go              # sentinels server/ maps to statuses (ErrNotFound, ErrForbidden, ErrNotConfigured, ...)
 │   ├── pgerr.go               # Postgres error codes -> ErrConflict / ErrInvalid / ErrNotFound
 │   ├── password.go            # bcrypt helpers, student-number validation
+│   ├── student_number.go      # the student-number format: digits | alphanumeric | custom regex, installed at boot
 │   ├── failsafe.go            # EnsureFailsafeAdmin, run on every server start
+│   ├── envfile.go             # setEnvValues: the ONE writer of .env (temp file + rename), for the failsafe only
+│   ├── setup.go               # the first-run wizard: first admin, resume state, failsafe, load/remove examples
 │   ├── sessions.go            # in-memory SessionStore with idle timeout
 │   ├── auth.go                # Actor, RequireAdmin, RequireFullSession, the login/logout/Resolve/Me methods on DB
 │   ├── users.go, roster.go    # user CRUD + password reset; roster CSV import
 │   ├── categories.go          # categoryTree (the one in-memory shape of the table) + GetCategoryTree
 │   ├── categories_admin.go    # category create/update/delete, depth and cycle rules
+│   ├── categories_import.go   # a whole tree from indented text/Markdown or type,category,model CSV; idempotent
 │   ├── assets.go              # browse: ListAssets, GetAsset, current-holder reads, browse sort
 │   ├── assets_admin.go        # asset create/update/delete/status/photo
 │   ├── custody.go             # ScanItem, CheckOutAssets, CheckInAsset, the lists and histories
 │   ├── kits.go                # kits: CRUD, membership, CheckInKit. A kit holds no custody
+│   ├── assets_import.go       # asset CSV import: upsert by serial, per-row errors, names what an update replaced
+│   ├── assets_bulk.go         # N numbered units of one model: preview, then write, continuing the series
+│   ├── barcode.go             # Code 128 as a PNG, and the label layouts with their measured limits
+│   ├── labels.go              # the label sheet and ID-card PDFs, bars drawn as vectors
 │   ├── photos.go              # staged photo writes, FilesPrefix, photo URLs
 │   ├── settings.go            # app_settings: load/save, .env as a first-boot seed, secrets redacted
 │   ├── backup.go              # the nightly run: snapshot, CSVs, inventory/accounts, prune, push
@@ -226,6 +236,9 @@ stockroom/
 ├── server/                    # net/http JSON API on localhost; handlers decode, call the package, encode
 │   ├── main.go, router.go, json.go, session.go, files.go
 │   ├── ui.go                  # serves the embedded web UI at / and /static/; the catch-all route
+│   ├── imports.go             # the category/asset imports and bulk add; uploadBody takes multipart or a raw body
+│   ├── labels.go              # label and ID-card PDFs, the barcode PNG, the layout list
+│   ├── setup.go               # /signin/config and the /setup routes
 │   └── auth.go, users.go, assets.go, custody.go, kits.go, admin.go, photowall.go
 ├── deploy/                    # what an INSTALL runs, as opposed to what development runs
 │   ├── docker-compose.yml     # one postgres:17, 127.0.0.1 only, password from .env, no default
@@ -253,8 +266,9 @@ stockroom/
 │       ├── stores/            # session, cart, cart-items, catalog, kits, scan, router (hash)
 │       ├── components/ui/     # shadcn-svelte generated
 │       ├── components/app/    # StatusDot, Serial, ModelRow, UnitRow, CartDock, ScanResult,
-│       │                      # PasswordInput (masked field + reveal toggle), PhotoWall, ...
-│       └── screens/           # sign-in, browse, cart-page, kits, history, admin/{assets,categories,users,overdue,backup,settings,photo-wall}
+│       │                      # PasswordInput (masked field + reveal toggle), PhotoWall, FirstAdmin,
+│       │                      # StudentNumberFormat, ImportDialog, BulkAddDialog, PrintLabelsDialog, BarcodeDialog, ...
+│       └── screens/           # sign-in, setup (the wizard), browse, cart-page, kits, history, admin/{assets,categories,users,overdue,backup,settings,photo-wall}
 ├── desktop-app/               # Wails app, primary UI; Go side is only a window host
 ├── web-app/                   # Vite + Svelte 5 secondary UI
 ├── supabase/                  # config.toml, migrations/, seed.sql, tests/ (pgTAP)
@@ -264,7 +278,9 @@ stockroom/
 │                              # counterpart (untested on Windows). Plus Start Stockroom.command (a
 │                              # double-click wrapper for dev.sh up)
 ├── docs/                      # adr/ (decision records), agents/ (skill notes), design/ (design system, backup spec)
-├── examples/                  # obviously-fake example data: category trees, a roster, an asset list
+├── examples/                  # obviously-fake example data ("Example …", numbers 900001-5, EXAMPLE- serials):
+│                              # two category trees, a roster, an asset list. embed.go puts them in the binary
+│                              # for the wizard's "load examples"; examples_test.go imports each one
 ├── CONTEXT.md                 # domain glossary
 ├── TEMPLATE-TODO.md           # the template track: packaging for other schools + GitHub setup
 ├── CLAUDE.md, TODO.md, README.md, TESTING.md, CI.md
@@ -274,7 +290,7 @@ Neither app has a `src/lib/` any more: everything they used to hold moved into `
 
 ### 8.1 Endpoints
 
-Every route except `/health`, the two logins and `/files/` needs a session. "Admin" below means `RequireAdmin` inside the package, not the router. A limited session (Section 7) reaches only the three routes marked so.
+Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` and the static files needs a session. "Admin" below means `RequireAdmin` inside the package, not the router. A limited session (Section 7) reaches only the three routes marked so.
 
 | Route | Who | Notes |
 |---|---|---|
@@ -297,6 +313,16 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`) or a `text/csv` body |
 | `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}` |
 | `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
+| `POST /users/cards.pdf` | admin | `{user_ids}`; a sheet of ID cards with a scannable barcode, for schools whose own cards carry none |
+| `POST /categories/import` | admin | multipart `file` or a raw `text/plain`/`text/csv` body. Indented text, Markdown (headings and list items only) or `type,category,model` CSV, sniffed. One transaction with a savepoint per row, idempotent, so re-running a corrected file only adds what is new |
+| `POST /assets/import` | admin | multipart `file` or a raw CSV body. Upserts by `serial_number`; per-row errors with line numbers; an update names what it replaced; status and custody are never touched |
+| `POST /assets/bulk-preview`, `POST /assets/bulk` | admin | `{name, prefix, count, category_id?}`. The preview writes nothing and returns the exact serials; numbering continues from the highest already in use under that prefix |
+| `GET /labels/layouts` | any full | the label sheets, named by what they go on, each with its paper and an approximate `max_serial_chars` |
+| `POST /assets/labels.pdf` | admin | `{asset_ids, layout}`; a PDF to print at 100%. A serial too long for the layout is refused here, whatever the dialog warned |
+| `GET /assets/{id}/barcode.png` | any full | `?width=`, `?download=1`. One barcode, big enough to scan off the monitor — the recovery path when a sticker falls off. Fetched by the UI rather than put in an `<img src>`, which cannot carry the token |
+| `GET /setup`, `PUT /setup` | admin | the wizard's state: `{needs_admin, step, completed}`; PUT takes `{step, completed}` |
+| `POST /setup/failsafe` | admin | `{student_number, password}`, written into the `.env` the server started from and ensured immediately. Refused if it is the caller's own number or an ordinary account's |
+| `POST /setup/examples`, `DELETE /setup/examples` | admin | load `examples/` through the real importers, or remove exactly those rows. A half whose serials or numbers a real row already holds is skipped, not merged |
 | `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
 | `POST /admin/backup` | admin | the whole run: archive, photo mirror, every enabled target. A failed push is in `targets`, not an error |
 | `GET /admin/backup/status` | admin | the backup screen's one read: warnings (already worded), per-target state, photo generations, log tail |
@@ -308,6 +334,8 @@ Every route except `/health`, the two logins and `/files/` needs a session. "Adm
 | `POST /admin/restore/remote` | admin | the same restore, bytes fetched from a target by date |
 | `GET /admin/photos/generations`, `POST /admin/photos/restore`, `DELETE /admin/photos/generations/{name}` | admin | the mirror. Deleting is the only deletion it has, and it is a person pressing a button |
 | `GET /admin/photo-wall`, `PUT /admin/photo-wall`, `POST /admin/photo-wall/rebuild`, `GET /admin/photo-wall/preview` | admin | the sign-in photo wall's Drive folder. **No response ever carries the folder id or a Drive URL** — a share link is a capability, so the field is write-only and the screen gets a typed label, counts and a preview strip instead. `PUT` takes `{link, label}` and parses → probes Drive → writes → tears the reel down; a folder it cannot reach writes nothing and leaves the previous one live. The preview does not mark tiles served |
+| `GET /signin/config` | nobody | the sign-in field's filter for the student-number format, and `needs_setup` when there are no accounts yet. The sign-in screen works without it: digits stands in until it arrives |
+| `POST /setup/admin` | nobody | `FirstAdminInput` (number, names, password, the student-number format). **Only while `profiles` is empty**, checked and inserted under a table lock, so two browsers racing the form make one admin |
 | `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
 | `GET /signin/photos` | nobody | the sign-in photo wall's batch: `{photos: [...], ttl_seconds}`. **Always 200**, with `[]` whenever the wall is off, unconfigured, warming up or drained — every one of those means "draw no columns" to the only caller, and the sign-in screen must never look broken (`docs/design/signin-photo-wall.html` §5, §9) |
 | `GET /`, `GET /static/...` | nobody | the embedded web UI (`server/ui.go`, `web-app/embed.go`). `GET /` is the **least specific pattern on the mux**, so every route above still wins and the catch-all only ever sees paths no endpoint claims; a path that is not a file in `dist` answers `index.html`, which is what makes a bookmarked `#/kits` work. The bundle directory is `static`, **not** Vite's default `assets`, because `GET /assets/{id}` is already an endpoint and a default build would have the router answer a JavaScript request with "asset not found". A binary built with an empty `dist` answers 503 in words rather than a blank page |
@@ -664,6 +692,16 @@ decisions, all verified against a scratch database with no Supabase anywhere.
       and the photo-wall folder are first-boot seeds that `app_settings` owns from then on — an
       installer that rewrote them every release would be the "a value an admin typed reverts on the
       next restart" failure the Phase 7 decision rules out.
+
+**Closed (2026-09-22, Phase B: the first-run experience; `TEMPLATE-TODO.md` Phase B)**
+Phase A made it installable; Phase B makes a fresh install usable by a teacher who has never seen it — no accounts, no categories, no items, no labels.
+- [x] **The wizard gate diverges from the plan.** `TEMPLATE-TODO.md` said the wizard exists only while `profiles` is empty. On the installs this project actually produces, that table is **never** empty when a browser first opens it: `install.sh` asks for the failsafe admin and the server creates that account at boot. Gated on an empty table, the wizard would never appear. So only **creating the first admin** keeps that gate — it is the one unauthenticated write in the system, and the check and the insert happen in one transaction under a table lock, so two browsers racing the form make one admin and one refusal. Everything after it is an ordinary admin-only call, gated on `app_settings.setup_completed_at`, which the migration sets on any database that already has accounts so an upgrade never lands a working school in the wizard.
+- [x] **The failsafe is written into `.env`, not the database.** Its whole job is getting back in after the database is lost, so the database is the one place it cannot live. `setEnvValues` is the only code that writes `.env`: temp file plus rename, the file's mode kept, values single-quoted, every other line byte-for-byte untouched. The wizard refuses the admin's own number (the failsafe's password is re-applied at every start, so it would silently overwrite theirs) and any ordinary account's (which it would promote to admin). If the installer already made one, the step says so rather than making a second.
+- [x] **Example rows are recognised by content, not by a reserved UUID.** They go in through the real importers, which generate their own ids, so a reserved id would have meant a second, example-only code path. They are recognised by two things a real row will not have together: an `EXAMPLE-` serial **and** a name starting `Example`, or a `90000x` number **and** the first name `Example`. Loading skips a half whose keys a real row already holds rather than merging into it — found by a test: the roster upsert would have renamed a real student numbered 900004 to "Example Student-Four", and "remove the examples" would then have deleted them.
+- [x] **The example serials are short** (`EXAMPLE-CAM1`, not `EXAMPLE-CAM-001`). `<Serial>` middle-truncates past 14 characters, so five examples all rendered as the same `EXAM…-001` — a demo of the catalogue that made every item look identical.
+- [x] **Serials have a practical length limit, and it is the small label.** Code 128 widens with every character, and a bar thinner than 0.25 mm did not decode at 203 DPI (measured with `zbarimg`, which also moved the floor up from the quoted 0.19 mm). The small label fits about 9 characters on Letter and 7 on A4; §6.2's examples were shortened to match.
+- [x] **Bugs the Phase B tests found, all fixed:** the asset import could never create an item (it matched `ErrNotFound` on an error `mapPgError` passes through as `pgx.ErrNoRows`, so every new serial failed); every bulk add was a 500 (`RETURNING` used the `a.` column list without aliasing the table); the category import ran in one transaction without savepoints, so the first name collision aborted it and every later row was reported as failed too; the text parser counted a tab as half a level, putting a tab-indented child beside its own parent, and turned every line of Markdown prose into a top-level Type; the label and bulk handlers dropped `decodeJSON`'s error and answered malformed JSON with an empty 200; and loading the examples could rename, then delete, a real student numbered 900004 (above).
+- [x] **The settings are loaded before the failsafe is ensured.** The old boot order validated an `AB12345` failsafe against the digits default, logged a warning and started with no way in — on exactly the school the format setting exists for.
 
 **Still open**
 - [ ] **The installer builds from a checkout**, so it needs Go and Node on the machine it is run
