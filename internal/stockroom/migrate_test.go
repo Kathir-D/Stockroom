@@ -37,13 +37,18 @@ func TestMigrateIsIdempotent(t *testing.T) {
 // the tempting behaviour and the wrong one: a migration that silently does not
 // run is precisely the failure this whole mechanism exists to prevent, and it
 // surfaces later as a missing column in a query nobody changed.
+//
+// A version that is not exactly 14 digits is refused for the same reason:
+// versions sort as strings, so `9_fix.sql` would run after every real file.
 func TestMigrateRejectsUnversionedFile(t *testing.T) {
-	fsys := fstest.MapFS{
-		"20260101000000_fine.sql": &fstest.MapFile{Data: []byte("select 1")},
-		"oops.sql":                &fstest.MapFile{Data: []byte("select 1")},
-	}
-	if _, err := migrationFilenames(fsys); err == nil {
-		t.Fatal("migrationFilenames accepted a file with no version prefix; want an error")
+	for _, bad := range []string{"oops.sql", "9_fix.sql", "202601010000001_long.sql"} {
+		fsys := fstest.MapFS{
+			"20260101000000_fine.sql": &fstest.MapFile{Data: []byte("select 1")},
+			bad:                       &fstest.MapFile{Data: []byte("select 1")},
+		}
+		if _, err := migrationFilenames(fsys); err == nil {
+			t.Errorf("migrationFilenames accepted %q; want an error", bad)
+		}
 	}
 }
 

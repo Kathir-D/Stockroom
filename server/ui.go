@@ -24,11 +24,16 @@ const uiPrefix = "/static/"
 //
 // Three behaviours, in order:
 //
-//   - `/` and any path that is not a file in dist answer with index.html. The
+//   - `/` and any path outside uiPrefix that is not a file in dist answer
+//     with index.html. The
 //     app routes on the hash (packages/ui/src/lib/stores/router), so this is
 //     not really an SPA fallback -- it is what makes a bookmarked
 //     `http://localhost:8080/#/kits` work, and what makes a mistyped path show
 //     the app rather than a bare 404 page a student cannot act on.
+//   - A missing file under uiPrefix is a plain 404. Nobody types those paths;
+//     a browser asks for them from a script or link tag, and index.html in
+//     reply is a 200 of HTML where JavaScript was expected -- a MIME error in
+//     the console instead of a 404 that says which file is missing.
 //   - A file that does exist is served as itself.
 //   - A binary built without the UI says so, in words, rather than answering a
 //     blank page. See webapp.Present.
@@ -38,7 +43,13 @@ const uiPrefix = "/static/"
 // with a more specific pattern, and Go's ServeMux prefers the specific one --
 // so this handler only ever receives paths no endpoint claims.
 func uiHandler() http.Handler {
-	if !webapp.Present() {
+	return uiHandlerFor(webapp.Dist, webapp.Present())
+}
+
+// uiHandlerFor is uiHandler over any filesystem, so the routing rules can be
+// tested without a built UI.
+func uiHandlerFor(dist fs.FS, present bool) http.Handler {
+	if !present {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 503 rather than 404: the UI is not missing, it was never built
 			// into this binary, and that is a build problem with an operator
@@ -50,11 +61,15 @@ func uiHandler() http.Handler {
 		})
 	}
 
-	files := http.FileServer(http.FS(webapp.Dist))
+	files := http.FileServer(http.FS(dist))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-		if name == "" || !fileExists(name) {
-			serveIndex(w, r)
+		if name == "" || !fileExists(dist, name) {
+			if strings.HasPrefix(r.URL.Path, uiPrefix) {
+				http.NotFound(w, r)
+				return
+			}
+			serveIndex(dist, w)
 			return
 		}
 		// The bundles carry a content hash in their filename, so a cached copy
@@ -75,8 +90,8 @@ func uiHandler() http.Handler {
 // index.html asks for JavaScript that the new binary does not have. The closet
 // PC's browser stays open for months, which is exactly long enough for that to
 // happen across a version.
-func serveIndex(w http.ResponseWriter, r *http.Request) {
-	body, err := fs.ReadFile(webapp.Dist, "index.html")
+func serveIndex(dist fs.FS, w http.ResponseWriter) {
+	body, err := fs.ReadFile(dist, "index.html")
 	if err != nil {
 		http.Error(w, "web UI not available", http.StatusServiceUnavailable)
 		return
@@ -90,8 +105,8 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // fileExists reports whether name identifies a file in the embedded UI.
-func fileExists(name string) bool {
-	info, err := fs.Stat(webapp.Dist, name)
+func fileExists(dist fs.FS, name string) bool {
+	info, err := fs.Stat(dist, name)
 	return err == nil && !info.IsDir()
 }
 
