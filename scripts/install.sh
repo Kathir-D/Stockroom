@@ -20,8 +20,8 @@
 # argument: arguments are readable by every local user through `ps` and
 # /proc/<pid>/cmdline, and they land in shell history.
 #
-# Running it a second time is the UPGRADE path: it takes a database dump
-# first, rebuilds, swaps the binary and restarts the service. That is why "it
+# Running it a second time is the UPGRADE path: it rebuilds, stops the
+# service, takes a database dump, swaps the binary and restarts the service. That is why "it
 # broke, I'll run the installer again" is the thing that fixes it, and why the
 # dump happens before anything is replaced -- a migration that goes wrong is
 # the one failure an upgrade can cause, and the dump is the only protection
@@ -41,7 +41,12 @@ SERVER_ADDR="${SERVER_ADDR:-127.0.0.1:8080}"
 INSTALL_SERVICE=1
 OPEN_BROWSER=1
 ADMIN_NUMBER="${ADMIN_STUDENT_NUMBER:-}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+# The password is never taken from the environment (see the header): unset
+# first, because assigning to a variable that arrived exported keeps it
+# exported, and every child below -- npm lifecycle scripts included -- would
+# inherit it.
+unset ADMIN_PASSWORD
+ADMIN_PASSWORD=""
 
 say()  { echo "$@"; }
 ok()   { echo "  [OK] $*"; }
@@ -115,8 +120,52 @@ if ! docker info >/dev/null 2>&1; then
 fi
 ok "the Docker daemon is responding"
 
+PLIST="$HOME/Library/LaunchAgents/com.stockroom.server.plist"
+UNIT="/etc/systemd/system/stockroom.service"
+SERVICE_STOPPED=0
+
+# Both keyed on the service definition existing rather than on its state: a
+# unit somebody disabled by hand can still be running, and `is-enabled` would
+# leave it writing to the database through the dump.
+stop_service() {
+  case "$OS" in
+    macos) [ -f "$PLIST" ] && launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true ;;
+    linux) [ -f "$UNIT" ] && sudo systemctl stop stockroom.service >/dev/null 2>&1 || true ;;
+  esac
+}
+start_service() {
+  case "$OS" in
+    macos) [ -f "$PLIST" ] && launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true ;;
+    linux) [ -f "$UNIT" ] && sudo systemctl start stockroom.service >/dev/null 2>&1 || true ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
-# 2. Is this an upgrade? Take a dump before touching anything.
+# 2. Build: one binary with the UI and the migrations inside it
+# ---------------------------------------------------------------------------
+say ""
+say "Building..."
+
+# One definition of an installed JS tree, called from here as well as from
+# `dev.sh up` and `dev.sh test` (CLAUDE.md §13, 2026-09-14). Duplicating the
+# npm install here is how the nested-node_modules bug gets back in.
+"$REPO/scripts/dev.sh" deps >/dev/null || die "dependency install failed; run ./scripts/dev.sh deps to see why"
+ok "dependencies are up to date"
+
+( cd "$REPO" && npm run build --workspace=web-app >/dev/null ) || die "the web UI failed to build"
+[ -f "$REPO/web-app/dist/index.html" ] || die "the web UI built but produced no index.html"
+ok "web UI built"
+
+mkdir -p "$REPO/.build"
+# -trimpath and a stripped binary: neither is load-bearing, both keep the
+# artefact smaller and free of this machine's directory names.
+( cd "$REPO" && go build -trimpath -ldflags "-s -w" -o "$REPO/.build/stockroom" ./server ) \
+  || die "the server failed to build"
+ok "server built ($(du -h "$REPO/.build/stockroom" | cut -f1) with the UI and migrations inside)"
+
+
+# ---------------------------------------------------------------------------
+# 3. Is this an upgrade? Stop the old server, then dump, before touching anything.
 # ---------------------------------------------------------------------------
 UPGRADE=0
 if [ -x "$STOCKROOM_HOME/stockroom" ]; then
@@ -127,6 +176,17 @@ if [ -x "$STOCKROOM_HOME/stockroom" ]; then
   mkdir -p "$STOCKROOM_HOME/backups"
   chmod 700 "$STOCKROOM_HOME/backups"
   dump="$STOCKROOM_HOME/backups/pre-upgrade-$(date +%Y%m%d-%H%M%S).sql"
+
+  # The old server is stopped BEFORE the dump, and only after the build has
+  # succeeded, so the service is down for the length of a dump rather than a
+  # build, and nothing can be written between the dump and the new binary's
+  # migrations. A checkout recorded after the dump would be missing from the
+  # one copy an upgrade gone wrong is restored from. The EXIT trap brings the
+  # old server back if anything from here to step 7 fails, so a refused
+  # upgrade leaves the previous install running rather than stopped.
+  stop_service
+  SERVICE_STOPPED=1
+  trap 'if [ "$SERVICE_STOPPED" = 1 ]; then warn "upgrade stopped; restarting the previous server"; start_service; fi' EXIT
 
   # pg_dump from inside the container, so no Postgres client is needed on the
   # host -- there isn't one on a machine installed this way, by design.
@@ -160,29 +220,6 @@ if [ -x "$STOCKROOM_HOME/stockroom" ]; then
     die "could not dump the database. Not upgrading. Start the database and try again, or pass --no-service and upgrade by hand."
   fi
 fi
-
-# ---------------------------------------------------------------------------
-# 3. Build: one binary with the UI and the migrations inside it
-# ---------------------------------------------------------------------------
-say ""
-say "Building..."
-
-# One definition of an installed JS tree, called from here as well as from
-# `dev.sh up` and `dev.sh test` (CLAUDE.md §13, 2026-09-14). Duplicating the
-# npm install here is how the nested-node_modules bug gets back in.
-"$REPO/scripts/dev.sh" deps >/dev/null || die "dependency install failed; run ./scripts/dev.sh deps to see why"
-ok "dependencies are up to date"
-
-( cd "$REPO" && npm run build --workspace=web-app >/dev/null ) || die "the web UI failed to build"
-[ -f "$REPO/web-app/dist/index.html" ] || die "the web UI built but produced no index.html"
-ok "web UI built"
-
-mkdir -p "$REPO/.build"
-# -trimpath and a stripped binary: neither is load-bearing, both keep the
-# artefact smaller and free of this machine's directory names.
-( cd "$REPO" && go build -trimpath -ldflags "-s -w" -o "$REPO/.build/stockroom" ./server ) \
-  || die "the server failed to build"
-ok "server built ($(du -h "$REPO/.build/stockroom" | cut -f1) with the UI and migrations inside)"
 
 # ---------------------------------------------------------------------------
 # 4. The install directory
@@ -242,6 +279,20 @@ else
   # the one character that form cannot hold, so it is refused by name.
   case "$ADMIN_PASSWORD$ADMIN_NUMBER" in
     *"'"*) die "the failsafe admin number and password cannot contain a single quote (') -- choose another." ;;
+  esac
+  # Both or neither. A number without a password is a failsafe the server
+  # skips with a warning, and a password without a number is one it never
+  # sees -- either way an install that reports success with no way back in.
+  if [ -n "$ADMIN_NUMBER" ] && [ -z "$ADMIN_PASSWORD" ]; then
+    die "a failsafe admin number was given without a password. Pass --admin-password-file too, or neither."
+  fi
+  if [ -z "$ADMIN_NUMBER" ] && [ -n "$ADMIN_PASSWORD" ]; then
+    die "a failsafe admin password was given without a number. Pass --admin-number too, or neither."
+  fi
+  # Digits, because a fresh database boots with the digits format and the
+  # server would refuse anything else at the first start.
+  case "$ADMIN_NUMBER" in
+    *[!0-9]*) die "the failsafe admin number must be digits only." ;;
   esac
   # 8 to 72, the range every other password in the system is held to (§7).
   # The failsafe does not fail the server on a bad value, it logs and skips --
@@ -342,20 +393,11 @@ ok "binary installed"
 # ---------------------------------------------------------------------------
 # 7. The service
 # ---------------------------------------------------------------------------
-PLIST="$HOME/Library/LaunchAgents/com.stockroom.server.plist"
-UNIT="/etc/systemd/system/stockroom.service"
-
-stop_service() {
-  case "$OS" in
-    macos) [ -f "$PLIST" ] && launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true ;;
-    linux) systemctl is-enabled stockroom.service >/dev/null 2>&1 && sudo systemctl stop stockroom.service || true ;;
-  esac
-}
-
 if [ "$INSTALL_SERVICE" = 1 ]; then
   say ""
   say "Registering the service (it will start at boot and restart if it dies)..."
   stop_service
+  SERVICE_STOPPED=0
 
   case "$OS" in
     macos)
@@ -383,6 +425,9 @@ if [ "$INSTALL_SERVICE" = 1 ]; then
       ;;
   esac
 else
+  # --no-service on an upgrade: the old server stays stopped, because the
+  # binary it would restart is the new one and the person asked to start it.
+  SERVICE_STOPPED=0
   warn "skipping service registration (--no-service)"
   say "  Start it by hand with: cd $STOCKROOM_HOME && ./stockroom-run.sh"
 fi

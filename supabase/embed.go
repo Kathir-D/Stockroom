@@ -25,6 +25,7 @@ var migrationFiles embed.FS
 // `<version>_<name>.sql` the way stockroom.Migrate expects to read it.
 var Migrations fs.FS = mustSub("migrations")
 
+// mustSub returns a subtree of the embedded migrations or panics if it is absent.
 func mustSub(dir string) fs.FS {
 	sub, err := fs.Sub(migrationFiles, dir)
 	if err != nil {

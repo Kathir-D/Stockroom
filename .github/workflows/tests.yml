@@ -75,11 +75,15 @@ jobs:
           # exist.
           cache-dependency-path: package-lock.json
 
+      # Pinned, not `latest`: resolving `latest` calls the GitHub releases API
+      # without a token, and when the runner's shared rate limit is spent the
+      # job fails here before a single test runs. Bump it by hand, to the
+      # version `supabase --version` reports on a working dev machine.
       - name: Set up Supabase CLI
         if: steps.changes.outputs.code == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.117.0
 
       # Postgres plus the rest of the local stack, with every migration and
       # the seed applied. The Go tests and pgTAP both connect on 127.0.0.1:54322.
@@ -138,4 +142,6 @@ jobs:
 
       - name: Stop Supabase
         if: always() && steps.changes.outputs.code == 'true'
-        run: supabase stop --no-backup
+        # Skipped quietly when the CLI never installed, so the log's one error
+        # is the step that actually failed, not "supabase: command not found".
+        run: command -v supabase >/dev/null && supabase stop --no-backup || true
