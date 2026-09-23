@@ -60,4 +60,7 @@ func TestExportEverything(t *testing.T) {
 	if strings.Contains(string(settingsCSV), secret) {
 		t.Error("app_settings.csv in the export carries the GitHub token")
 	}
+	if strings.Contains(string(settingsCSV), "export-is-never-encrypted") {
+		t.Error("app_settings.csv in the export carries the archive passphrase")
+	}
 }

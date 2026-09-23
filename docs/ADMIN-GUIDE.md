@@ -161,8 +161,9 @@ file like the class list it contains.
 safety-net admin, and upload the zip under **Admin → Backup → Restore from a
 file**. Every record comes back, passwords included. Two things do not travel
 in the zip. Photos live in the `uploads` folder on the old computer, so copy
-that folder across by hand. And install the same version of Stockroom on both,
-because a restore refuses a zip from a different version rather than guess.
+that folder across by hand. And install the same version of Stockroom on both.
+A restore refuses a zip from a different version and says so. It has an
+override for emergencies, but the same version on both is the safe path.
 
 ### The two files you will actually open
 

@@ -436,7 +436,7 @@ see the relative-path decision above. "Skip for now" stays a quiet button until 
 > Next: scan your own ID card at the sign-in screen and check something out, so you've seen what
 > your students will see.
 
-*"Print the student instructions" waits on `docs/STUDENT-GUIDE.md` (Phase C).*
+*"Print the student instructions" is not built. `docs/STUDENT-GUIDE.md` exists since Phase C (2026-09-23); the wizard does not link to it yet.*
 
 ---
 
@@ -483,7 +483,8 @@ see the relative-path decision above. "Skip for now" stays a quiet button until 
       camera. Reading the overdue list. Handing the system to next year's teacher.
       `docs/BACKUP-SETUP.md` is already written at exactly this register — match it.
 - [x] **A data-export answer.** *(2026-09-23: Admin → Backup → Export everything, and the column
-      guide in `docs/ADMIN-GUIDE.md`.)* An admin-panel **Export everything** button producing the same zip
+      guide in `docs/ADMIN-GUIDE.md` for `inventory.csv` and `accounts.csv`, the two files a
+      teacher opens. The raw `tables/*.csv` are the database tables as-is and get one paragraph.)* An admin-panel **Export everything** button producing the same zip
       the backup writes, named as an export rather than a backup so a teacher looking for "export"
       finds it — plus one page in the admin guide explaining what each CSV column means. "We want to
       stop using Stockroom" should be a documented path, not a rescue operation; it is also what

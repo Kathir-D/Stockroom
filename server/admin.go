@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"stockroom/internal/stockroom"
@@ -166,11 +165,7 @@ func (d deps) handleExport(w http.ResponseWriter, r *http.Request, actor stockro
 		writeError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", exp.Filename))
-	// It holds every student number beside its password hash. No cache, on
-	// this machine or any proxy, may keep a copy.
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(exp.Archive)
+	// It holds every student number beside its password hash, so no cache
+	// may keep a copy: writeDownload sends no-store.
+	writeDownload(w, "application/zip", exp.Filename, exp.Archive)
 }

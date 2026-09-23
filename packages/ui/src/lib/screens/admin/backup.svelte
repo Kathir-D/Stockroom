@@ -137,7 +137,12 @@
     exportError = null
     try {
       const blob = await api.exportEverything()
-      const day = new Date().toISOString().slice(0, 10)
+      // The local date, as the server names it. toISOString() is UTC, which
+      // on an evening in the Americas is already tomorrow.
+      const now = new Date()
+      const day = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+        .map((n) => String(n).padStart(2, "0"))
+        .join("-")
       saveBlob(blob, `stockroom-export-${day}.zip`)
     } catch (err) {
       exportError = err instanceof Error ? err.message : String(err)
@@ -585,7 +590,8 @@
       <code class="font-mono">inventory.csv</code> and <code class="font-mono">accounts.csv</code>
       in Excel, or restore the zip on another machine to move Stockroom there. The file is not
       encrypted and lists every student number, which signs its owner in with a scan, so keep it
-      somewhere private.
+      somewhere private. Photos are not in it: copy the <code class="font-mono">uploads</code>
+      folder across by hand.
     </p>
     <div class="flex flex-wrap items-center gap-3">
       <Button variant="secondary" disabled={exporting} onclick={exportEverything}>

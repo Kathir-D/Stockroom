@@ -83,7 +83,7 @@ type snapshot struct {
 func (db *DB) takeSnapshot(ctx context.Context, workDir string, ranAt time.Time, encrypted bool) (snapshot, error) {
 	tablesDir := filepath.Join(workDir, "tables")
 	if err := os.MkdirAll(tablesDir, 0o755); err != nil {
-		return snapshot{}, fmt.Errorf("create backup dir: %w", err)
+		return snapshot{}, fmt.Errorf("create snapshot dir: %w", err)
 	}
 
 	// One connection for the whole export: COPY TO STDOUT is a protocol-level
@@ -91,7 +91,7 @@ func (db *DB) takeSnapshot(ctx context.Context, workDir string, ranAt time.Time,
 	// borrowing a dozen in a row from a pool of eight.
 	conn, err := db.Pool.Acquire(ctx)
 	if err != nil {
-		return snapshot{}, fmt.Errorf("backup: %w", err)
+		return snapshot{}, fmt.Errorf("snapshot: %w", err)
 	}
 	defer conn.Release()
 
@@ -102,7 +102,7 @@ func (db *DB) takeSnapshot(ctx context.Context, workDir string, ranAt time.Time,
 	// too early to be there, and the reload would fail on the foreign key.
 	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return snapshot{}, fmt.Errorf("backup: %w", err)
+		return snapshot{}, fmt.Errorf("snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -189,7 +189,7 @@ func (db *DB) takeSnapshot(ctx context.Context, workDir string, ranAt time.Time,
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return snapshot{}, fmt.Errorf("backup: %w", err)
+		return snapshot{}, fmt.Errorf("snapshot: %w", err)
 	}
 
 	archive, err := builder.finish()
