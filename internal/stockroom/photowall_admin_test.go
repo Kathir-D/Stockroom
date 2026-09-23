@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -192,6 +193,40 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 // The test that keeps the privacy property from quietly regressing when
 // somebody later adds a debug field: neither the read nor the write ever says
 // the folder id or a Drive URL out loud.
+// TestPhotoWallStatusExplainsARestingReel: the admin screen says why a wall
+// with a full manifest is empty. Before this, the status read only the
+// source's listing errors, so a reel resting after 25 failed downloads showed
+// two thousand photographs, zero tiles and no error at all. A stray failure
+// among successes is *not* shown, because that is a healthy wall.
+func TestPhotoWallStatusExplainsARestingReel(t *testing.T) {
+	portrait := fmt.Errorf("%w: 3024x4032 is 0.75:1, outside 1.33-1.60", errPhotoUnusable)
+	src := &stubSource{err: portrait}
+	w, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: src})
+	captureLog(t)
+	db := &DB{PhotoWall: w}
+
+	for i := 0; i < photoWallFailureCap-1; i++ {
+		w.fillOne(context.Background())
+	}
+	if st := db.photoWallStatus(photoWallFolder{}); st.LastError != "" {
+		t.Errorf("failures short of the rest already show as %q", st.LastError)
+	}
+
+	w.fillOne(context.Background())
+	st := db.photoWallStatus(photoWallFolder{})
+	if !strings.Contains(st.LastError, "3:2") || !strings.Contains(st.LastError, "portrait") || st.LastErrorAt == nil {
+		t.Errorf("a reel resting on the ratio gate reads %q, want §9's no-usable-photos sentence naming 3:2", st.LastError)
+	}
+
+	src.mu.Lock()
+	src.err = errors.New("download a.jpg: dial tcp: no such host")
+	src.mu.Unlock()
+	w.fillOne(context.Background())
+	if st := db.photoWallStatus(photoWallFolder{}); !strings.Contains(st.LastError, "paused") || !strings.Contains(st.LastError, "no such host") {
+		t.Errorf("a reel resting on the network reads %q, want paused and the cause", st.LastError)
+	}
+}
+
 func TestPhotoWallStatusNeverCarriesTheFolderID(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()

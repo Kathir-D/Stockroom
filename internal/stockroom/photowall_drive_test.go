@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -90,6 +91,164 @@ func TestDriveManifestFiltersTheListing(t *testing.T) {
 	}
 	if onDisk.FolderID != "FOLDER-1" || len(onDisk.Entries) != len(want) {
 		t.Fatalf("manifest.json holds %+v", onDisk)
+	}
+}
+
+// TestDriveListingReadsWhatRcloneActuallyPrints is the listing as rclone
+// 1.75 really emits it under --no-modtime: every field present, and ModTime
+// an empty string rather than absent. Every other fixture in this file leaves
+// ModTime out, which is the one shape rclone never produces, and so the suite
+// passed while the first listing against a real Drive failed on its first
+// line -- the listing decoded into a struct whose time.Time field refuses "".
+// Found by §10's manual pass, not by a test, which is why this one exists.
+func TestDriveListingReadsWhatRcloneActuallyPrints(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = stubListing(`[
+{"Path":"events/gala 2026/DSC_0142.JPG","Name":"DSC_0142.JPG","Size":2400000,"MimeType":"image/jpeg","ModTime":"","IsDir":false,"ID":"1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345"},
+{"Path":"notes.docx","Name":"notes.docx","Size":12966,"MimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","ModTime":"","IsDir":false,"ID":"1zYxWvUtSrQpOnMlKjIhGfEdCbA543210"}
+]`)
+
+	s.buildManifest(context.Background(), "FOLDER-1")
+
+	if s.lastErr != nil {
+		t.Fatalf("the listing was refused: %v", s.lastErr)
+	}
+	if len(s.manifest.Entries) != 1 || s.manifest.Entries[0].Path != "events/gala 2026/DSC_0142.JPG" {
+		t.Fatalf("manifest holds %+v, want the one photograph", s.manifest.Entries)
+	}
+}
+
+// TestDriveNotReadyIsWarmingUp: the source's two normal not-yet states are
+// tagged so the reel does not count them, and its real failures are not.
+func TestDriveNotReadyIsWarmingUp(t *testing.T) {
+	ctx := context.Background()
+
+	_, err := newTestSource(t, "").NextPhoto(ctx)
+	if !errors.Is(err, errPhotoWallWarmingUp) || !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("no folder chosen: %v, want warming up and still ErrNotConfigured", err)
+	}
+	s := newTestSource(t, "FOLDER-1")
+	if _, err := s.NextPhoto(ctx); !errors.Is(err, errPhotoWallWarmingUp) {
+		t.Errorf("manifest not built yet: %v, want warming up", err)
+	}
+	s.listing = true
+	if _, err := s.NextPhoto(ctx); !errors.Is(err, errPhotoWallWarmingUp) {
+		t.Errorf("first listing running: %v, want warming up", err)
+	}
+
+	// A listing that failed is a failure: counted, it is what makes a machine
+	// with no internet rest rather than ask every ten seconds forever.
+	s.listing = false
+	s.lastErr = errors.New("list the Drive folder: dial tcp: no such host")
+	if _, err := s.NextPhoto(ctx); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
+		t.Errorf("failed listing: %v, want a failure the reel counts", err)
+	}
+	// So is a folder that listed fine and holds nothing usable (§9).
+	empty := newTestSource(t, "FOLDER-1")
+	empty.list = stubListing(`[]`)
+	empty.buildManifest(ctx, "FOLDER-1")
+	if _, err := empty.NextPhoto(ctx); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
+		t.Errorf("empty folder: %v, want a failure the reel counts", err)
+	}
+}
+
+// TestDriveErrorsNeverCarryTheFolderID is §7's promise -- no response carries
+// the folder id -- held against rclone's real failure text, which breaks it.
+// A failed call quotes the Drive API request it made, and that request's query
+// string is `'<id>' in parents`; everything the source keeps reaches GET
+// /admin/photo-wall as last_error. The strings below are rclone 1.75.1's own,
+// captured with a revoked token and with the network down, with the id and the
+// remote swapped for the test's.
+func TestDriveErrorsNeverCarryTheFolderID(t *testing.T) {
+	const id = "1AbCd-EfGh_IjKlMnOpQrStUvWxYz0123"
+	const notice = `2026/09/22 17:33:43 NOTICE: gdrive{PDhs9}: This remote uses rclone's shared Google Drive client_id, which is being retired and will stop working during 2026. Create your own client_id to avoid interruption: https://rclone.org/drive/#making-your-own-client-id `
+	request := `Get "https://www.googleapis.com/drive/v3/files?alt=json&q=trashed%3Dfalse+and+%28%27` + id + `%27+in+parents%29&supportsAllDrives=true"`
+	expired := notice + `2026/09/22 17:33:56 NOTICE: Failed to cat: couldn't list directory: ` + request +
+		`: couldn't fetch token: invalid_grant: maybe token expired? - try refreshing with "rclone config reconnect gdrive{PDhs9}:"`
+	offline := notice + `2026/09/22 17:40:02 NOTICE: Failed to lsjson: error in ListJSON: couldn't list directory: ` + request +
+		`: dial tcp: lookup www.googleapis.com: no such host`
+
+	clean := func(where, msg string) {
+		t.Helper()
+		for _, bad := range []string{id, "googleapis.com/drive", "client_id", "{PDhs9}"} {
+			if strings.Contains(msg, bad) {
+				t.Errorf("%s carries %q: %s", where, bad, msg)
+			}
+		}
+	}
+	ctx := context.Background()
+	logged := captureLog(t)
+
+	// A download with an expired token: the fix named with a remote a person
+	// can type, and warned about once however many downloads fail.
+	s := newTestSource(t, id)
+	s.manifest = &photoManifest{FolderID: id, Entries: []photoEntry{{Path: "a.jpg", Size: 1000}}}
+	s.fetch = func(context.Context, string, string) ([]byte, error) {
+		return nil, fmt.Errorf("download a.jpg: %s", expired)
+	}
+	var err error
+	for i := 0; i < 3; i++ {
+		_, err = s.NextPhoto(ctx)
+	}
+	clean("NextPhoto's error", err.Error())
+	if !errors.Is(err, errPhotoDriveAuth) || !strings.Contains(err.Error(), "rclone config reconnect gdrive:") {
+		t.Errorf("an expired sign-in reads %q, want the reconnect command for the configured remote", err)
+	}
+	if n := strings.Count(logged.String(), "warning: sign-in photo wall"); n != 1 {
+		t.Errorf("%d expired-sign-in warnings after three failed downloads, want exactly 1:\n%s", n, logged.String())
+	}
+	clean("the log", logged.String())
+
+	// A success re-arms it: a token reconnected and later expired again is
+	// warned about again rather than silently.
+	jpg := testJPEG(t, 1500, 1000)
+	s.fetch = func(context.Context, string, string) ([]byte, error) { return jpg, nil }
+	if _, err := s.NextPhoto(ctx); err != nil {
+		t.Fatalf("NextPhoto with a good download: %v", err)
+	}
+	s.fetch = func(context.Context, string, string) ([]byte, error) {
+		return nil, fmt.Errorf("download a.jpg: %s", expired)
+	}
+	_, _ = s.NextPhoto(ctx)
+	if n := strings.Count(logged.String(), "warning: sign-in photo wall"); n != 2 {
+		t.Errorf("%d warnings after the sign-in expired a second time, want 2", n)
+	}
+
+	// A listing with the network down: the cause survives, the id does not.
+	s.list = func(context.Context, string) (io.ReadCloser, func() error, error) {
+		return io.NopCloser(strings.NewReader("[")), func() error { return errors.New(offline) }, nil
+	}
+	s.buildManifest(ctx, id)
+	st := s.Status()
+	clean("the listing's last_error", st.LastError)
+	if !strings.Contains(st.LastError, "no such host") {
+		t.Errorf("the listing's last_error lost its cause: %q", st.LastError)
+	}
+
+	// The probe behind PUT /admin/photo-wall: an expired sign-in is the
+	// server's credential and says so, rather than blaming the folder's
+	// sharing; anything else is still the link's 400.
+	s.probe = func(context.Context, string) error { return errors.New(expired) }
+	err = s.Probe(ctx, id)
+	clean("the probe's error", err.Error())
+	if !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "rclone config reconnect gdrive:") {
+		t.Errorf("probe with an expired sign-in: %v, want ErrNotConfigured naming the reconnect", err)
+	}
+	s.probe = func(context.Context, string) error { return errors.New(offline) }
+	err = s.Probe(ctx, id)
+	clean("the probe's error", err.Error())
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("probe offline: %v, want ErrInvalid", err)
+	}
+	// Drive also names an id bare, outside any request URL, when the thing it
+	// could not find is the folder itself.
+	s.probe = func(context.Context, string) error {
+		return errors.New(notice + `2026/09/22 17:41:10 NOTICE: Failed to lsjson: googleapi: Error 404: File not found: ` + id + `., notFound`)
+	}
+	err = s.Probe(ctx, id)
+	clean("the probe's error", err.Error())
+	if !strings.Contains(err.Error(), "File not found") {
+		t.Errorf("probe of a missing folder lost its cause: %v", err)
 	}
 }
 
