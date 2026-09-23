@@ -128,6 +128,14 @@ class CatalogStore {
   }
 
   /**
+   * True when nothing narrows the list, so an empty result means the whole
+   * inventory is empty -- a fresh install -- rather than a filter to clear.
+   */
+  get unfiltered() {
+    return !this.category && !this.status && !this.search.trim()
+  }
+
+  /**
    * True when the selected category genuinely holds no units, as opposed to the
    * filters matching nothing. `Primes` is seeded empty because `examples/categories.media-department.md`
    * records no primes in inventory, and that needs a different message from "no

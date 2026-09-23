@@ -71,7 +71,7 @@
 
   <div class="flex flex-col gap-1.5">
     <Label>What do ID numbers look like at your school?</Label>
-    <StudentNumberFormat idPrefix="first-admin" bind:format bind:pattern />
+    <StudentNumberFormat idPrefix="first-admin" showTest={false} bind:format bind:pattern />
   </div>
 
   <div class="flex flex-col gap-1.5">

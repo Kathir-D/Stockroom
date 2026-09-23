@@ -11,7 +11,10 @@
    * The two empty states are deliberately different. "This category has no models
    * yet" is true of `Primes`, which is seeded empty because `examples/categories.media-department.md`
    * records no primes in inventory; "your filters matched nothing" wants the
-   * filters cleared. They need different actions (§8.2).
+   * filters cleared. They need different actions (§8.2). A third covers a fresh
+   * install, where nothing is filtered and nothing exists: "Clear filters" there
+   * is a button that does nothing, so an admin is pointed at where equipment
+   * comes from instead.
    */
   import { Button } from "@stockroom/ui/components/ui/button"
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
@@ -23,6 +26,7 @@
   import { addShouldOpenDetail } from "../add-flow"
   import { cart } from "../stores/cart.svelte"
   import { catalog } from "../stores/catalog.svelte"
+  import { router } from "../stores/router.svelte"
   import { session } from "../stores/session.svelte"
 
   let {
@@ -119,7 +123,24 @@
       {/each}
     </div>
   {:else if catalog.groups.length === 0}
-    {#if catalog.selectedIsEmptyBranch}
+    {#if catalog.unfiltered && session.isAdmin}
+      <EmptyState
+        title="No equipment has been added yet"
+        description="Add it from the Assets tab — one at a time, a numbered batch, or a spreadsheet. The setup guide walks through it."
+      >
+        {#snippet action()}
+          <Button onclick={() => router.go({ name: "admin", tab: "assets" })}>Add equipment</Button>
+          <Button variant="secondary" onclick={() => router.go({ name: "setup" })}>
+            Open the setup guide
+          </Button>
+        {/snippet}
+      </EmptyState>
+    {:else if catalog.unfiltered}
+      <EmptyState
+        title="No equipment has been added yet"
+        description="Once an admin adds the department's equipment, it will be listed here."
+      />
+    {:else if catalog.selectedIsEmptyBranch}
       <EmptyState
         title={`${catalog.selectedNode?.name ?? "This category"} has nothing in it yet`}
         description="No units are filed under here. An admin can add them from the Assets tab of the admin panel."

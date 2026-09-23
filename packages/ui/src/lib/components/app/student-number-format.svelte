@@ -19,7 +19,14 @@
     format = $bindable<StudentNumberFormat>("digits"),
     pattern = $bindable(""),
     idPrefix = "sn",
-  }: { format?: StudentNumberFormat; pattern?: string; idPrefix?: string } = $props()
+    showTest = true,
+  }: {
+    format?: StudentNumberFormat
+    pattern?: string
+    idPrefix?: string
+    /** Off in the first-run form, where "Your ID number" directly below is the test. */
+    showTest?: boolean
+  } = $props()
 
   let sample = $state("")
 
@@ -93,18 +100,20 @@
   </div>
 {/if}
 
-<div class="flex flex-col gap-1">
-  <Label for="{idPrefix}-sample">Test it with a real ID</Label>
-  <Input
-    id="{idPrefix}-sample"
-    bind:value={sample}
-    placeholder="Paste or scan one here"
-    spellcheck={false}
-    autocomplete="off"
-  />
-  {#if verdict}
-    <p class="text-xs {verdict.ok ? 'text-fg-muted' : 'text-status-overdue'}" role="status">
-      {verdict.text}
-    </p>
-  {/if}
-</div>
+{#if showTest}
+  <div class="flex flex-col gap-1">
+    <Label for="{idPrefix}-sample">Test it with a real ID</Label>
+    <Input
+      id="{idPrefix}-sample"
+      bind:value={sample}
+      placeholder="Paste or scan one here"
+      spellcheck={false}
+      autocomplete="off"
+    />
+    {#if verdict}
+      <p class="text-xs {verdict.ok ? 'text-fg-muted' : 'text-status-overdue'}" role="status">
+        {verdict.text}
+      </p>
+    {/if}
+  </div>
+{/if}

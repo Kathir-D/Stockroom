@@ -357,8 +357,9 @@
                than only on the admin one: a stale backup is a fact about the
                machine, and the admin is the person least likely to be standing
                at it (docs/design/backup.md §E.7). The server decides the wording
-               and who sees which sentence; this only places it. -->
-          {#if session.visibleBackupWarning}
+               and who sees which sentence; this only places it. Not on the
+               setup guide, whose last step is choosing that folder. -->
+          {#if session.visibleBackupWarning && route.name !== "setup"}
             <BackupNotice
               warning={session.visibleBackupWarning}
               isAdmin={session.isAdmin}

@@ -29,6 +29,14 @@
 
   let layouts = $state<LabelLayout[]>([])
   let layoutKey = $state("")
+  /**
+   * The sheets come in both paper sizes, and a school only ever buys one, so the
+   * list shows that one's three or four rather than all eight. The first guess
+   * follows the browser's locale: US Letter in the US and Canada, A4 elsewhere.
+   */
+  let paper = $state(
+    typeof navigator !== "undefined" && /-(US|CA)$/i.test(navigator.language) ? "US Letter" : "A4",
+  )
   let startAt = $state("0")
   let chosen = $state<Record<string, boolean>>({})
   let busy = $state(false)
@@ -44,7 +52,9 @@
         (list) => {
           layouts = list
           // The one whose hint says "start here", else the first.
-          layoutKey ||= (list.find((l) => /start here/i.test(l.hint)) ?? list[0])?.key ?? ""
+          if (!list.some((l) => l.paper === paper)) paper = list[0]?.paper ?? paper
+          const onPaper = list.filter((l) => l.paper === paper)
+          layoutKey ||= (onPaper.find((l) => /start here/i.test(l.hint)) ?? onPaper[0])?.key ?? ""
         },
         (err) => (error = err instanceof Error ? err.message : String(err)),
       )
@@ -52,6 +62,16 @@
   })
 
   const layout = $derived(layouts.find((l) => l.key === layoutKey))
+  const papers = $derived([...new Set(layouts.map((l) => l.paper))])
+  const shownLayouts = $derived(layouts.filter((l) => l.paper === paper))
+
+  /** Switching paper keeps the size: medium on Letter becomes medium on A4. */
+  function choosePaper(next: string) {
+    paper = next
+    const size = layout?.key.split("-")[0]
+    const same = shownLayouts.find((l) => l.key.split("-")[0] === size)
+    layoutKey = (same ?? shownLayouts[0])?.key ?? ""
+  }
   const selected = $derived(items.filter((i) => chosen[i.id]))
   /** Serials the chosen size cannot fit; the server refuses them, so say so first. */
   const tooLong = $derived(
@@ -90,13 +110,28 @@
     </Dialog.Header>
 
     <div class="flex flex-col gap-1.5">
-      <Label>Label sheet</Label>
-      <div class="flex max-h-56 flex-col gap-1 overflow-y-auto">
-        {#each layouts as l (l.key)}
+      <div class="flex items-center justify-between gap-2">
+        <Label>Label sheet</Label>
+        {#if papers.length > 1}
+          <div class="flex gap-1" role="radiogroup" aria-label="Paper size">
+            {#each papers as p (p)}
+              <Button
+                size="sm"
+                variant={p === paper ? "secondary" : "ghost"}
+                role="radio"
+                aria-checked={p === paper}
+                onclick={() => choosePaper(p)}>{p}</Button
+              >
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="flex flex-col gap-1">
+        {#each shownLayouts as l (l.key)}
           <label class="flex cursor-pointer items-start gap-2 rounded-(--radius) p-1 hover:bg-raised">
             <input type="radio" name="label-layout" value={l.key} bind:group={layoutKey} class="mt-1 accent-(--primary)" />
             <span class="flex flex-col">
-              <span class="text-sm text-fg">{l.label} <span class="text-fg-faint">· {l.paper}</span></span>
+              <span class="text-sm text-fg">{l.label}</span>
               <span class="text-xs text-fg-faint">{l.hint} Serials up to about {l.max_serial_chars} characters.</span>
             </span>
           </label>

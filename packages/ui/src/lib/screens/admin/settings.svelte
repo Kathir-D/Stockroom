@@ -336,8 +336,8 @@
     <div class="flex flex-col">
       <h1 class="text-base font-semibold text-fg">Settings</h1>
       <p class="text-xs text-fg-muted">
-        Where backups go and when they run. Saved in the database, not in a file — nothing here
-        needs a restart.
+        What student numbers look like, where backups go and when they run. Saved in the
+        database, not in a file — nothing here needs a restart.
       </p>
     </div>
     <span class="flex-1"></span>

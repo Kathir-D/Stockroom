@@ -24,7 +24,6 @@
   import { Label } from "@stockroom/ui/components/ui/label"
   import BulkAddDialog from "@stockroom/ui/components/app/bulk-add-dialog.svelte"
   import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
-  import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
   import PrintLabelsDialog, { type LabelItem } from "@stockroom/ui/components/app/print-labels-dialog.svelte"
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
   import { cn } from "@stockroom/ui/utils"
@@ -44,12 +43,13 @@
   import type { StudentNumberFormat as Format } from "../student-number"
 
   const STEPS = [
+    // Short enough that all seven fit on one line of the rail.
     "Welcome",
-    "Your account",
-    "The safety net",
+    "Account",
+    "Safety net",
     "Lending rules",
-    "Your equipment",
-    "Your people",
+    "Equipment",
+    "People",
     "Backups",
   ] as const
 
@@ -201,6 +201,11 @@
   /* -------------------------------------------------- step 7: backups ---- */
 
   let backupDir = $state("")
+  /** What a full path looks like on this machine; relative ones are refused (CLAUDE.md §13, 2026-09-21). */
+  const backupDirExample =
+    typeof navigator !== "undefined" && /^win/i.test(navigator.platform)
+      ? "C:\\Stockroom backups"
+      : "/Users/Shared/Stockroom backups"
   let backupDirConfirmed = $state(false)
   let backupBusy = $state(false)
   let backupResult = $state<BackupResult | null>(null)
@@ -298,7 +303,14 @@
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="spare-password">Spare password</Label>
-            <PasswordInput id="spare-password" bind:value={sparePassword} autocomplete="off" />
+            <!-- Shown, not masked: the whole point of this screen is copying it down. -->
+            <Input
+              id="spare-password"
+              bind:value={sparePassword}
+              class="font-mono"
+              spellcheck={false}
+              autocomplete="off"
+            />
             <p class="text-xs text-fg-faint">Made up for you. Change it if you like.</p>
           </div>
         </div>
@@ -454,6 +466,7 @@
           }}
           class="font-mono"
           spellcheck={false}
+          placeholder={backupDirExample}
         />
         <p class="text-xs text-fg-faint">
           The full path, starting from the top of the disk. Open it on this computer afterwards and
@@ -489,7 +502,13 @@
         </p>
       {/if}
       <div class="flex gap-2">
-        <Button onclick={() => go(8)}>{backupResult ? "Next" : "Skip for now"}</Button>
+        <!-- Skipping is allowed, not encouraged: it is the filled button only once
+             a backup has actually run. -->
+        {#if backupResult}
+          <Button onclick={() => go(8)}>Next</Button>
+        {:else}
+          <Button variant="ghost" onclick={() => go(8)}>Skip for now</Button>
+        {/if}
       </div>
     </section>
   {:else}
