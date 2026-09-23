@@ -115,7 +115,11 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go wall.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wall.Run(ctx)
+	}()
 
 	router := newRouter(deps{db: db})
 
@@ -124,13 +128,21 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 	// the bound is here so a broken filler fails this test instead of hanging.
 	// Waited for on the reel's counts, not by polling the endpoint: every call
 	// hands tiles out, and enough early calls would reach the ceiling of twice
-	// the buffer and hold the refill the second half of this test waits for.
+	// the buffer.
 	for i := 0; i < 200; i++ {
 		if ready, _ := wall.Counts(); ready == 3 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	// Then the filler is stopped, and waited for, before anything is handed
+	// out. Left running, it refills the moment the first batch goes -- there
+	// is no pacing and room under the ceiling -- so the drained call below
+	// would get fresh tiles instead of repeats; and cancel alone does not stop
+	// a fetch already in flight.
+	cancel()
+	<-done
+
 	body := readPhotos(t, do(router, http.MethodGet, "/signin/photos"))
 	if len(body.Photos) != 3 {
 		t.Fatalf("the endpoint handed out %d tiles after 2s, want 3", len(body.Photos))
@@ -159,10 +171,9 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 	// A second call with nothing fresh ready is the drained reel (§2,
 	// "Draining"): it gets the first batch again rather than an empty wall,
 	// each tile still fetchable, and ttl_seconds no longer than the first
-	// hand-out allowed. The filler is stopped first so a refill cannot race
+	// hand-out allowed. The filler was stopped above so a refill cannot race
 	// the call; that fresh tiles are never handed out twice is the reel's own
 	// TestPhotoWallTakeIsAtomic.
-	cancel()
 	again := readPhotos(t, do(router, http.MethodGet, "/signin/photos"))
 	if len(again.Photos) != len(body.Photos) {
 		t.Fatalf("a drained reel handed out %d tiles, want the %d already out", len(again.Photos), len(body.Photos))
