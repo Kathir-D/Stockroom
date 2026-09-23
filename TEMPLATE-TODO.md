@@ -37,9 +37,9 @@ The code is more portable than the project is. Almost nothing in `internal/stock
 | # | Blocker | Where it lives | Phase |
 |---|---|---|---|
 | 1 | ~~Installing it means being a developer~~ — **mostly closed 2026-09-22** | `deploy/`, `scripts/install.sh` | **A** |
-| 2 | There is **no way to produce a barcode**, and the product is barcode-driven | nothing exists | **B** |
-| 3 | The seed *is* one school's inventory, and ships a known admin login | `supabase/seed.sql` | **B** |
-| 4 | A school with IDs like `AB12345` cannot sign in at all | `password.go`, `sign-in.svelte` | **B** |
+| 2 | ~~There is no way to produce a barcode~~ — **closed 2026-09-22** | `barcode.go`, `labels.go` | **B** |
+| 3 | ~~The seed *is* one school's inventory~~ — **closed 2026-09-22**: demo-only, never loaded on an install | `supabase/seed.sql` | **B** |
+| 4 | ~~A school with IDs like `AB12345` cannot sign in~~ — **closed 2026-09-22** | `student_number.go`, `lib/student-number.ts` | **B** |
 
 (2) is the one that was previously misfiled as polish — see the note in Phase B.
 
@@ -50,6 +50,13 @@ systemd unit that restarts the server on crash. Proven on a scratch database wit
 anywhere: ten migrations applied, an admin signed in through the browser, a restart re-applied
 nothing. What is *not* done is Windows, and fetching a release binary rather than building from a
 checkout — so it still takes Go and Node on the machine you install **from**. See `docs/INSTALL.md`.
+
+**Phase B, also 2026-09-22.** A fresh install now opens on a setup guide instead of an empty
+catalogue: first admin, the safety-net account, lending rules, equipment (examples, a category
+import, an asset CSV, a numbered batch, or one by hand), people, and backups. Label sheets and ID
+cards print as PDFs, and the student-number format is a setting. Every wizard step and dialog was
+screenshotted against a scratch `postgres:17` and fixed where it looked wrong. The decisions and the
+bugs the new tests found are in `CLAUDE.md` §13 (2026-09-22, Phase B).
 
 ---
 
@@ -184,7 +191,7 @@ what is left is Windows and the release-binary download path, both marked below.
 
 ## Phase B — Make it usable by a school that isn't yours
 
-- [ ] **Barcode generation.** *Previously filed under "Hardware, stickers and the physical setup",
+- [x] **Barcode generation.** *Previously filed under "Hardware, stickers and the physical setup",
       near the bottom, described as an adoption cliff. It is not an adoption cliff, it is a missing
       feature.* The entire product is barcode-driven — §1.5 makes scanning the single "track it"
       action — and there is currently no way to produce a barcode for either an asset or an ID
@@ -196,6 +203,13 @@ what is left is Windows and the release-binary download path, both marked below.
       - **`GET /assets/labels.pdf?ids=...`** with a **size picker**: 30-per-sheet (Avery
         5160 / L7160), 80-per-sheet for batteries and small gear, and a single-label format. The
         serial as Code 128 with the asset name under it.
+        *Built as `POST /assets/labels.pdf` (a long id list does not fit in a URL) with Small,
+        Medium, Large and one-per-page, each in US Letter and A4, named by what they go on rather
+        than by part number. The print dialog picks the paper from the browser's locale.*
+      - **Serials have to be short for the small label.** It fits about **9 characters on Letter
+        and 7 on A4** before the bars drop below the 0.25 mm that decodes at 203 DPI. `CLAUDE.md`
+        §6.2's example serials were `T7IBAT-001` (10), which would not print on the label meant for
+        batteries; they are now `T7B-001`. Say this in the admin guide.
       - **`GET /assets/{id}/barcode.png`**, rendered inline on the asset detail dialog and
         downloadable from the same endpoint — one endpoint, two features. The inline render is also
         the recovery path for the failure a school will actually hit: the sticker falls off, and
@@ -203,17 +217,17 @@ what is left is Windows and the release-binary download path, both marked below.
       - **A printable ID-card layout** from the same generator, for schools whose cards carry no
         barcode or encode something other than the student number. Without it, scan login — the
         headline feature — does not work for them at all.
-      - Sticker guidance alongside it: matte not glossy, where they survive on a lens barrel versus
+      - [ ] *Not done — belongs in `docs/ADMIN-GUIDE.md`.* Sticker guidance alongside it: matte not glossy, where they survive on a lens barrel versus
         a body, laminate anything that goes outdoors.
-      - A manufacturer's existing barcode is a valid serial. Plenty of gear already wears a unique
+      - [x] *In the wizard's equipment step, as a tip.* A manufacturer's existing barcode is a valid serial. Plenty of gear already wears a unique
         barcode from the factory, which means **no sticker to print at all** for those units. Say
         this in the wizard; it is a real hour saved and nobody guesses it.
-- [ ] **A fresh production database starts empty.** `seed.sql` becomes demo-only and says so at the
+- [x] **A fresh production database starts empty.** `seed.sql` becomes demo-only and says so at the
       top: it keeps the 63-node tree, the 12 assets, the kit and the two dev accounts, it loads on
       `supabase db reset` during development, and it **never** loads on an install. The only way
       into a fresh install is the wizard or the `.env` failsafe admin (§7), which is exactly what
       the failsafe is for and is already proven by `cmd/restore`'s zero-account path.
-- [ ] **A category-tree import**, `POST /categories/import`, admin-only. Building an eight-Type
+- [x] **A category-tree import**, `POST /categories/import`, admin-only. Building an eight-Type
       tree through *New category* is roughly sixty dialogs, it is the **first** thing a new school
       does, and it is where they stop.
       - **Accepts both** the indented-text shape the example files use and a CSV of
@@ -226,19 +240,21 @@ what is left is Windows and the release-binary download path, both marked below.
       - Watch the constraint that bites: **`categories.name` is unique across the entire table**,
         not per parent. Two departments both having an "Accessories" node is an import failure with
         a confusing message unless the importer says so in plain words.
-- [ ] **An asset CSV import**, `POST /assets/import`, columns `serial_number,name,category,model,
+- [x] **An asset CSV import**, `POST /assets/import`, columns `serial_number,name,category,model,
       status`, upserting by serial. A school with 300 items cannot type them into a dialog.
       `roster.go` is already the pattern: per-row errors collected with line numbers, the rest
       still landing. No column-mapping screen, no dry run, no undo token — see §Cut.
       - **Duplicate detection with a readable message.** A serial that already exists gets
         *"You already have an item with this serial: Canon 70-200mm (added March 3)"*, not a
         database constraint error and not a silent overwrite.
-- [ ] **Bulk add N units of one model.** *"Add 12 × Canon LP-E6 battery"* generates `LPE6-001`
+- [x] **Bulk add N units of one model.** *"Add 12 × Canon LP-E6 battery"* generates `LPE6-001`
       through `LPE6-012`, **shows the list of serials before committing**, and offers the label
       sheet immediately. Linear stock — batteries, SD cards, bags, cables — is most of the unit
       count in a real department and all of the tedium. Let the prefix be edited and remember it per
       model, so next year's re-order continues the numbering instead of colliding with it.
-- [ ] **A student-number format setting.** Digits-only, 1–32 today (`NormalizeStudentNumber`,
+      *Built without the per-model memory: the numbering continues from the highest serial
+      already using that prefix, which gives the same re-order behaviour with nothing stored.*
+- [x] **A student-number format setting.** Digits-only, 1–32 today (`NormalizeStudentNumber`,
       `password.go`). Plenty of schools issue IDs like `AB12345`, and for them Stockroom currently
       **does not work at all** — the sign-in field filters their ID to nothing and the message never
       fires. Every other policy constant is a preference; this one is a hard blocker.
@@ -251,9 +267,14 @@ what is left is Windows and the release-binary download path, both marked below.
         comparison that runs the keystroke buffer through that same filter** (§13, 2026-09-15).
         This is the one item in this file that touches genuinely subtle code. Read that decision log
         entry before starting and keep the six `scanner.test.ts` regressions green.
-- [ ] **A seven-step first-run wizard** at `/setup`, reachable **only while `profiles` is empty** —
+- [x] **A seven-step first-run wizard** at `/setup`, reachable **only while `profiles` is empty** —
       an unauthenticated route that stops existing the moment there is an account, which is the only
       safe shape for it.
+      *Diverged, deliberately: only **creating the first admin** is gated on an empty `profiles`.
+      `install.sh` asks for the failsafe and the server creates it at boot, so on a real install
+      that table is never empty and the wizard as written would never appear. The rest is
+      admin-only, resumed from `app_settings.setup_step` until `setup_completed_at` is set. Lending
+      rules are stated rather than configurable — the settings are under §Later. `CLAUDE.md` §13.*
       - One binary, one front door. The wizard always exists; `INSTALL.md` documents how somebody
         CS-literate skips it by pre-filling settings and starting the server, which is exactly what
         happens today.
@@ -281,7 +302,7 @@ what is left is Windows and the release-binary download path, both marked below.
         looked at produces a complete archive, a manifest that verifies, every screen reporting
         health, and files nowhere the admin will ever look. Finish with *[ Run a backup now and show
         me it worked ]*, which is the only proof that matters.
-- [ ] **Example data, and a prompt to remove it.** Ship an `examples/` folder — a roster CSV, an
+- [x] **Example data, and a prompt to remove it.** Ship an `examples/` folder — a roster CSV, an
       asset CSV, two category trees — all obviously fake (`Example High School`, numbers starting
       `900`). These double as the fixtures for the install walkthrough, so the docs and the files
       cannot drift apart. Offer to load them at setup, so somebody can try the system with three
@@ -290,11 +311,130 @@ what is left is Windows and the release-binary download path, both marked below.
         `is_example` column, so there is no migration and no flag that every real install carries
         forever. It is invisible in the UI and reads as magic to the next maintainer, which is why
         it is written down here.
+        *Not built that way: the importers generate their own ids, so a reserved id would have
+        needed an example-only insert path. Examples are recognised by content instead — an
+        `EXAMPLE-` serial **and** an `Example …` name, or a `90000x` number **and** the first name
+        `Example`. Admin → Assets shows a remove-the-examples banner while any are loaded.*
       - **When real data is imported, prompt to delete the examples.** Fake cameras that outlive
         setup are worse than no demo at all, because the catalogue looks authoritative and is wrong.
-- [ ] **Move `Catagories.md` to `examples/categories.media-department.md`** and stop calling it a
+- [x] **Move `Catagories.md` to `examples/categories.media-department.md`** and stop calling it a
       source of truth. It becomes *an* example tree alongside at least one more — a theatre or a
       science department's — so the shape reads as a pattern rather than a spec.
+
+### §Copy — the wizard's words
+
+Restored from the original plan (T6.8), renumbered to the seven steps that were built. Steps 1, 3,
+5, 7 and Done shipped close to this; where the build differs, the note says so. **Do not ship
+placeholders** — every one of these is the difference between a confident user and a hesitant one.
+
+**Step 1 — Welcome**
+
+> **Welcome to Stockroom.**
+> This sets up equipment checkout for your department. It takes about twenty minutes, and you can
+> stop at any point and pick up where you left off.
+> Here is what we'll do: create your account, tell Stockroom what equipment you have, add the
+> people who can borrow it, print barcode stickers, and turn on automatic backups.
+> You will not need to install anything else, and Stockroom never sends your data anywhere you
+> haven't set up yourself.
+> *[ Let's go ]*
+
+**Step 2 — Create your admin account** *(the sign-in screen, while there are no accounts; the ID
+format comes first, because the admin's own number has to fit it)*
+
+> **Create your account.**
+> You'll use this to add equipment, manage people, and see who has what.
+> **Your ID number** — the number on your school ID card. If your card has a barcode, scan it now
+> and we'll fill this in. *[ field ]*
+> **Your name** *[ first ]* *[ last ]*
+> **A password** — you'll only need this when you type your number instead of scanning it. At least
+> 8 characters. *[ field with a reveal button ]*
+> *Why a password if I can scan?* → Scanning is the fast way in at the counter. Typing your number
+> needs a password, so somebody who simply knows your number can't sign in as you.
+
+**Step 3 — The safety net** *(cannot be skipped)*
+
+> **One thing to write down.**
+> This is a spare administrator account that Stockroom re-creates every time it starts. If a screen
+> ever breaks, or the last admin account is deleted by accident, this is how you get back in.
+> **Spare ID number** *[ 900000 ]* **Spare password** *[ generated, shown in full ]*
+> **Save this somewhere that isn't this computer** — a password manager, or a sealed envelope in a
+> drawer. If the computer fails and you have to set Stockroom up again, this is what gets you back
+> into your restored records.
+> ☐ I have saved these somewhere safe *(required to continue)*
+
+*Built: the password is shown, not masked — the whole point of the step is writing it down. If
+the installer already made a failsafe, the step says so instead.*
+
+**Step 4 — Lending rules**
+
+> **How does your department lend equipment?**
+> **How long can somebody keep something?** *[ 7 ] days* — students pick a return date when they
+> check out, and they cannot pick one further away than this.
+> **When something is late:** ( ) Stop that person borrowing anything else until it comes back
+> *(recommended)* ( ) Just show a warning
+> You can change both of these later in Settings.
+
+*Built as "How lending works." — the rules stated, not chosen, because `max_checkout_days` and
+`overdue_blocks_checkout` are not settings yet (§Later). When they are, this is the copy.*
+
+**Step 5 — Add your equipment**
+
+> **What's in your store cupboard?**
+> Every camera, lens, light and battery gets its own entry, so you always know which one came back.
+> Pick whichever of these suits you — you can use more than one, and you can add more any time.
+> **[ Scan them in ]** *Fastest if you have the scanner plugged in. Stick a label on an item, scan
+> it, type its name, move to the next one. About eight seconds each.*
+> **[ Upload a spreadsheet ]** *If you already have a list. We'll show you what we found before
+> anything is saved.*
+> **[ Add a batch ]** *For twelve identical batteries, twenty SD cards — we'll number them for you.*
+> **[ Add one by hand ]**
+> **[ I'll do this later ]**
+
+*Built without "Scan them in" (scan-to-create is cut, §Cut) and with "Try it with examples" and
+"Upload your categories" added. "We'll show you what we found before anything is saved" is not
+true of the asset import — there is no dry run (§Cut) — so the built copy says only "If you already
+have a list. Save it as CSV first." and the report comes afterwards. The manufacturer's-barcode tip
+sits under the choices.*
+
+**Step 6 — Add your people** *(built as "Who can borrow?": the ID format card and a class-list
+upload; no drafted copy existed)*
+
+**Not built — Test your scanner** *(needs a scanner to write against; §Later)*
+
+> **Let's check your scanner works.**
+> Scan any barcode — an item, an ID card, a book, anything. *[ live field ]*
+> ✅ *We saw `T7B-001` and it arrived in 34 ms, which is well within the range Stockroom reads as
+> a scan. Your scanner is set up correctly.*
+> ⚠️ *We saw the characters but no Enter at the end. Your scanner needs its "add Enter after scan"
+> setting turned on — it's usually a barcode printed in the scanner's manual. [What this means]*
+> ❌ *Nothing arrived. Check the scanner is plugged in and that its light comes on when you press
+> the trigger. [More help]*
+
+**Step 7 — Backups**
+
+> **Protect your records.**
+> Stockroom backs itself up every night, automatically. Choose where those backups go.
+> **On this computer** *[ folder picker, with a sensible default already filled in ]* — takes a
+> minute to set up and covers most problems.
+> **Also send them somewhere else** *(recommended, optional)* — Google Drive or GitHub, so a failed
+> hard drive doesn't take your records with it. You can set this up now or later in Settings.
+> *[ Run a backup now and show me it worked ]* ← do this. It is the only proof that matters.
+> ⚠️ If you skip this entirely, Stockroom will remind everybody who signs in until it's set up.
+
+*Built: the folder is an example placeholder the admin must type over, not a pre-filled value —
+see the relative-path decision above. "Skip for now" stays a quiet button until a backup has run.*
+
+**Done**
+
+> **You're ready.**
+> *(a summary: 247 items · 31 people · backups on)*
+> **[ Print the student instructions ]** — one page for the wall above the computer.
+> **[ Print your barcode stickers ]** — for the items that need one.
+> **[ Open Stockroom ]**
+> Next: scan your own ID card at the sign-in screen and check something out, so you've seen what
+> your students will see.
+
+*"Print the student instructions" waits on `docs/STUDENT-GUIDE.md` (Phase C).*
 
 ---
 
