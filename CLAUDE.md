@@ -366,8 +366,8 @@ the installer is the upgrade, and it dumps the database before it touches anythi
    |---|---|---|
    | `DATABASE_URL` | direct Postgres connection | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
    | `SERVER_ADDR` | Go server listen address | `127.0.0.1:8080` |
-   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7); digits only | (none) |
-   | `ADMIN_PASSWORD` | failsafe admin password; at least 8 characters | (none) |
+   | `ADMIN_STUDENT_NUMBER` | failsafe admin account (Section 7); must fit the configured `student_number_format`, digits by default | (none) |
+   | `ADMIN_PASSWORD` | failsafe admin password; 8 to 72 characters | (none) |
    | `UPLOADS_DIR` | where photos are copied | `./uploads` |
    | `BACKUP_DIR` | **first-boot seed** for the backup folder | (none) |
    | `PHOTO_BACKUP_DIR` | first-boot seed for the photo mirror folder | (none) |

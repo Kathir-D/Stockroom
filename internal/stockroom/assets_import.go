@@ -97,6 +97,11 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 	byName := categoryIDsByName(tree)
 
 	var res AssetImportResult
+	// firstLine is where each serial was first seen in this file. A repeat is
+	// refused here rather than left to the database: each row commits on its
+	// own, so the second would find the first and *update* it -- the file
+	// overwriting itself, reported as "you already had an item".
+	firstLine := map[string]int{}
 	line := 1
 	for {
 		rec, err := rd.Read()
@@ -125,6 +130,16 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 			// failure, because a report full of "line 301: blank" trains
 			// people to ignore the report.
 			continue
+		}
+		if row.SerialNumber != "" {
+			if first, dup := firstLine[row.SerialNumber]; dup {
+				row.Action = "failed"
+				row.Error = fmt.Sprintf("serial %q is already on line %d of this file; each serial is one item", row.SerialNumber, first)
+				res.Failed++
+				res.Rows = append(res.Rows, row)
+				continue
+			}
+			firstLine[row.SerialNumber] = line
 		}
 
 		action, note, err := db.importAssetRow(ctx, actor, tree, byName, get, row)
@@ -217,9 +232,10 @@ func (db *DB) importAssetRow(ctx context.Context, actor Actor, tree categoryTree
 		if err != nil {
 			mapped := mapPgError("create asset", err)
 			if errors.Is(mapped, ErrConflict) {
-				// Two rows in the same file sharing a serial: the first
-				// created it, so the read above missed it.
-				return "", "", fmt.Errorf("serial %q appears more than once in this file", row.SerialNumber)
+				// Somebody else created this serial between the read above
+				// and this insert. A repeat within the file never gets here;
+				// ImportAssets refuses it first.
+				return "", "", fmt.Errorf("serial %q was added by somebody else during this import; run it again", row.SerialNumber)
 			}
 			return "", "", mapped
 		}

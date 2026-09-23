@@ -326,15 +326,20 @@ func ptFor(mm float64) float64 {
 // because "Canon EF 70-200mm f/2.8L IS III USM" and "Sony A7 III" have very
 // different widths at the same length, and a name that overflows does not wrap
 // -- it prints across the next label.
+//
+// Cut in UTF-8 and translated per candidate, ellipsis included. Translating
+// first made the rune loop walk single-byte cp1252 -- an accented name split
+// into replacement characters -- and appended a UTF-8 "…" the PDF font then
+// printed as three stray glyphs on every truncated label.
 func truncateForLabel(pdf *fpdf.Fpdf, tr translator, s string, maxW float64) string {
-	s = tr(strings.TrimSpace(s))
-	if pdf.GetStringWidth(s) <= maxW {
-		return s
+	s = strings.TrimSpace(s)
+	if out := tr(s); pdf.GetStringWidth(out) <= maxW {
+		return out
 	}
 	runes := []rune(s)
 	for len(runes) > 1 {
 		runes = runes[:len(runes)-1]
-		candidate := strings.TrimSpace(string(runes)) + "…"
+		candidate := tr(strings.TrimSpace(string(runes)) + "…")
 		if pdf.GetStringWidth(candidate) <= maxW {
 			return candidate
 		}

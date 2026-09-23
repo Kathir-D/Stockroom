@@ -422,14 +422,19 @@
 
       <div class="flex flex-col gap-1.5">
         <Label for="user-number">Student number</Label>
+        <!-- No pattern: the format is a setting, and the server checks it. A
+             hard-coded digits pattern made the browser refuse every account
+             at a school whose numbers carry letters. -->
         <Input
           id="user-number"
-          inputmode="numeric"
-          pattern="[0-9]*"
           bind:value={form.student_number}
+          autocomplete="off"
+          spellcheck={false}
           required
         />
-        <p class="text-xs text-fg-faint">Digits only. This is what the ID card barcode encodes.</p>
+        <p class="text-xs text-fg-faint">
+          What the ID card barcode encodes, in the format set under Admin → Settings.
+        </p>
       </div>
 
       <div class="flex flex-col gap-1.5">

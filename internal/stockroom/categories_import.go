@@ -238,6 +238,11 @@ func ensureCategoryPath(ctx context.Context, tx pgx.Tx, created map[string]strin
 // asked which of two formats it is before they can upload it is a question
 // they should not have to answer about their own document.
 func parseCategoryFile(body string) (CategoryImportFormat, [][]string, error) {
+	// Excel puts a BOM in front of every UTF-8 CSV it saves. Left in, the
+	// header's first cell is "\ufefftype", the sniff below says "not a CSV",
+	// and the whole file becomes one category named after its header line
+	// (the asset import strips it for the same reason).
+	body = strings.TrimPrefix(body, "\ufeff")
 	if looksLikeCategoryCSV(body) {
 		paths, err := parseCategoryCSV(body)
 		return CategoryImportCSV, paths, err

@@ -23,7 +23,11 @@
    */
   import { StockroomApp } from '@stockroom/ui'
 
-  const override = import.meta.env.VITE_API_BASE_URL as string | undefined
+  // Trimmed, and blank counts as unset: `VITE_API_BASE_URL=` in a .env file
+  // is an empty string, which `??` would keep, and a production build would
+  // then skip the same-origin rule and talk to the package default instead.
+  const override =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || undefined
   const baseUrl =
     override ?? (import.meta.env.PROD ? window.location.origin : undefined)
 </script>

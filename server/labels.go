@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -89,6 +91,20 @@ func (d deps) handleAssetBarcodePNG(w http.ResponseWriter, r *http.Request, acto
 	}
 
 	width, _ := strconv.Atoi(r.URL.Query().Get("width"))
+
+	// Revalidated every time rather than cached for an hour. The URL names
+	// the asset, but the image is the serial, and an admin can change the
+	// serial: a cached PNG would then be the old barcode on the one screen
+	// that exists to replace a lost sticker, scanning as the wrong item. The
+	// tag is a hash so the serial -- a scan key -- stays out of the header.
+	etag := barcodeETag(*asset.SerialNumber, width)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	png, err := stockroom.BarcodePNG(*asset.SerialNumber, width)
 	if err != nil {
 		writeError(w, err)
@@ -104,12 +120,25 @@ func (d deps) handleAssetBarcodePNG(w http.ResponseWriter, r *http.Request, acto
 	}
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("%s; filename=%q", disposition, safeFilename(*asset.SerialNumber)+".png"))
-	// A barcode is a pure function of the serial, so it can be cached hard --
-	// but privately: this is behind a session, and a shared cache holding it
-	// would be a shared cache holding a scan key.
-	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(png)
+}
+
+// barcodeETag names one rendering: the serial and the requested width.
+func barcodeETag(serial string, width int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", width, serial)))
+	return `"` + hex.EncodeToString(sum[:12]) + `"`
+}
+
+// etagMatches reports whether an If-None-Match header names tag.
+func etagMatches(header, tag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "W/")
+		if candidate == tag || candidate == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 func writePDF(w http.ResponseWriter, filename string, body []byte) {

@@ -273,17 +273,8 @@ func findLayout(key string) (LabelLayout, error) {
 // the PNG and the PDF are provably the same barcode, because they come from
 // the same call.
 func barcodeModules(text string) ([]bool, error) {
-	if strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("%w: cannot make a barcode of an empty string", ErrInvalid)
-	}
-	// Code 128 encodes the ASCII range. A serial with a character outside it
-	// is refused here rather than producing a barcode that encodes something
-	// else, which would scan as the wrong item -- the worst possible failure
-	// for this feature.
-	for _, r := range text {
-		if r > 127 {
-			return nil, fmt.Errorf("%w: %q cannot be encoded as a barcode; serials must be plain ASCII", ErrInvalid, text)
-		}
+	if err := validateBarcodeText(text); err != nil {
+		return nil, err
 	}
 
 	bc, err := code128.Encode(text)
@@ -298,6 +289,24 @@ func barcodeModules(text string) ([]bool, error) {
 		modules = append(modules, r == 0 && g == 0 && b == 0)
 	}
 	return modules, nil
+}
+
+// validateBarcodeText is the one gate both renderers pass through, so the PNG
+// and the label sheet refuse the same serials in the same words.
+func validateBarcodeText(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("%w: cannot make a barcode of an empty string", ErrInvalid)
+	}
+	// Code 128 encodes the ASCII range. A serial with a character outside it
+	// is refused here rather than producing a barcode that encodes something
+	// else, which would scan as the wrong item -- the worst possible failure
+	// for this feature.
+	for _, r := range text {
+		if r > 127 {
+			return fmt.Errorf("%w: %q cannot be encoded as a barcode; serials must be plain ASCII", ErrInvalid, text)
+		}
+	}
+	return nil
 }
 
 // BarcodePNG renders text as a Code 128 PNG, width pixels wide.
@@ -315,6 +324,9 @@ func BarcodePNG(text string, width int) ([]byte, error) {
 		// an unbounded one is a way to make the server allocate 2 GB from a
 		// query string.
 		width = 4000
+	}
+	if err := validateBarcodeText(text); err != nil {
+		return nil, err
 	}
 
 	bc, err := code128.Encode(text)

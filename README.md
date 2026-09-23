@@ -35,11 +35,11 @@ first, because they describe the behaviour the code has to keep.
 > configured user **logs in**, so the Mac has to be set to log in automatically. It is also the upgrade: run it again.
 >
 > **Honest status.** It still needs Go and Node *on the machine you install from*, because it
-> builds rather than downloading a release binary, and there is no Windows installer yet. And once
-> it is running there is still **no way to print a barcode** — for an asset or an ID card — which
-> for a barcode-driven product is a real gap. Both are tracked in
-> [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) (Phase A and Phase B). If you are evaluating Stockroom for
-> a school with nobody technical, read those first and decide whether to wait.
+> builds rather than downloading a release binary, and there is no Windows installer yet — both
+> tracked in [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) Phase A. Once it is running, a first-run wizard
+> walks through the first admin, the category tree and the equipment, and it prints its own
+> barcode labels and ID cards (Phase B). If you are evaluating Stockroom for a school with nobody
+> technical, read Phase A first and decide whether to wait.
 >
 > Everything below this point is the **development** setup, which is a different thing: the
 > Supabase CLI, `seed.sql`, Studio and `./scripts/dev.sh`. Do not follow it for an install.
@@ -340,8 +340,9 @@ Three things to know before you start typing:
 - **A branch may stop short.** A Category with no Models yet is fine and shows as an empty branch.
 
 [`examples/categories.media-department.md`](examples/categories.media-department.md) is one department's tree, as an example of the shape. Building a
-tree of any size through the dialog is tedious; a tree import is the first item in
-[`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) Phase T2 for exactly that reason.
+tree of any size through the dialog is tedious, so **Admin → Categories → Import** takes a whole
+tree at once: an indented outline, a Markdown file of headings and list items, or a
+`type,category,model` CSV. Re-importing a corrected file only adds what is new.
 
 ### 4. Add your equipment
 
@@ -362,15 +363,19 @@ one. It exists because the original schema had it; the serial is the identifier 
 bags, SD cards — use model-prefixed serials so every physical unit still has its own scannable
 identity: `T7IBAT-001`, `T7IBAT-002`, `SD-014`.
 
-For hundreds of items, bulk entry through **Supabase Studio's table editor**
-(<http://127.0.0.1:54323/project/default>) is faster today; an asset CSV import is tracked in
-[`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) Phase T2.
+For hundreds of items, **Admin → Assets → Import CSV** takes a spreadsheet keyed on
+`serial_number` (a serial you already have updates that item and says what it replaced), and
+**Add several** makes N numbered units of one model — `T7B-001` to `T7B-040` — continuing the
+series from the highest serial already in use.
 
 ### 5. Print and apply stickers
 
-Each sticker encodes the asset's **serial number** as a Code 128 barcode. Stockroom does not
-generate the sheets yet (Phase T7 in [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md)); until it does, any
-Code 128 batch generator plus an Avery template will do.
+Each sticker encodes the asset's **serial number** as a Code 128 barcode. **Admin → Assets →
+Print labels** makes a PDF sheet for whatever the list shows, in label sizes named by what they go
+on; print it at 100%. Keep serials short: the small label fits about 9 characters on Letter and 7
+on A4. A sticker that falls off can be replaced from the asset's **Barcode** button, which shows
+one large enough to scan off the monitor. If your ID cards carry no barcode, **Admin → Users →
+Print ID cards** makes a sheet of CR80 cards that do.
 
 Practical advice paid for in reprints: matte labels, not glossy — a glossy label under the counter
 lamp will not scan. Put them where a hand does not rub: the underside of a camera body, the barrel
@@ -568,7 +573,7 @@ Copy `.env.example` to `.env` at the repository root.
 |---|---|---|
 | `DATABASE_URL` | Direct Postgres connection | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
 | `SERVER_ADDR` | API listen address | `127.0.0.1:8080` |
-| `ADMIN_STUDENT_NUMBER` | Failsafe admin account; digits only, 1–32 | *(none)* |
+| `ADMIN_STUDENT_NUMBER` | Failsafe admin account; 1–32 characters in the configured student-number format, digits by default | *(none)* |
 | `ADMIN_PASSWORD` | Failsafe admin password; 8–72 characters | *(none)* |
 | `UPLOADS_DIR` | Where profile and asset photos are copied | `./uploads` |
 | `SESSION_IDLE_MINUTES` | Idle timeout, measured from the last interaction | `10` |
@@ -961,6 +966,10 @@ one · **any full** is every signed-in user whose password is set — a limited 
 | `POST /assets` · `PUT/DELETE /assets/{id}` · `POST /assets/{id}/status` | admin | `serial_number` required; `asset_tag` is generated |
 | `POST /assets/{id}/photo` | admin | Multipart, 10 MB, `.jpg .jpeg .png .gif .webp` |
 | `POST /categories` · `PUT/DELETE /categories/{id}` | admin | Depth capped at 3 |
+| `POST /categories/import` · `POST /assets/import` | admin | A category tree (outline, Markdown or CSV) and an asset CSV upserting by serial |
+| `POST /assets/bulk-preview` · `POST /assets/bulk` | admin | N numbered units of one model; the preview writes nothing |
+| `GET /labels/layouts` · `POST /assets/labels.pdf` · `POST /users/cards.pdf` | any full · admin · admin | Label sheets and ID cards as PDFs |
+| `GET /assets/{id}/barcode.png` | any full | One barcode, for a sticker that fell off |
 | `POST /admin/backup` | admin | Runs a backup now: CSV per table, sequences, a manifest, then every enabled target |
 | `GET/PUT /admin/settings` · `POST /admin/settings/test` | admin | Backup configuration, and a connection check against one target |
 | `POST /admin/drive/connect` · `POST /admin/drive/finish` | admin | Connects a Google account through `rclone authorize`, no terminal |
@@ -1303,19 +1312,16 @@ same generator the item stickers use.
 <details>
 <summary><strong>We have 300 items. Do I really add them one dialog at a time?</strong></summary>
 
-For now, or through Supabase Studio's table editor, which is a spreadsheet-like view of the raw
-`assets` table and much faster in bulk. An asset CSV import is Phase T2 of
-[`TEMPLATE-TODO.md`](TEMPLATE-TODO.md). Remember every unit needs its own unique serial, including
-each identical battery.
+No. **Admin → Assets → Import CSV** takes a spreadsheet, and **Add several** makes a numbered run
+of one model. Remember every unit needs its own unique serial, including each identical battery.
 
 </details>
 
 <details>
 <summary><strong>Where do the barcode stickers come from?</strong></summary>
 
-Any Code 128 generator, printed onto Avery 5160 / L7160 sheets. Stockroom does not generate them
-yet; a label-sheet PDF endpoint is Phase T7. Use matte labels, and put them somewhere a hand does
-not rub.
+Stockroom prints them: **Admin → Assets → Print labels** makes a PDF for Avery-style sheets. Print
+at 100%. Use matte labels, and put them somewhere a hand does not rub.
 
 </details>
 

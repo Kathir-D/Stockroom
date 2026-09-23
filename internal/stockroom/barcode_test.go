@@ -2,6 +2,7 @@ package stockroom
 
 import (
 	"bytes"
+	"github.com/go-pdf/fpdf"
 	"strings"
 	"testing"
 )
@@ -66,6 +67,27 @@ func TestBarcodeRejectsNonASCII(t *testing.T) {
 	}
 	if _, err := barcodeModules("   "); err == nil {
 		t.Fatal("encoded a blank serial; want a refusal")
+	}
+	if _, err := BarcodePNG("   ", 300); err == nil {
+		t.Fatal("BarcodePNG rendered a blank serial; want the same refusal as the label sheet")
+	}
+}
+
+// A truncated label name comes out in the PDF's encoding, ellipsis included:
+// cp1252's single-byte "…" (0x85), accents intact, and none of the UTF-8
+// bytes that print as stray glyphs.
+func TestTruncateForLabelStaysInPDFEncoding(t *testing.T) {
+	pdf := fpdf.New("P", "mm", "Letter", "")
+	pdf.AddPage()
+	pdf.SetFont("Helvetica", "", 10)
+	tr := latin1(pdf)
+
+	got := truncateForLabel(pdf, tr, "Caméra éclairage très longue à imprimer", 25)
+	if !strings.HasSuffix(got, "\x85") {
+		t.Errorf("truncated %q does not end in cp1252's ellipsis", got)
+	}
+	if strings.Contains(got, "\u2026") || strings.Contains(got, "\ufffd") || !strings.HasPrefix(got, tr("Camé")) {
+		t.Errorf("truncated %q carries UTF-8 bytes or lost its accent", got)
 	}
 }
 

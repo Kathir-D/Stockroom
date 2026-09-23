@@ -93,9 +93,14 @@ func TestImportAssetsUpsertsAndSaysWhatItReplaced(t *testing.T) {
 	if err != nil || res.Created != 1 {
 		t.Fatalf("first import = %+v, %v; want 1 created", res, err)
 	}
-	res, err = db.ImportAssets(ctx, admin, strings.NewReader("serial_number,name\n"+serial+",Second name\n"))
-	if err != nil || res.Updated != 1 {
-		t.Fatalf("second import = %+v, %v; want 1 updated", res, err)
+	// The second row repeats the first's serial: refused, naming line 2,
+	// rather than updating the item the same file created a line earlier.
+	res, err = db.ImportAssets(ctx, admin, strings.NewReader("serial_number,name\n"+serial+",Second name\n"+serial+",Third name\n"))
+	if err != nil || res.Updated != 1 || res.Failed != 1 {
+		t.Fatalf("second import = %+v, %v; want 1 updated, 1 failed", res, err)
+	}
+	if e := res.Rows[1].Error; !strings.Contains(e, "line 2") {
+		t.Errorf("repeat error = %q, want it to name line 2", e)
 	}
 	if note := res.Rows[0].Note; !strings.Contains(note, "First name") {
 		t.Errorf("update note = %q, want it to name the item it replaced", note)
@@ -115,9 +120,13 @@ func TestBulkAddContinuesTheSeries(t *testing.T) {
 	prefix := fmt.Sprintf("ZZB%06d", rand.IntN(1_000_000))
 	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `delete from assets where serial_number like $1`, prefix+"-%") })
 
-	in := BulkAddInput{Name: "Test battery", Prefix: prefix, Count: 3}
-	if _, err := db.BulkAddAssets(ctx, admin, in); err != nil {
+	in := BulkAddInput{Name: "  Test battery ", Prefix: prefix, Count: 3}
+	added, err := db.BulkAddAssets(ctx, admin, in)
+	if err != nil {
 		t.Fatalf("first BulkAddAssets: %v", err)
+	}
+	if added[0].Name != "Test battery" {
+		t.Errorf("stored name = %q, want it trimmed as the preview showed it", added[0].Name)
 	}
 	prev, err := db.BulkPreviewSerials(ctx, admin, BulkAddInput{Name: "Test battery", Prefix: prefix, Count: 2})
 	if err != nil {
@@ -130,6 +139,14 @@ func TestBulkAddContinuesTheSeries(t *testing.T) {
 
 	if _, err := db.BulkPreviewSerials(ctx, admin, BulkAddInput{Name: "x", Prefix: "has space", Count: 1}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("prefix with a space: err = %v, want ErrInvalid", err)
+	}
+}
+
+// An Excel CSV starts with a BOM, and it must still be sniffed as a CSV.
+func TestParseCategoryFileStripsBOM(t *testing.T) {
+	format, paths, err := parseCategoryFile("\ufefftype,category,model\nLenses,Zooms,Canon 24-70\n")
+	if err != nil || format != CategoryImportCSV || len(paths) != 1 || len(paths[0]) != 3 {
+		t.Fatalf("parseCategoryFile = %v, %v, %v; want one csv path of 3", format, paths, err)
 	}
 }
 

@@ -128,3 +128,44 @@ func TestMalformedJSONIsA400(t *testing.T) {
 		}
 	}
 }
+
+// The recovery barcode revalidates: an unchanged serial is a 304, and a
+// changed one is a new image rather than an hour of the old barcode.
+func TestBarcodeRouteRevalidates(t *testing.T) {
+	h, d := testDeps(t)
+	token := adminToken(t, h, d)
+	serial := newAssetSerial()
+	code, body := call(t, h, http.MethodPost, "/assets", token, map[string]any{"name": "Barcode camera", "serial_number": serial})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /assets = %d %v", code, body)
+	}
+	id, _ := body["id"].(string)
+	dropAsset(t, d, id)
+
+	get := func(etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/assets/"+id+"/barcode.png", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	first := get("")
+	etag := first.Header().Get("ETag")
+	if first.Code != http.StatusOK || etag == "" || strings.Contains(etag, serial) {
+		t.Fatalf("first GET = %d, ETag %q; want 200 with a tag that does not carry the serial", first.Code, etag)
+	}
+	if rec := get(etag); rec.Code != http.StatusNotModified {
+		t.Errorf("GET with the same tag = %d, want 304", rec.Code)
+	}
+
+	if code, body := call(t, h, http.MethodPut, "/assets/"+id, token, map[string]any{"name": "Barcode camera", "serial_number": serial + "X"}); code != http.StatusOK {
+		t.Fatalf("PUT /assets/%s = %d %v", id, code, body)
+	}
+	if rec := get(etag); rec.Code != http.StatusOK || rec.Header().Get("ETag") == etag {
+		t.Errorf("GET after the serial changed = %d, ETag %q; want 200 with a new tag", rec.Code, rec.Header().Get("ETag"))
+	}
+}

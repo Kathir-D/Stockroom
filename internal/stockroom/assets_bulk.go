@@ -171,7 +171,7 @@ func (db *DB) BulkAddAssets(ctx context.Context, actor Actor, in BulkAddInput) (
 		a, err := scanAsset(tx.QueryRow(ctx, `
 			insert into assets as a (name, serial_number, category_id, created_by)
 			values ($1, $2, $3, $4)
-			returning `+assetColumns, in.Name, serial, in.CategoryID, actor.ID))
+			returning `+assetColumns, preview.Name, serial, in.CategoryID, actor.ID))
 		if err != nil {
 			mapped := mapPgError("bulk add", err)
 			if errors.Is(mapped, ErrConflict) {
