@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The first-run wizard (TEMPLATE-TODO Phase B).
@@ -219,8 +221,18 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 	err = db.Pool.QueryRow(ctx, `
 		select coalesce(full_name, student_number) from profiles
 		 where student_number = $1 and full_name is distinct from 'Failsafe Admin'`, sn).Scan(&existing)
-	if err == nil {
+	switch {
+	case err == nil:
 		return fmt.Errorf("%w: %s already has that number. Pick one nobody uses", ErrInvalid, existing)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return mapPgError("check failsafe number", err)
+	}
+
+	// The number being replaced, if any. Read before the write, because
+	// afterwards the file no longer says.
+	previous, err := readEnvValue(db.EnvPath, "ADMIN_STUDENT_NUMBER")
+	if err != nil {
+		return err
 	}
 
 	if err := setEnvValues(db.EnvPath, map[string]string{
@@ -233,6 +245,25 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 		return err
 	}
 	SetFailsafeAdminConfigured(true)
+
+	// Replacing the failsafe has to retire the old one. Nothing re-applies
+	// its password any more, but the account itself would stay an admin with
+	// that password for good -- and "the old one may have leaked" is the
+	// likeliest reason to replace it. Demoted and password cleared rather
+	// than deleted, so any custody history naming it survives.
+	if previous != "" && previous != sn {
+		var oldID string
+		err := db.Pool.QueryRow(ctx, `
+			update profiles set is_admin = false, password_hash = null
+			 where student_number = $1 and full_name = 'Failsafe Admin'
+			returning id`, previous).Scan(&oldID)
+		switch {
+		case err == nil:
+			db.Sessions.DeleteForProfile(oldID)
+		case !errors.Is(err, pgx.ErrNoRows):
+			return mapPgError("retire previous failsafe", err)
+		}
+	}
 	return nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode"
 )
 
 // What a student number is allowed to look like (TEMPLATE-TODO Phase B).
@@ -198,7 +197,10 @@ func NormalizeStudentNumber(s string) (string, error) {
 
 func normalizeDigits(s string) (string, error) {
 	for _, r := range s {
-		if !unicode.IsDigit(r) {
+		// ASCII only. unicode.IsDigit also takes Arabic-Indic and fullwidth
+		// digits, which a barcode cannot carry (Code 128 is ASCII) and which
+		// make "１２３" a different account from "123".
+		if r < '0' || r > '9' {
 			return "", fmt.Errorf("%w: student number must be digits only", ErrInvalid)
 		}
 	}

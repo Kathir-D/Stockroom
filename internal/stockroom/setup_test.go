@@ -125,4 +125,20 @@ func TestConfigureFailsafeWritesTheSettingsFile(t *testing.T) {
 	if _, err := db.LoginByPassword(ctx, number, "spare $pass#word"); err != nil {
 		t.Errorf("the spare account cannot sign in now: %v", err)
 	}
+
+	// Replacing it retires the old one: an admin with a password nothing
+	// re-applies any more is a way in nobody is keeping track of.
+	second := fmt.Sprintf("8%08d", rand.IntN(100_000_000))
+	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `delete from profiles where student_number = $1`, second) })
+	if err := db.ConfigureFailsafe(ctx, admin, second, "second-spare"); err != nil {
+		t.Fatalf("ConfigureFailsafe again: %v", err)
+	}
+	if _, err := db.LoginByPassword(ctx, number, "spare $pass#word"); err == nil {
+		t.Error("the replaced failsafe can still sign in with its old password")
+	}
+	var stillAdmin bool
+	_ = db.Pool.QueryRow(ctx, `select is_admin from profiles where student_number = $1`, number).Scan(&stillAdmin)
+	if stillAdmin {
+		t.Error("the replaced failsafe is still an admin")
+	}
 }

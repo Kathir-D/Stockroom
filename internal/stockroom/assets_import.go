@@ -102,16 +102,33 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 	// own, so the second would find the first and *update* it -- the file
 	// overwriting itself, reported as "you already had an item".
 	firstLine := map[string]int{}
-	line := 1
 	for {
 		rec, err := rd.Read()
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		line++
 		if err != nil {
-			return res, fmt.Errorf("%w: line %d could not be read: %v", ErrInvalid, line, err)
+			// Every row before this one has already committed, so this is a
+			// failed row in the report, not an error that hides the report: a
+			// 400 here would tell the admin nothing landed when 148 items did.
+			// The reader cannot resynchronise after a malformed quote, so the
+			// run stops here.
+			line := 0
+			var pe *csv.ParseError
+			if errors.As(err, &pe) {
+				line = pe.StartLine
+			}
+			res.Failed++
+			res.Rows = append(res.Rows, AssetImportRow{
+				Line: line, Action: "failed",
+				Error: fmt.Sprintf("this line could not be read (%v); nothing after it was imported", err),
+			})
+			break
 		}
+		// The reader's own position, not a record count: encoding/csv skips
+		// blank lines and a quoted field may span several, and either would
+		// make a counter name the wrong line in the spreadsheet.
+		line, _ := rd.FieldPos(0)
 
 		row := AssetImportRow{Line: line}
 		get := func(name string) string {

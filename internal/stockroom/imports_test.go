@@ -95,15 +95,24 @@ func TestImportAssetsUpsertsAndSaysWhatItReplaced(t *testing.T) {
 	}
 	// The second row repeats the first's serial: refused, naming line 2,
 	// rather than updating the item the same file created a line earlier.
-	res, err = db.ImportAssets(ctx, admin, strings.NewReader("serial_number,name\n"+serial+",Second name\n"+serial+",Third name\n"))
+	// The blank line is skipped by the reader, so the repeat sits on file
+	// line 4: the report has to say 4, not the record count 3.
+	res, err = db.ImportAssets(ctx, admin, strings.NewReader("serial_number,name\n"+serial+",Second name\n\n"+serial+",Third name\n"))
 	if err != nil || res.Updated != 1 || res.Failed != 1 {
 		t.Fatalf("second import = %+v, %v; want 1 updated, 1 failed", res, err)
 	}
-	if e := res.Rows[1].Error; !strings.Contains(e, "line 2") {
-		t.Errorf("repeat error = %q, want it to name line 2", e)
+	if e := res.Rows[1].Error; !strings.Contains(e, "line 2") || res.Rows[1].Line != 4 {
+		t.Errorf("repeat row = line %d, %q; want line 4, naming line 2", res.Rows[1].Line, e)
 	}
 	if note := res.Rows[0].Note; !strings.Contains(note, "First name") {
 		t.Errorf("update note = %q, want it to name the item it replaced", note)
+	}
+
+	// A malformed line stops the run but keeps the report: the rows before
+	// it have committed, and the admin needs to be told so.
+	res, err = db.ImportAssets(ctx, admin, strings.NewReader("serial_number,name\n"+serial+",Fourth name\n"+serial+"X,Dell 27\" monitor\n"))
+	if err != nil || res.Updated != 1 || res.Failed != 1 || res.Rows[1].Line != 3 {
+		t.Fatalf("import with a bare quote = %+v, %v; want 1 updated, 1 failed on line 3", res, err)
 	}
 
 	// A student cannot import.

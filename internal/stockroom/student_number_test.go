@@ -55,3 +55,16 @@ func TestStudentNumberFormatSetting(t *testing.T) {
 		t.Errorf("lookahead pattern = %v, want ErrInvalid", err)
 	}
 }
+
+// Only ASCII digits: Code 128 cannot carry anything else, and "１２３" must not
+// be a different account from "123".
+func TestNormalizeStudentNumberIsASCIIDigits(t *testing.T) {
+	for _, in := range []string{"١٢٣", "１２３", "12a"} {
+		if _, err := NormalizeStudentNumber(in); !errors.Is(err, ErrInvalid) {
+			t.Errorf("NormalizeStudentNumber(%q) = %v, want ErrInvalid", in, err)
+		}
+	}
+	if got, err := NormalizeStudentNumber(" 012345 "); err != nil || got != "012345" {
+		t.Errorf("NormalizeStudentNumber(012345) = %q, %v", got, err)
+	}
+}
