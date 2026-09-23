@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 
@@ -73,15 +74,17 @@ func (d deps) handleSignInPhotos(w http.ResponseWriter, r *http.Request) {
 // a 404 handler, so the off state needs no branch here or in the router.
 func photoTileServer(wall *stockroom.PhotoWall) http.Handler {
 	files := fileServer(stockroom.PhotoWallPrefix, wall.TileDir())
-	maxAge := strconv.Itoa(int(wall.TTL().Seconds()))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Tile names are random and single-use, so the bytes at a given URL
 		// can never change -- immutable is exactly true.
 		//
-		// The lifetime is the reel's TTL rather than the year a
-		// permanently-immutable asset would get, because the server *deletes*
-		// the file at the end of that window. A year-long max-age would leave
+		// The lifetime is what is left of this tile's life rather than the year
+		// a permanently-immutable asset would get, because the server *deletes*
+		// the file at the end of that window. Per tile, not the reel's TTL: a
+		// drained reel hands a tile out again with only part of its life left
+		// (TakePhotos). Rounded up, so a tile fetched the instant it is handed
+		// out reads as the full TTL rather than a second short of it. A year-long max-age would leave
 		// a photograph in the browser's disk cache long after the copy on disk
 		// was reaped, which is the opposite of what "delete after use" (§2) is
 		// for, and it would buy nothing: the component fetches each URL once
@@ -89,7 +92,8 @@ func photoTileServer(wall *stockroom.PhotoWall) http.Handler {
 		//
 		// private, because the machine is shared and there is no shared cache
 		// on loopback for public to be about.
-		w.Header().Set("Cache-Control", "private, max-age="+maxAge+", immutable")
+		maxAge := int(math.Ceil(wall.TileMaxAge(r.URL.Path).Seconds()))
+		w.Header().Set("Cache-Control", "private, max-age="+strconv.Itoa(maxAge)+", immutable")
 		files.ServeHTTP(w, r)
 	})
 }

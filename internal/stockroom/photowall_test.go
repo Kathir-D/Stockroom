@@ -206,14 +206,16 @@ func TestPhotoWallLifecycle(t *testing.T) {
 }
 
 // TestPhotoWallTakeIsAtomic: two requests arriving together must never be
-// handed the same tile, or two browsers race the same TTL over one file.
+// handed the same *fresh* tile. Four requests of five against twenty ready
+// tiles, so nobody is short and no batch is made up with repeats -- a drained
+// reel repeating tiles on purpose is TestPhotoWallDrainedReelRepeats.
 func TestPhotoWallTakeIsAtomic(t *testing.T) {
 	src := &stubSource{data: []byte("tile bytes")}
 	w, _ := newTestWall(t, PhotoWallOptions{Count: 20, Batch: 10, Source: src})
 	fill(t, w)
 
 	var wg sync.WaitGroup
-	results := make([][]string, 8)
+	results := make([][]string, 4)
 	for i := range results {
 		wg.Add(1)
 		go func(i int) {
@@ -255,6 +257,121 @@ func TestPhotoWallTakeWhenEmpty(t *testing.T) {
 	}
 	if w.needsFill() {
 		t.Error("a reel with no source should not ask to be filled")
+	}
+}
+
+// TestPhotoWallCeilingBoundsDownloads: GET /signin/photos needs no session, so
+// a tab stuck reloading the sign-in screen -- or a script -- can call it as
+// fast as it likes. Without the ceiling every call was a batch more downloads
+// from Drive. With it, no number of calls within a TTL costs more than twice
+// the buffer, and the filler picks up again on its own once tiles expire.
+func TestPhotoWallCeilingBoundsDownloads(t *testing.T) {
+	logs := captureLog(t)
+	src := &stubSource{data: []byte("tile bytes")}
+	w, clock := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 4, Source: src})
+
+	fill(t, w)
+	for i := 0; i < 100; i++ {
+		w.TakePhotos(0)
+		fill(t, w)
+	}
+	if src.calls != 8 {
+		t.Errorf("100 hand-outs cost %d downloads, want the ceiling of 8", src.calls)
+	}
+	if got := len(tileFiles(t, w)); got != 8 {
+		t.Errorf("%d tiles on disk, want the ceiling of 8", got)
+	}
+	if n := strings.Count(logs.String(), "the most it keeps"); n != 1 {
+		t.Errorf("logged the ceiling %d times, want once per episode:\n%s", n, logs)
+	}
+
+	// Not a permanent stop: once the served tiles expire the buffer refills.
+	*clock = clock.Add(DefaultPhotoWallTTL + time.Minute)
+	w.reap()
+	fill(t, w)
+	if ready, _ := w.Counts(); ready != 4 {
+		t.Errorf("after the TTL the reel refilled to %d ready, want 4", ready)
+	}
+}
+
+// TestPhotoWallDrainedReelRepeats: the sign-in screen that arrives after a
+// drain gets a repeated wall rather than an empty one -- but a repeat keeps
+// the expiry its first hand-out set, so "delete after use" still holds, and a
+// tile too close to deletion is not handed out at all.
+func TestPhotoWallDrainedReelRepeats(t *testing.T) {
+	src := &stubSource{data: []byte("tile bytes")}
+	w, clock := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 4, TTL: 15 * time.Minute, Source: src})
+	fill(t, w)
+
+	first, _ := w.TakePhotos(0)
+	*clock = clock.Add(5 * time.Minute)
+	again, ttl := w.TakePhotos(0)
+	if len(again) != 4 {
+		t.Fatalf("a drained reel handed out %d tiles, want 4 repeats", len(again))
+	}
+	seen := map[string]bool{}
+	for _, u := range first {
+		seen[u] = true
+	}
+	for _, u := range again {
+		if !seen[u] {
+			t.Errorf("repeat %s was never handed out; a drained reel has nothing fresh to give", u)
+		}
+	}
+	if ttl != 10*time.Minute {
+		t.Errorf("ttl = %v, want the 10 minutes the repeats have left", ttl)
+	}
+	if got := w.TileMaxAge(again[0]); got != 10*time.Minute {
+		t.Errorf("TileMaxAge = %v, want 10m: a repeat must not be cached past its deletion", got)
+	}
+
+	// The repeat did not extend anything: the files go on the first schedule.
+	*clock = clock.Add(10*time.Minute + time.Second)
+	w.reap()
+	if got := len(tileFiles(t, w)); got != 0 {
+		t.Errorf("%d tiles outlived the TTL their first hand-out set", got)
+	}
+
+	// And one with under two minutes left is not worth handing out.
+	fill(t, w)
+	w.TakePhotos(0)
+	*clock = clock.Add(14 * time.Minute)
+	if urls, _ := w.TakePhotos(0); len(urls) != 0 {
+		t.Errorf("handed out %d tiles about to be deleted", len(urls))
+	}
+}
+
+// TestPhotoWallNeverRepeatsAReplacedFolder: served tiles outlive a folder
+// switch on purpose (§7), and a drained reel must not hand them out again --
+// that would put the replaced folder back on the wall for a whole TTL.
+func TestPhotoWallNeverRepeatsAReplacedFolder(t *testing.T) {
+	src := &stubSource{data: []byte("tile bytes")}
+	w, _ := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 4, Source: src})
+	fill(t, w)
+	w.TakePhotos(0)
+	w.Invalidate()
+	if urls, _ := w.TakePhotos(0); len(urls) != 0 {
+		t.Errorf("handed out %d tiles from the replaced folder", len(urls))
+	}
+}
+
+// TestPhotoWallTileMaxAge: a ready tile may be cached for the full TTL -- it
+// cannot be deleted sooner after it is handed out -- and a name the reel does
+// not hold is never cached, nor is anything on a nil reel.
+func TestPhotoWallTileMaxAge(t *testing.T) {
+	src := &stubSource{data: []byte("tile bytes")}
+	w, _ := newTestWall(t, PhotoWallOptions{Count: 1, TTL: 15 * time.Minute, Source: src})
+	fill(t, w)
+	ready := w.PreviewPhotos(1)
+	if got := w.TileMaxAge(ready[0]); got != 15*time.Minute {
+		t.Errorf("ready tile max-age = %v, want 15m", got)
+	}
+	if got := w.TileMaxAge(PhotoWallPrefix + "nosuchtile.jpg"); got != 0 {
+		t.Errorf("unknown tile max-age = %v, want 0", got)
+	}
+	var off *PhotoWall
+	if got := off.TileMaxAge(ready[0]); got != 0 {
+		t.Errorf("nil reel max-age = %v, want 0", got)
 	}
 }
 

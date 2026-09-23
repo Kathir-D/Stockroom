@@ -43,6 +43,7 @@ func Present() bool {
 	return err == nil
 }
 
+// mustSub returns a subtree of the embedded UI or panics if it is absent.
 func mustSub(dir string) fs.FS {
 	sub, err := fs.Sub(distFiles, dir)
 	if err != nil {

@@ -89,6 +89,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
+// fileExists reports whether name identifies a file in the embedded UI.
 func fileExists(name string) bool {
 	info, err := fs.Stat(webapp.Dist, name)
 	return err == nil && !info.IsDir()

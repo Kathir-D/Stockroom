@@ -598,6 +598,41 @@ func TestDriveManifestIsNotInTheServedDirectory(t *testing.T) {
 	}
 }
 
+// TestDriveSetFolderCancelsTheListingItReplaces: the refresher is one
+// goroutine, so a switch made while the old folder is still being listed used
+// to wait behind minutes of Drive traffic whose result was then thrown away --
+// and if that listing failed, its error was filed against the *new* folder and
+// pushed the new folder's first listing behind the five-minute retry gate.
+func TestDriveSetFolderCancelsTheListingItReplaces(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	started := make(chan struct{})
+	s.list = func(ctx context.Context, _ string) (io.ReadCloser, func() error, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.buildManifest(context.Background(), "FOLDER-1")
+		close(done)
+	}()
+	<-started
+	s.SetFolder("FOLDER-2")
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the listing of the replaced folder kept running after the switch")
+	}
+	if st := s.Status(); st.LastError != "" || st.Listing {
+		t.Errorf("status after the switch = %+v; the old folder's listing is not news about the new one", st)
+	}
+	if folderID, due := s.buildDue(); !due || folderID != "FOLDER-2" {
+		t.Errorf("buildDue() = %q, %v; the new folder must be listed now, not after the retry gate", folderID, due)
+	}
+}
+
 // TestDriveRebuildKeepsTheManifestServing is §7's Rebuild button: it re-lists
 // the folder that is already live, so the listing it is replacing is still
 // correct and must keep feeding the wall for the minutes the new one takes
