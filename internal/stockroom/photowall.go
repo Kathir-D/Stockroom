@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -185,10 +186,17 @@ type PhotoWall struct {
 	gen uint64
 	// fails counts consecutive fetch failures, and resets on any success.
 	fails int
-	// lastErr is the most recent fetch failure, kept rather than logged
-	// because §7's admin screen is where it belongs: a decorative buffer
-	// failing every ten seconds on a machine with no internet would otherwise
-	// fill the log with noise nobody asked for.
+	// warming is whether the last attempt found the source not ready yet --
+	// no folder chosen, or the first listing still running. Not a failure
+	// (§9 calls both normal), so it neither counts toward the rest nor sets
+	// lastErr; Run just asks again at the idle tick rather than every two
+	// seconds.
+	warming bool
+	// lastErr is the most recent fetch failure. It is *not* logged per
+	// failure: a decorative buffer failing every few seconds on a machine
+	// with no internet would fill the log with noise nobody asked for. What
+	// is logged is §9's single explanatory line when a streak reaches the
+	// cap, and one more when a success ends it (recordFailure, fillOne).
 	lastErr   error
 	lastErrAt time.Time
 }
@@ -335,8 +343,11 @@ func (w *PhotoWall) Run(ctx context.Context) {
 		if w.needsFill() {
 			w.fillOne(ctx)
 			wait = w.delay
-			if w.backingOff() {
+			switch {
+			case w.backingOff():
 				wait = photoWallBackoff
+			case w.isWarming():
+				wait = w.tick
 			}
 		}
 		if !sleepCtx(ctx, wait) {
@@ -355,6 +366,13 @@ func (w *PhotoWall) needsFill() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.readyLocked() < w.count
+}
+
+// isWarming reports whether the last attempt found the source not ready yet.
+func (w *PhotoWall) isWarming() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.warming
 }
 
 // backingOff reports whether the filler has failed enough times in a row to
@@ -377,6 +395,15 @@ func (w *PhotoWall) fillOne(ctx context.Context) {
 	// image decode; holding the lock across it would stall every TakePhotos
 	// for the duration, on the one screen that must stay responsive.
 	data, err := w.src.NextPhoto(ctx)
+	if errors.Is(err, errPhotoWallWarmingUp) {
+		w.mu.Lock()
+		w.warming = true
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Lock()
+	w.warming = false
+	w.mu.Unlock()
 	if err != nil {
 		w.recordFailure(err)
 		return
@@ -404,8 +431,12 @@ func (w *PhotoWall) fillOne(ctx context.Context) {
 	// prevents -- a photograph from a replaced folder appearing minutes later
 	// -- is unreproducible once it ships.
 	stale := gen != w.gen || w.readyLocked() >= w.count
+	rested := 0
 	if !stale {
 		w.tiles[id] = &photoTile{id: id, gen: gen}
+		if w.fails >= photoWallFailureCap {
+			rested = w.fails
+		}
 		w.fails = 0
 		w.lastErr = nil
 	}
@@ -414,16 +445,50 @@ func (w *PhotoWall) fillOne(ctx context.Context) {
 	if stale {
 		_ = os.Remove(w.tilePath(id))
 	}
+	if rested > 0 {
+		// The other half of the rest's log line: without it the last word in
+		// the log is "pausing", and whoever reads it next week cannot tell
+		// whether the wall ever came back.
+		log.Printf("sign-in photo wall: fetching again after %d failed tries in a row", rested)
+	}
 }
 
 // recordFailure counts a failed fetch and keeps the reason for §7's admin
-// screen. Nothing is logged: see the lastErr field.
+// screen. It logs once per streak, at the moment the streak reaches the cap
+// -- §9's "single explanatory line" -- and never per failure: see lastErr.
 func (w *PhotoWall) recordFailure(err error) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.fails++
 	w.lastErr = err
 	w.lastErrAt = w.now()
+	reached := w.fails == photoWallFailureCap
+	w.mu.Unlock()
+
+	if reached {
+		log.Printf("sign-in photo wall: %d tries in a row gave no usable photograph, so it is pausing for %s between tries until one works. The last: %v",
+			photoWallFailureCap, photoWallBackoff, err)
+	}
+}
+
+// fillFailure is the reel's half of the admin screen's last_error: the most
+// recent failure, but only while the filler is resting.
+//
+// Only while resting, because that is the only time the reel's errors explain
+// what the screen shows. A single failed download among successes is normal --
+// Drive answers "directory not found" for a file it listed a minute earlier
+// often enough to have been seen on the first real run -- and NextPhoto has
+// already retried past it. Reporting it would put a red line on a screen
+// whose wall is full.
+func (w *PhotoWall) fillFailure() (err error, at time.Time) {
+	if w == nil {
+		return nil, time.Time{}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fails < photoWallFailureCap {
+		return nil, time.Time{}
+	}
+	return w.lastErr, w.lastErrAt
 }
 
 // reap deletes served tiles whose batch has expired, freeing the slot for the
@@ -570,7 +635,7 @@ func (w *PhotoWall) Invalidate() {
 	}
 	w.mu.Lock()
 	w.gen++
-	w.fails, w.lastErr = 0, nil
+	w.fails, w.lastErr, w.warming = 0, nil, false
 	var dropped []string
 	for id, t := range w.tiles {
 		if !t.served {
