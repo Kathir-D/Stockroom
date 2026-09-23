@@ -52,6 +52,16 @@ func TestMigrateRejectsUnversionedFile(t *testing.T) {
 // Cheap, needs no database, and covers the thing a new migration gets wrong:
 // a filename that does not start with a timestamp, or a duplicate version,
 // either of which changes what a fresh install ends up with.
+func TestMigrateRejectsDuplicateVersion(t *testing.T) {
+	fsys := fstest.MapFS{
+		"20260101000000_one.sql": &fstest.MapFile{Data: []byte("select 1")},
+		"20260101000000_two.sql": &fstest.MapFile{Data: []byte("select 2")},
+	}
+	if _, err := migrationFilenames(fsys); err == nil {
+		t.Fatal("migrationFilenames accepted two files with one version; want an error")
+	}
+}
+
 func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 	files, err := migrationFilenames(supabase.Migrations)
 	if err != nil {

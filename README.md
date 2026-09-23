@@ -30,8 +30,9 @@ first, because they describe the behaviour the code has to keep.
 > [!IMPORTANT]
 > **Installing it on the machine it will live on is now [`docs/INSTALL.md`](docs/INSTALL.md)** —
 > `./scripts/install.sh` on macOS or Linux. That gets you one plain Postgres container, one binary
-> holding the API, the web UI and every database migration, and a service that starts at boot and
-> restarts if it dies. It is also the upgrade: run it again.
+> holding the API, the web UI and every database migration, and a service that restarts it if it
+> dies. On Linux the service starts at boot; on macOS it is a LaunchAgent that starts when the
+> configured user **logs in**, so the Mac has to be set to log in automatically. It is also the upgrade: run it again.
 >
 > **Honest status.** It still needs Go and Node *on the machine you install from*, because it
 > builds rather than downloading a release binary, and there is no Windows installer yet. And once

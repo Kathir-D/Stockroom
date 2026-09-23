@@ -264,6 +264,15 @@ func (db *DB) photoWallStatus(f photoWallFolder) PhotoWallStatus {
 		at := src.LastErrorAt
 		st.LastErrorAt = &at
 	}
+	// The reel's failures, which until §10's manual pass reached no screen at
+	// all: the source only knows about listings, so a wall that had a manifest
+	// of two thousand photographs and was resting after 25 failed downloads
+	// reported no error while showing nothing. Newer wins, because the older
+	// of the two has usually been overtaken by the newer.
+	if err, at := db.PhotoWall.fillFailure(); err != nil && (st.LastErrorAt == nil || at.After(*st.LastErrorAt)) {
+		st.LastError = describeFillFailure(err)
+		st.LastErrorAt = &at
+	}
 	// A folder set in the database but not in the running source means the
 	// server was started before the folder was chosen, or the source failed to
 	// build. Say so rather than showing a configured folder and an idle wall.
@@ -277,6 +286,22 @@ func (db *DB) photoWallStatus(f photoWallFolder) PhotoWallStatus {
 		st.LastError = "the running server has no Drive source for this folder; check that SIGNIN_PHOTOS_REMOTE is set in .env, then restart"
 	}
 	return st
+}
+
+// describeFillFailure words a resting reel's last failure for the admin.
+//
+// A streak of photographs the normalizer refused gets §9's sentence, naming
+// the gate, because that one is fixed by what goes into the folder and not
+// by anything on this machine: a folder of phone portraits is two thousand
+// valid photographs and an empty wall. The gate's bounds are 4:3 and 16:10,
+// so "close to 3:2" is how it is put to a person rather than as two decimals.
+func describeFillFailure(err error) string {
+	if errors.Is(err, errPhotoUnusable) {
+		return fmt.Sprintf("no usable photographs found in the last %d tries. The wall only uses landscape photographs close to 3:2 — anything outside 4:3 to 16:10, which includes every portrait shot, is skipped. The last one: %v",
+			photoWallFailureCap, err)
+	}
+	return fmt.Sprintf("paused after %d failed tries in a row; trying again every %s. The last: %v",
+		photoWallFailureCap, photoWallBackoff, err)
 }
 
 // rcloneInstalled reports whether the binary is on PATH. Checked per request

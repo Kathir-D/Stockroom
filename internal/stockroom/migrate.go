@@ -137,6 +137,18 @@ func migrationFilenames(fsys fs.FS) ([]migrationFile, error) {
 	}
 
 	sort.Slice(files, func(i, j int) bool { return files[i].version < files[j].version })
+
+	// Two files with one version is refused here, at boot, rather than left to
+	// the test that checks the embedded set. The bookkeeping table is keyed on
+	// the version, so a fresh database would run both files and record one,
+	// while an upgraded database that already recorded the version would skip
+	// the second -- two installs of the same release with different schemas.
+	for i := 1; i < len(files); i++ {
+		if files[i-1].version == files[i].version {
+			return nil, fmt.Errorf("migrate: %q and %q share version %s",
+				files[i-1].path, files[i].path, files[i].version)
+		}
+	}
 	return files, nil
 }
 
