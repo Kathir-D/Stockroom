@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,8 +19,9 @@ import (
 // The sign-in photo wall's reel: the prefetch buffer the sign-in screen draws
 // from. docs/design/signin-photo-wall.html is the design; this file is §2 of
 // it and deliberately nothing else. Where the photographs come from (rclone,
-// §3) and how they are normalized (§4) sit behind PhotoSource; the HTTP
-// endpoint (§5), the component (§6) and the admin screen (§7) are not built.
+// §3) and how they are normalized (§4) sit behind PhotoSource, in
+// photowall_drive.go and photowall_image.go; the HTTP endpoint (§5) is
+// server/photowall.go and the admin screen's reads (§7) are photowall_admin.go.
 //
 // The reel is a prefetch buffer with single-use contents: a fixed number of
 // tiles are kept normalized and ready on disk, handed out in batches, and
@@ -44,10 +47,13 @@ const (
 	// wipePhotoWallDir for the guard that enforces that.
 	DefaultPhotoWallDir = "./.cache/signin-photos"
 	// DefaultPhotoWallCount is how many ready tiles the reel keeps buffered.
-	// 48 at ~120 KB is about 6 MB of disk and three batches of runway.
+	// 48 at ~120 KB is about 6 MB of disk and a batch and a half of runway.
 	DefaultPhotoWallCount = 48
-	// DefaultPhotoWallBatch is how many tiles one request is handed.
-	DefaultPhotoWallBatch = 16
+	// DefaultPhotoWallBatch is how many tiles one request is handed: sixteen
+	// per column, so a photograph comes round once every three to four
+	// minutes rather than every two. Was 16 until 2026-09-22; 48 is now a
+	// batch and a half of runway rather than three.
+	DefaultPhotoWallBatch = 32
 	// DefaultPhotoWallTTL is how long a served tile survives before the
 	// reaper deletes it. Comfortably longer than a page load and longer than
 	// the session idle timeout (CLAUDE.md §7), because the number that
@@ -71,6 +77,19 @@ const (
 	photoWallFailureCap = 25
 	// photoWallBackoff is how long the filler waits once it has hit the cap.
 	photoWallBackoff = 5 * time.Minute
+	// photoWallCeilingFactor sets the most tiles the reel keeps on disk at
+	// once, ready and served together, as a multiple of the buffer. It is what
+	// stops hand-outs from driving downloads: GET /signin/photos needs no
+	// session, so anything that can reach it can call it in a loop, and
+	// without a ceiling every call is a batch more originals pulled from Drive
+	// over the school uplink. Served tiles only leave when their TTL runs out,
+	// so the ceiling is a hard bound of 2x the buffer downloads per TTL,
+	// however often the endpoint is called (§2, "Draining").
+	photoWallCeilingFactor = 2
+	// photoWallReuseMinLife is how long a served tile must still have to live
+	// before a drained reel hands it out again. Long enough that the browser
+	// has fetched it well before the reaper deletes it.
+	photoWallReuseMinLife = 2 * time.Minute
 	// photoWallMarker names a file written into the cache directory so the
 	// boot wipe can tell a cache it owns from a directory somebody pointed
 	// SIGNIN_PHOTOS_DIR at by mistake. See wipePhotoWallDir.
@@ -164,12 +183,13 @@ type photoTile struct {
 // subsystem may delay, block or visibly break sign-in. A handler that has to
 // remember a nil check is a handler that will one day forget it.
 type PhotoWall struct {
-	dir   string
-	count int
-	batch int
-	ttl   time.Duration
-	delay time.Duration
-	tick  time.Duration
+	dir     string
+	count   int
+	ceiling int
+	batch   int
+	ttl     time.Duration
+	delay   time.Duration
+	tick    time.Duration
 
 	src PhotoSource
 
@@ -199,6 +219,9 @@ type PhotoWall struct {
 	// cap, and one more when a success ends it (recordFailure, fillOne).
 	lastErr   error
 	lastErrAt time.Time
+	// atCeiling is whether the filler is being held by the ceiling, so that
+	// holding is logged once when it starts rather than every tick.
+	atCeiling bool
 }
 
 // NewPhotoWall prepares the cache directory and returns an empty reel. It does
@@ -226,6 +249,7 @@ func NewPhotoWall(opts PhotoWallOptions) (*PhotoWall, error) {
 	if w.count <= 0 {
 		w.count = DefaultPhotoWallCount
 	}
+	w.ceiling = photoWallCeilingFactor * w.count
 	if w.batch <= 0 {
 		w.batch = DefaultPhotoWallBatch
 	}
@@ -241,18 +265,35 @@ func NewPhotoWall(opts PhotoWallOptions) (*PhotoWall, error) {
 	return w, nil
 }
 
-// TTL is how long a served tile survives before the reaper deletes it, and so
-// how long a tile URL stays fetchable. §5 reports it in the batch response and
-// uses it as the tiles' Cache-Control lifetime, since caching a file past the
-// point the server deletes it is the one thing "delete after use" forbids.
+// TileMaxAge is how long the tile at urlPath may be cached: exactly as long as
+// it will still exist on disk. §5 uses it as the tile's Cache-Control
+// lifetime, since caching a file past the point the server deletes it is the
+// one thing "delete after use" forbids.
 //
-// The default on a nil reel, so a caller computing a cache header never has to
-// branch on the feature being off.
-func (w *PhotoWall) TTL() time.Duration {
+// Per tile rather than the reel's TTL, because a drained reel hands out a
+// tile again with only part of its life left (TakePhotos), and a fixed
+// fifteen-minute max-age on that one would outlive the file. A ready tile gets
+// the full TTL: it cannot be deleted sooner than that after it is handed out.
+// A name the reel does not hold -- and a nil reel -- is zero, so a 404 is
+// never cached.
+func (w *PhotoWall) TileMaxAge(urlPath string) time.Duration {
 	if w == nil {
-		return DefaultPhotoWallTTL
+		return 0
 	}
-	return w.ttl
+	id := strings.TrimSuffix(path.Base(urlPath), photoWallExt)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	t, ok := w.tiles[id]
+	switch {
+	case !ok:
+		return 0
+	case !t.served:
+		return w.ttl
+	}
+	if left := t.expiresAt.Sub(w.now()); left > 0 {
+		return left
+	}
+	return 0
 }
 
 // TileDir is the directory §5 mounts at PhotoWallPrefix. It is a subdirectory
@@ -356,16 +397,33 @@ func (w *PhotoWall) Run(ctx context.Context) {
 	}
 }
 
-// needsFill reports whether there is both room in the buffer and somewhere to
-// fetch from. A nil source is the pre-§3 state and the SIGNIN_PHOTOS_REMOTE
-// unset state: the reel simply idles, reaping nothing, forever.
+// needsFill reports whether there is room in the buffer, room under the
+// ceiling, and somewhere to fetch from. A nil source is the
+// SIGNIN_PHOTOS_REMOTE-unset state: the reel simply idles, reaping nothing,
+// forever.
+//
+// The ceiling is what keeps hand-outs from turning into downloads (see
+// photoWallCeilingFactor). While it holds, the reel is short of fresh tiles
+// and TakePhotos makes up the difference with repeats; the slots come back as
+// served tiles expire, and the filler resumes on its own.
 func (w *PhotoWall) needsFill() bool {
 	if w.src == nil {
 		return false
 	}
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.readyLocked() < w.count
+	short := w.readyLocked() < w.count
+	held := short && len(w.tiles) >= w.ceiling
+	started := held && !w.atCeiling
+	w.atCeiling = held
+	onDisk := len(w.tiles)
+	w.mu.Unlock()
+
+	if started {
+		// Once per episode. Normal sign-ins do not get here, so this line in
+		// the log is how a tab stuck reloading the sign-in screen gets noticed.
+		log.Printf("sign-in photo wall: %d tiles are out at once, the most it keeps; repeating photographs rather than downloading more until some expire", onDisk)
+	}
+	return short && !held
 }
 
 // isWarming reports whether the last attempt found the source not ready yet.
@@ -425,12 +483,12 @@ func (w *PhotoWall) fillOne(ctx context.Context) {
 
 	w.mu.Lock()
 	// Two reasons to throw away a tile that just cost a download: the folder
-	// was replaced while it was in flight (§7), or the buffer filled from
-	// under it. Neither can happen today with one filler, but the generation
+	// was replaced while it was in flight (§7), or the buffer (or the
+	// ceiling) filled from under it. Neither can happen today with one filler, but the generation
 	// check has to be here rather than retrofitted, because the bug it
 	// prevents -- a photograph from a replaced folder appearing minutes later
 	// -- is unreproducible once it ships.
-	stale := gen != w.gen || w.readyLocked() >= w.count
+	stale := gen != w.gen || w.readyLocked() >= w.count || len(w.tiles) >= w.ceiling
 	rested := 0
 	if !stale {
 		w.tiles[id] = &photoTile{id: id, gen: gen}
@@ -512,20 +570,29 @@ func (w *PhotoWall) reap() {
 	}
 }
 
-// TakePhotos hands out up to n ready tiles and returns their URLs along with
-// the TTL the caller should report to the browser. n <= 0 asks for the
+// TakePhotos hands out up to n tiles and returns their URLs along with how
+// long the shortest-lived of them stays fetchable. n <= 0 asks for the
 // configured batch size.
 //
-// The hand-out is atomic under the reel's mutex, so two simultaneous requests
-// can never be given the same tile. Tiles flip to served with an expiry rather
-// than being deleted -- the caller has a list of URLs and the browser has not
-// fetched a single image yet.
+// Fresh tiles first. The hand-out is atomic under the reel's mutex, so two
+// simultaneous requests can never be given the same *ready* tile. Tiles flip
+// to served with an expiry rather than being deleted -- the caller has a list
+// of URLs and the browser has not fetched a single image yet.
 //
-// Fewer than n, including zero, is a normal answer: not configured, the source
-// still warming up, Drive unreachable, or a burst of sign-ins draining the
-// buffer faster than it refills. Reel exhaustion degrades the wall's density
-// and never its correctness, so this returns no error and the endpoint above
-// it answers 200 either way (§5).
+// When there are fewer ready tiles than asked for, the batch is made up with
+// tiles already served that still have photoWallReuseMinLife to live, longest
+// first. That is the drained-reel answer: the sign-in screen that arrives
+// after a burst -- or after a tab stuck reloading this endpoint -- gets a
+// repeated wall rather than an empty one, while the ceiling keeps the burst
+// from turning into downloads. A repeated tile keeps its expiry: it is still
+// deleted on the schedule its first hand-out set, so "delete after use" (§2)
+// holds, and only tiles of the current generation are repeated, so a folder
+// an admin has replaced never reappears.
+//
+// Fewer than n, including zero, is still a normal answer: not configured, the
+// source warming up, or Drive unreachable for longer than a TTL. The wall's
+// density degrades and never its correctness, so this returns no error and
+// the endpoint above it answers 200 either way (§5).
 func (w *PhotoWall) TakePhotos(n int) ([]string, time.Duration) {
 	if w == nil {
 		return nil, DefaultPhotoWallTTL
@@ -536,30 +603,54 @@ func (w *PhotoWall) TakePhotos(n int) ([]string, time.Duration) {
 	if n <= 0 {
 		n = w.batch
 	}
-	expires := w.now().Add(w.ttl)
+	now := w.now()
+	expires := now.Add(w.ttl)
 
 	// Sorted so the choice is deterministic rather than map-iteration order.
 	// Which tiles go out does not matter -- they are interchangeable
 	// photographs -- but a reproducible order is worth having in a test.
-	ids := make([]string, 0, len(w.tiles))
+	var fresh []string
+	var repeats []*photoTile
 	for id, t := range w.tiles {
-		if !t.served {
-			ids = append(ids, id)
+		switch {
+		case !t.served:
+			fresh = append(fresh, id)
+		case t.gen == w.gen && t.expiresAt.Sub(now) >= photoWallReuseMinLife:
+			repeats = append(repeats, t)
 		}
 	}
-	sort.Strings(ids)
-	if len(ids) > n {
-		ids = ids[:n]
+	sort.Strings(fresh)
+	if len(fresh) > n {
+		fresh = fresh[:n]
 	}
 
-	urls := make([]string, 0, len(ids))
-	for _, id := range ids {
+	urls := make([]string, 0, n)
+	life := w.ttl
+	for _, id := range fresh {
 		t := w.tiles[id]
 		t.served = true
 		t.expiresAt = expires
 		urls = append(urls, PhotoWallPrefix+id+photoWallExt)
 	}
-	return urls, w.ttl
+
+	if short := n - len(urls); short > 0 && len(repeats) > 0 {
+		sort.Slice(repeats, func(i, j int) bool {
+			if !repeats[i].expiresAt.Equal(repeats[j].expiresAt) {
+				return repeats[i].expiresAt.After(repeats[j].expiresAt)
+			}
+			return repeats[i].id < repeats[j].id
+		})
+		if len(repeats) > short {
+			repeats = repeats[:short]
+		}
+		for _, t := range repeats {
+			urls = append(urls, PhotoWallPrefix+t.id+photoWallExt)
+			if left := t.expiresAt.Sub(now); left < life {
+				life = left
+			}
+		}
+	}
+	return urls, life
 }
 
 // PreviewPhotos returns up to n ready tile URLs **without marking them

@@ -99,7 +99,9 @@ td code{white-space:nowrap}
   opacity:.5; filter:saturate(.72)}
 .wall.left{left:0} .wall.right{right:0}
 .strip{position:absolute; top:0; left:0; right:0; display:flex; flex-direction:column; gap:14px;
-  padding:0 14px; will-change:transform}
+  /* the trailing 14px is the shipped component's: gap sits between items, so without it half the
+     doubled strip is 7px short of one cycle and the loop jolts */
+  padding:0 14px 14px; will-change:transform}
 .wall.left .strip{animation:up 110s linear infinite}
 .wall.right .strip{animation:down 134s linear infinite}
 @keyframes up{from{transform:translate3d(0,0,0)} to{transform:translate3d(0,-50%,0)}}
@@ -217,6 +219,22 @@ document is the build plan and the visual reference.</p>
   empty folder passes it</strong> (§7); the folder's <strong>label is required, not optional</strong> (§7); and
   the status <strong>does not print "no Drive source" when it has already said rclone is missing</strong> (§7),
   which is the same fact in two wordings.
+  <br /><br />
+  <strong>Reviewed 2026-09-22</strong>, after the first real Drive run. Five small fixes, each folded into the
+  section it belongs to: <strong>re-pasting the live folder no longer empties the wall</strong> (§7);
+  <strong>a folder switch cancels the old folder's listing</strong> and no longer files that listing's error
+  against the new one (§7); <strong>a download is capped at rclone</strong>, not only after it has been buffered
+  (§3); a trailing colon on <code>SIGNIN_PHOTOS_REMOTE</code> is tolerated (§8); and the folder label's length is
+  counted in characters rather than UTF-8 bytes, so the server and the field's <code>maxlength</code> agree. This
+  document was corrected in two places where it had drifted from the code: the seeding marker (§1, §8) and the
+  order of a switch (§7). The review also found that <strong>the unauthenticated endpoint could drain the reel
+  and drive Drive downloads</strong> from anything calling it in a loop; that is now bounded by a ceiling on tiles
+  on disk, with repeats instead of an empty wall (§2, "Draining"). This preview's strip also gained the shipped component's trailing padding, without which
+  its loop jolted.
+  <br /><br />
+  <strong>Batch raised to 32 (2026-09-22)</strong>, sixteen photographs per column, so one comes round every three
+  to four minutes rather than every two. The columns' loop duration now scales with their length so the scroll
+  speed is unchanged (§6), and the preview above still shows twelve tiles at the eight-tile rate (§2, "Sizing").
 </div>
 
 <div class="toc">
@@ -277,7 +295,7 @@ for Drive photos; everything else is what ships.</p>
 
   <div class="legend">
     <span><b>Columns</b> 27% width each · opacity .5 · saturate .72</span>
-    <span><b>Cycle</b> 110s left ↑ / 134s right ↓ — deliberately coprime so they never lock in step</span>
+    <span><b>Cycle</b> 110s left ↑ / 134s right ↓ per eight tiles, scaled with the column's length — deliberately coprime so they never lock in step</span>
     <span><b>Tiles</b> 900×600 (3:2), <code>object-fit:cover</code></span>
     <span><b>Hit-testing</b> <code>pointer-events:none</code> · <code>aria-hidden</code></span>
   </div>
@@ -394,7 +412,7 @@ the most core screen there is. A firewall hiccup must produce today's sign-in sc
    <span class="dim">▼</span>
 <b>the reel</b> <span class="dim">— SIGNIN_PHOTOS_DIR, ~48 tiles of 900×600 JPEG, ≈6 MB total</span>
    <span class="dim">│</span>
-   <span class="dim">│</span>  GET /signin/photos  <span class="dim">→ 16 opaque URLs, tiles flip to "served"</span>
+   <span class="dim">│</span>  GET /signin/photos  <span class="dim">→ 32 opaque URLs, tiles flip to "served"</span>
    <span class="dim">▼</span>
 <b>GET /signin-photos/&lt;id&gt;.jpg</b> <span class="dim">→ the browser, off local disk</span>
    <span class="dim">│</span>
@@ -410,8 +428,9 @@ the most core screen there is. A firewall hiccup must produce today's sign-in sc
 <tr><td><code>internal/stockroom/photowall_drive.go</code></td><td><span class="pill new">built</span></td><td>rclone: manifest build/refresh, <code>cat</code> a single file, <code>SetFolder</code>, <code>Status</code></td></tr>
 <tr><td><code>internal/stockroom/photowall_image.go</code></td><td><span class="pill new">built</span></td><td>decode, EXIF orientation, ratio gate, crop, resize, encode</td></tr>
 <tr><td><code>internal/stockroom/photowall_admin.go</code></td><td><span class="pill new">built</span></td><td>link parsing, the Drive probe, <code>SetPhotoWallFolder</code>, the status read and the preview. The generation counter arrived early, with the reel (§2)</td></tr>
-<tr><td><code>internal/stockroom/settings.go</code></td><td><span class="pill edit">edit</span></td><td>Phase 7 already built this file. §8 adds one thing: the folder id joins the three values <code>EnsureSettings</code> seeds from <code>.env</code>, under the same one-time <code>env_seeded</code> marker</td></tr>
+<tr><td><code>internal/stockroom/settings.go</code></td><td><span class="pill edit">edit</span></td><td>Phase 7 already built this file. §8 adds one thing: the folder id joins the values <code>EnsureSettings</code> seeds from <code>.env</code> — under <strong>its own</strong> one-time marker, <code>signin_photos_env_seeded</code>, not the backup values' <code>env_seeded</code> (§8 says why)</td></tr>
 <tr><td><code>supabase/migrations/20260918100000_signin_photo_wall_folder.sql</code></td><td><span class="pill new">built</span></td><td>Phase 7 shipped the <code>app_settings</code> table first, so this is four columns on it, not the table: the folder id, its label, and who changed it when</td></tr>
+<tr><td><code>supabase/migrations/20260921090000_app_settings_signin_photos_env_seeded.sql</code></td><td><span class="pill new">built</span></td><td>the folder's own first-boot seeding marker, <code>signin_photos_env_seeded</code> (§8)</td></tr>
 <tr><td><code>photowall_test.go</code>, <code>photowall_drive_test.go</code>, <code>photowall_image_test.go</code>, <code>photowall_admin_test.go</code></td><td><span class="pill new">built</span></td><td>reel lifecycle, manifest and fetch with rclone stubbed, the normalizer end to end, and §7's five: link parsing, the probe gating the write, the id never leaving the server, switch-invalidates, preview-does-not-consume</td></tr>
 <tr><td><code>internal/stockroom/backup.go</code></td><td><span class="pill new">built</span></td><td>one entry in <code>exportRedactions</code>. That also buys the restore side for free: <code>captureSecrets</code> and <code>restoreSecrets</code> walk the same map, so the live id survives a restore rather than being overwritten by the archive's null</td></tr>
 <tr><td><code>internal/stockroom/config.go</code></td><td><span class="pill edit">edit</span></td><td>the seven <code>Config</code> fields from §8. The folder ID and the manifest interval arrived with §3, which
@@ -443,7 +462,7 @@ and deleted once shown. Nothing accumulates on disk, which bounds both storage a
 <thead><tr><th>State</th><th>Meaning</th><th>Leaves when</th></tr></thead>
 <tbody>
 <tr><td><code>ready</code></td><td>normalized tile on disk, never shown</td><td>handed out by the endpoint</td></tr>
-<tr><td><code>served</code></td><td>in a batch the browser was told about; carries <code>expiresAt</code></td><td><code>expiresAt</code> passes</td></tr>
+<tr><td><code>served</code></td><td>in a batch the browser was told about; carries <code>expiresAt</code>. A drained reel may name it in a later batch too, with <code>expiresAt</code> unchanged (see "Draining" below)</td><td><code>expiresAt</code> passes</td></tr>
 <tr><td><em>(gone)</em></td><td>file deleted, slot freed</td><td>topper-upper fetches a replacement</td></tr>
 </tbody>
 </table>
@@ -467,13 +486,55 @@ and deleted once shown. Nothing accumulates on disk, which bounds both storage a
     is no deadline here; the reel refills over minutes and nobody is waiting. Hammering the Drive API to fill a
     decorative buffer is how a 403 rate-limit gets earned — one that also breaks the nightly backup, since both
     go through the same rclone remote and the same Google quota.</li>
-  <li><strong>Burst protection.</strong> If sign-ins drain the reel faster than it refills, the endpoint returns
-    however many are ready — possibly zero. The frontend repeats a short list to fill the column rather than
-    rendering a gappy one. Reel exhaustion degrades density, never correctness.</li>
-  <li><strong>Sizing.</strong> 48 ready tiles at ~120 KB each is about 6 MB of disk, and at 16 per batch that's
-    three sign-ins of runway — far more than the refill rate needs on a machine that sees a sign-in every few
-    minutes.</li>
+  <li><strong>Burst protection.</strong> If sign-ins drain the reel faster than it refills, the batch is made up
+    with tiles already handed out that still have at least two minutes to live — a repeated wall rather than an
+    empty one (see "Draining" below). Only when nothing is left at all is the answer <code>[]</code>. The
+    frontend also repeats a short list to fill the column rather than rendering a gappy one. Reel exhaustion
+    degrades density, never correctness.</li>
+  <li><strong>Sizing.</strong> 48 ready tiles at ~120 KB each is about 6 MB of disk, and at 32 per batch that's
+    a sign-in and a half of runway. <strong>The batch was 16 until 2026-09-22</strong> (three sign-ins of runway);
+    it doubled so each column holds sixteen photographs and one comes round every three to four minutes rather
+    than every two. The cost is that back-to-back sign-ins now reach repeats sooner (see "Draining" below), because
+    the refill — about one tile every 20–25 s against a real folder (§10), so roughly 12 minutes for a whole
+    batch — was already the limit, not the buffer. <strong>At most 96 tiles are on disk at once</strong>, ready and served together — twice
+    <code>SIGNIN_PHOTOS_COUNT</code>, about 12 MB. Before the ceiling, served tiles had no bound of their own.</li>
 </ul>
+
+<h3>Draining: the endpoint needs no session</h3>
+<p><code>GET /signin/photos</code> is unauthenticated because the screen that calls it comes before anyone signs
+in, and every call marks up to a batch — 32 — of ready tiles served. As first built, the filler topped the buffer back up
+whenever fewer than 48 were ready and never looked at how many were out — so <strong>hand-outs drove
+downloads</strong>. Anything calling the endpoint in a loop kept the filler fetching a full-size original every two
+seconds, portraits included (downloaded whole, then refused by §4's gate), on the school uplink and the Google
+account the nightly backup shares, while the wall was empty for the next person to walk up. The realistic cause is
+not malice — somebody at the keyboard of the closet PC can do far worse — but a tab stuck reloading the sign-in
+screen, a kiosk page that refreshes itself, or a script left running. Found in review, 2026-09-22.</p>
+<p>The fix bounds the <em>downloads</em>, not the callers:</p>
+<ul>
+  <li><strong>A ceiling on tiles on disk.</strong> The filler runs only while fewer than 48 are ready
+    <em>and</em> fewer than 96 exist in total. Served tiles leave only when their TTL runs out, so no number of
+    calls can cost more than 96 downloads per fifteen minutes. The filler resumes by itself as tiles expire.
+    Reaching the ceiling is logged once per episode — normal sign-ins never get there, so that line is how a
+    stuck reload loop gets noticed. The factor is fixed at twice the buffer rather than a new <code>.env</code>
+    variable: one fewer setting to explain, and it follows <code>SIGNIN_PHOTOS_COUNT</code> if that is ever
+    changed.</li>
+  <li><strong>Repeats instead of nothing.</strong> When fewer tiles are ready than a batch asks for,
+    <code>TakePhotos</code> fills the rest with served tiles that have at least two minutes left, longest-lived
+    first. A repeat <strong>keeps its expiry</strong>: it is still deleted on the schedule its first hand-out set,
+    so "delete after use" holds. Only tiles of the current generation are repeated, so a folder an admin has
+    replaced (§7) never comes back through this path. <code>ttl_seconds</code> becomes the shortest life in the
+    batch.</li>
+</ul>
+<p class="sub">Legitimate use is limited by the refill long before the ceiling: the measured rate on a real
+folder (one tile every 20–25 s, §10) is about 40 tiles in fifteen minutes, well under 96. With 32 per batch, a
+second sign-in within about ten minutes of the first gets whatever has been fetched since plus repeats of what is
+still out — the degradation this section already accepts, and the trade the larger batch makes (§2,
+"Sizing").</p>
+<p class="sub"><strong>What was not done, and why.</strong> Rate-limiting the endpoint to, say, one fresh batch a
+minute limits the symptom rather than the downloads, and a rush of real sign-ins would hit it before an
+accidental loop would. Per-client limits have nothing to key on: the server binds loopback, so every caller is
+127.0.0.1. And a token issued by the sign-in page is ceremony, since anything that can load the page can fetch
+the token.</p>
 
 <div class="note bad">
   <strong>The wipe deletes everything in a path a human typed.</strong> <code>SIGNIN_PHOTOS_DIR</code> is an
@@ -538,6 +599,9 @@ reaching one more feature rather than a new one. Two consequences worth stating:
 <p>The filename is random (crypto/rand hex), not derived from the Drive path or a content hash. A content hash
 would be stable across runs, which quietly defeats "delete after use": the same photo would resolve to the same
 URL and could be re-requested later from a cached page. Random names make every tile a one-time object.</p>
+<p class="sub">"One-time" is about the tile's <em>life</em>, not its audience. A drained reel may name the same
+tile to a second screen inside its TTL ("Draining" above), but never extends that TTL, so the URL still stops
+existing when its first hand-out said it would.</p>
 
 <hr />
 
@@ -631,6 +695,12 @@ the directory the source then reads its manifest out of.</p>
 (skip anything over ~40 MB) and a context timeout, so one pathological RAW doesn't stall the filler. The ceiling
 is applied when the manifest is <em>built</em>, against the size rclone already reported, so an oversized
 original costs a line of JSON rather than a download that is then thrown away.</p>
+<p class="sub"><strong>As built, the download is held in memory rather than piped, and is capped at the
+source.</strong> <code>runRclone</code> buffers what rclone prints and the decoder reads the buffer — the
+original still never touches the disk, which is the property this section is about. The buffer is why the cap
+has to be on rclone's side: a file that grew after the listing would otherwise be held whole before the
+normalizer's own 40 MB limit saw it. So the command is <code>rclone cat … --head 41943041</code>, one byte past
+the ceiling, which is all the normalizer needs in order to refuse it. Added in review.</p>
 <p>One call to <code>NextPhoto</code> tries up to four photographs before giving up. §2's <code>PhotoSource</code>
 contract already put "reject the unusable ones and retry past them" on this side of the seam, and a real folder
 legitimately holds portraits, panoramas and video that §4's gate turns away; an error out of <code>NextPhoto</code>
@@ -732,21 +802,31 @@ not list the wall), so two copies of it is two places for it to quietly stop bei
 <pre><code>GET /signin/photos
 
 200 <span class="k">{ "photos": [ "/signin-photos/9f2c…1a.jpg", … ], "ttl_seconds": 900 }</span>
+                                       <span class="c">← ttl_seconds is the shortest life in the batch:</span>
+                                       <span class="c">  900 when every tile is fresh, less when a</span>
+                                       <span class="c">  drained reel made it up with repeats (§2).</span>
 200 <span class="k">{ "photos": [], "ttl_seconds": 900 }</span>   <span class="c">← not configured, manifest still building,</span>
-                                       <span class="c">  Drive unreachable, or reel momentarily drained.</span>
+                                       <span class="c">  Drive unreachable, or reel drained with nothing</span>
+                                       <span class="c">  left worth repeating.</span>
                                        <span class="c">  Always 200. The wall is decoration; an error</span>
                                        <span class="c">  status here would be a red herring in the log</span>
                                        <span class="c">  on the one screen that must never look broken.</span></code></pre>
 <ul>
   <li>Hand-out is atomic under the reel's mutex: take up to <em>n</em> <code>ready</code> tiles, flip them to
     <code>served</code> with <code>expiresAt = now + ttl</code>, return the URLs. Two simultaneous requests can
-    never be handed the same tile.</li>
+    never be handed the same <em>fresh</em> tile. If fewer than <em>n</em> were ready, the rest are repeats of
+    current-generation served tiles with at least two minutes left, their expiry untouched (§2, "Draining").</li>
   <li><code>Cache-Control: no-store</code> on the JSON — a cached list points at files that are already gone.</li>
   <li>The tiles themselves are <code>immutable</code> — names are random and single-use, so the bytes at a tile
-    URL can never change. <strong>As built the <code>max-age</code> is the reel's TTL, not a year.</strong> The
-    server <em>deletes</em> the file at the end of that window, and a cache entry outliving it would leave the
-    photograph in the browser's disk cache long after "delete after use" (§2) had supposedly taken effect — for
-    no gain, since the component fetches each URL exactly once and is handed a fresh batch on the next mount.
+    URL can never change. <strong>As built the <code>max-age</code> is what is left of that tile's life, not a
+    year.</strong> The server <em>deletes</em> the file at the end of that window, and a cache entry outliving it
+    would leave the photograph in the browser's disk cache long after "delete after use" (§2) had supposedly taken
+    effect — for no gain, since the component fetches each URL exactly once and is handed a fresh batch on the
+    next mount. It was the reel's fixed TTL until drained reels started repeating tiles: a repeat with five
+    minutes left would then have been cached for fifteen. Now it is <code>PhotoWall.TileMaxAge</code>, rounded
+    up to the second: the full TTL for a tile just handed out or still ready (a ready tile cannot be deleted
+    sooner than a TTL after its hand-out), the remainder for a repeat, and <code>0</code> for a name the reel
+    does not hold, so a 404 is never cached.
     <code>private</code>, because the machine is shared and there is no intermediary cache on loopback for
     <code>public</code> to be about.</li>
   <li>CORS needs nothing new. <code>withCORS</code> wraps the whole mux, so the Vite and Wails origins are
@@ -784,9 +864,12 @@ It is the preview at the top of this page. The non-negotiables, each tied to som
     <td>§10, non-negotiable. Replace the animation with a fixed offset; the wall becomes a still collage.</td></tr>
 <tr><td>Hidden below 1280px</td>
     <td>§7.2. The columns are the first thing to go when someone resizes the Wails window.</td></tr>
-<tr><td>Slow, coprime cycles (110s / 134s)</td>
+<tr><td>Slow, coprime cycles (110s / 134s per eight tiles)</td>
     <td>Slow enough that peripheral vision stops tracking it. Coprime so the two columns never fall into step
-    and start reading as a single moving object.</td></tr>
+    and start reading as a single moving object. <strong>As built the rate is per tile</strong> — 13.75 s and
+    16.75 s — and each loop's duration is that times the column's length, set inline. A fixed 110 s made the
+    <em>speed</em> depend on the batch: doubling the batch to 32 would have doubled it. Per tile, the speed never
+    changes; a sixteen-tile column just takes 220 s / 268 s to come round.</td></tr>
 <tr><td>Fetch once on mount, never poll</td>
     <td>One request per sign-in screen mount. If it fails or returns <code>[]</code>, render nothing and never
     retry — the wall must not generate traffic or log noise on a machine with no internet.</td></tr>
@@ -949,16 +1032,30 @@ rejects is Drive saying no.</p>
 
 <h3>Switching invalidates the reel</h3>
 <p>A switch is a config write <em>plus</em> a teardown. Doing only the first leaves the wall showing photographs
-from the folder that was just replaced — the exact outcome this screen exists to prevent. Under the reel's mutex:</p>
+from the folder that was just replaced — the exact outcome this screen exists to prevent. As built it is three
+steps in this order, each under its own lock rather than one shared mutex — the generation counter below is what
+makes that safe:</p>
 <ol>
-  <li>Write the new ID to <code>app_settings</code> and <strong>increment a generation counter</strong> held
-    beside the reel.</li>
-  <li>Discard the manifest.</li>
-  <li>Delete every <code>ready</code> tile. Tiles already <code>served</code> are left to expire on their TTL —
-    their URLs sit in a browser that has already rendered them, and 404ing a live page to save fifteen minutes
-    is the worse trade.</li>
-  <li>Kick a manifest rebuild in the background.</li>
+  <li>Write the new ID and label to <code>app_settings</code> and the <code>activity_log</code> row, in one
+    transaction.</li>
+  <li>The source (<code>SetFolder</code>): discard the manifest, <strong>cancel any listing of the old folder
+    still running</strong>, and nudge a rebuild of the new one in the background.</li>
+  <li>The reel (<code>Invalidate</code>): <strong>advance the generation counter</strong> and delete every
+    <code>ready</code> tile. Tiles already <code>served</code> are left to expire on their TTL — their URLs sit
+    in a browser that has already rendered them, and 404ing a live page to save fifteen minutes is the worse
+    trade.</li>
 </ol>
+<p class="sub"><strong>Steps 2 and 3 run only when the folder actually changed.</strong> Re-pasting the live link,
+to rename it or just to be sure, still probes and still writes the new label and its log row, but it is a label
+edit: tearing the reel down for it would empty the wall for the minutes a refill takes, and every tile thrown
+away would have been from the right folder. <code>SetFolder</code> always reported "nothing changed" for this
+case; nothing read the answer until review.</p>
+<p class="sub"><strong>The old folder's listing is cancelled, not waited out.</strong> The refresher is one
+goroutine, so a switch made while the old folder was still being listed used to queue the new folder's listing
+behind minutes of Drive traffic whose result was then discarded. Worse, if that stale listing <em>failed</em>,
+its error was filed against the new folder: a red line on the admin screen about a folder no longer in use, and
+the new folder's first listing pushed behind the five-minute retry gate. A finished listing now checks whether
+its folder is still the live one <em>before</em> it looks at the error. Both found in review.</p>
 <p>The generation counter is what makes this safe under concurrency. A fetch can be in flight when the switch
 lands; it carries the generation it began under, and a tile whose generation no longer matches is written nowhere
 and deleted. Without it, a slow <code>rclone cat</code> deposits a photograph from the replaced folder into the
@@ -1003,16 +1100,19 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <table>
 <thead><tr><th>Var</th><th>Purpose</th><th>Default</th></tr></thead>
 <tbody>
-<tr><td><code>SIGNIN_PHOTOS_REMOTE</code></td><td>rclone remote for the photo folder. Blank disables the wall entirely.</td><td>(none)</td></tr>
+<tr><td><code>SIGNIN_PHOTOS_REMOTE</code></td><td>rclone remote for the photo folder. Blank disables the wall entirely. A trailing colon (<code>gdrive:</code>, the way rclone prints a remote) is tolerated and dropped: left on, the connection string would read as a path inside the remote</td><td>(none)</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_FOLDER_ID</code></td><td>first-boot default for the live folder; ignored once <code>app_settings</code> holds one. <strong>Redacted from the backup export</strong> (§7).
-  <em>As built</em>: <code>EnsureSettings</code> copies it into <code>app_settings.signin_photos_folder_id</code> under the
-  same one-time <code>env_seeded</code> marker the three backup values use, and <code>main.go</code> reads the folder out of
-  that row rather than out of the config — so a folder an admin pasted is never out-voted by this file on the next restart.
+  <em>As built</em>: <code>EnsureSettings</code> copies it into <code>app_settings.signin_photos_folder_id</code> under
+  <strong>its own</strong> one-time marker, <code>signin_photos_env_seeded</code> (<code>20260921090000</code>), and
+  <code>main.go</code> reads the folder out of that row rather than out of the config. Not the <code>env_seeded</code>
+  marker the three backup values share, as this row first said: that marker was already <code>true</code> on every
+  database that had started the server before this column existed, so sharing it would have seeded new installs and
+  silently ignored every upgraded one (CLAUDE.md §13) — so a folder an admin pasted is never out-voted by this file on the next restart.
   A seeded folder is labelled <code>Folder from .env</code> so it is not nameless on the admin screen. Unset is the normal
   path: the wall is configured, stays empty, and an admin chooses the folder in the panel</td><td>(none)</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot, so it must be a directory of its own — one holding files the server did not write is refused and the feature stays off (§2)</td><td><code>./.cache/signin-photos</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_COUNT</code></td><td>ready tiles to keep buffered</td><td><code>48</code></td></tr>
-<tr><td><code>SIGNIN_PHOTOS_BATCH</code></td><td>tiles handed out per request</td><td><code>16</code></td></tr>
+<tr><td><code>SIGNIN_PHOTOS_BATCH</code></td><td>tiles handed out per request, dealt alternately into the two columns. Was 16 until 2026-09-22 (§2, "Sizing")</td><td><code>32</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_TTL_MINUTES</code></td><td>how long a served tile survives before deletion</td><td><code>15</code></td></tr>
 <tr><td><code>SIGNIN_PHOTOS_MANIFEST_HOURS</code></td><td>manifest refresh interval. A <em>failed</em> listing is retried in five minutes instead, so a folder that was
   unreachable at boot because the uplink was not up yet does not wait a week</td><td><code>168</code> (weekly)</td></tr>
@@ -1037,11 +1137,14 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
 <tr><td>Folder empty / all files rejected</td><td>Filler rests after 25 consecutive rejections, logs a single explanatory line, and the admin screen names the 3:2 gate.</td></tr>
 <tr><td>OAuth token expired</td><td>rclone refreshes it. If refresh fails: one warning in the log and the same sentence on the admin screen, naming <code>rclone config reconnect &lt;remote&gt;:</code> with the remote as configured. Once per outage; nothing needs restarting. A Photo wall save attempted meanwhile answers <code>503</code> with the same fix rather than blaming the folder's sharing.</td></tr>
 <tr><td>Any rclone failure at all</td><td>Its message is cleaned before it is kept: the folder ID, the Drive API request that carries it, rclone's timestamps and its client-id notice are removed. Only then does it reach the log, the admin screen or a Photo wall save's error response: <code>503</code> when the probe failed on an expired sign-in (the row above), <code>400</code> for any other probe failure.</td></tr>
-<tr><td>Reel drained by a sign-in burst</td><td>Fewer tiles returned; the component repeats what it has to fill the column.</td></tr>
+<tr><td>Reel drained by a sign-in burst</td><td>The batch is made up with repeats of tiles already out that have at least two minutes left; the component repeats a short list to fill the column. Expiries are never extended (§2, "Draining").</td></tr>
+<tr><td>Endpoint called in a loop (a tab stuck reloading, a script)</td><td>The ceiling holds: at most 96 tiles on disk, so at most 96 downloads per TTL however often it is called. Later callers get repeats, not an empty wall. One log line when the ceiling is first reached; the filler resumes as tiles expire (§2, "Draining").</td></tr>
 <tr><td>Tile 404s (raced the reaper)</td><td><code>onerror</code> hides that <code>&lt;img&gt;</code>. Never a broken-image icon.</td></tr>
 <tr><td>Pasted text isn't a Drive folder link</td><td><code>400</code> naming the accepted forms (§7). Nothing is written.</td></tr>
 <tr><td>Pasted folder not reachable with the credential</td><td><code>400</code> naming the likely cause — not shared, or wrong account. Nothing is written; the previous folder stays live.</td></tr>
-<tr><td>Folder replaced, manifest rebuilding</td><td>Wall empty; the admin screen reports listing progress. Sign-in unaffected.</td></tr>
+<tr><td>Folder replaced, manifest rebuilding</td><td>Wall empty; the admin screen reports listing progress. Sign-in unaffected. A listing of the replaced folder still running is cancelled, and its outcome is not recorded against the new one (§7).</td></tr>
+<tr><td>Live folder re-pasted (e.g. to rename it)</td><td>Probed and written like any save, but the reel and the manifest are left alone: the wall keeps showing what it was showing (§7).</td></tr>
+<tr><td>A file grew past 40 MB after the listing</td><td>The download stops one byte past the ceiling and the normalizer refuses it; never held in memory whole (§3).</td></tr>
 <tr><td>New folder holds no usable photos</td><td>Permitted — it may be mid-upload. The filler backs off after 25 rejections and the admin screen reports <code>no usable photos found</code>, naming the 3:2 gate.</td></tr>
 <tr><td>Disk full</td><td>Writes fail and count as failures, so a full disk reaches the same single logged rest as no internet; the reel stays at whatever size it reached. Bounded at ~6 MB, so this is not the thing that fills the disk.</td></tr>
 </tbody>
@@ -1114,7 +1217,7 @@ behind a small interface so none of this needs a network or a Google account.</p
 <p class="sub">Everything down to "backoff" is written and passing, in <code>photowall_test.go</code>,
 <code>photowall_drive_test.go</code> and <code>photowall_image_test.go</code> — forty-one tests, none of which
 touch a network, rclone or Postgres. The endpoint's five live in <code>server/photowall_test.go</code>: the
-empty answer with no wall, reachability with no session or cookie, the batch-then-fetch round trip, the manifest
+empty answer with no wall, reachability with no session or cookie, the batch-then-fetch round trip (which since review also asserts that a second call to a drained reel gets the first batch back, still fetchable), the manifest
 and the marker unreachable through the mount, and <code>/files/</code> still working after
 <code>fileServer</code> grew its prefix. §7's five — link parsing, the probe gating the write, the ID never
 leaving the server, switch-invalidates, preview-does-not-consume — are written and passing too, in
@@ -1180,6 +1283,21 @@ available.</strong></p>
     dropped network, with the ID in the request URL and bare in a 404, through a download, a listing and the probe:
     none of it reaches an error, the status or the log. The expired sign-in names <code>rclone config reconnect
     gdrive:</code>, is warned about once over three failures, and again after a success re-arms it.</li>
+  <li><strong>The ceiling bounds downloads</strong> — a hundred hand-outs against a four-tile buffer cost
+    exactly eight downloads, log the ceiling once, and the reel refills normally once the TTL passes.</li>
+  <li><strong>A drained reel repeats</strong> — the second batch is the first one's tiles, reporting the ten
+    minutes they have left in both <code>ttl_seconds</code> and the tile's <code>max-age</code>. They are still
+    deleted on the first schedule, and a tile with under two minutes left is not handed out.</li>
+  <li><strong>A replaced folder is never repeated</strong> — after <code>Invalidate</code>, the served tiles
+    of the old generation are not handed out again.</li>
+  <li><strong>Tile max-age</strong> — a ready tile gets the full TTL, and an unknown name or a nil reel gets
+    <code>0</code>. The ceiling test and the replaced-folder test were checked by removing their guard and
+    watching them fail.</li>
+  <li><strong>Re-pasting the live folder keeps the reel</strong> — added in review. A label-only save leaves
+    every ready tile and the generation where they were, and the new label is what the status reports.</li>
+  <li><strong>A switch cancels the listing it replaces</strong> — added in review. A listing blocked on Drive
+    returns as soon as the folder changes, leaves no error behind, and the new folder is due immediately rather
+    than after the retry gate. Both tests were checked by reverting their fix and watching them fail.</li>
   <li><strong>Manual, on the real Drive</strong> — run the manifest build against the actual folder and time it;
     confirm the reel fills; pull the network cable and confirm sign-in is untouched; watch the wall in the Wails
     window for a full cycle on the slowest machine available. <em>Done 2026-09-22 on the development machine, up

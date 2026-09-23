@@ -36,7 +36,24 @@
    */
   const MIN_TILES_PER_COLUMN = 6
 
+  /**
+   * Seconds each tile takes to scroll past, per column: 110s and 134s over the
+   * eight tiles a column held when those numbers were chosen.
+   *
+   * A loop's duration is this times the column's length, not a constant. The
+   * strip loops by translating -50% of itself, so a fixed duration makes the
+   * *speed* depend on how many photographs arrived -- doubling the batch to 32
+   * would have doubled it, and the whole case for the wall rests on it moving
+   * slowly enough that peripheral vision stops tracking it. Per tile, the speed
+   * is the same for any batch, a long batch just takes longer to come round,
+   * and the two rates keep the 110:134 ratio that stops the columns falling
+   * into step.
+   */
+  const SECONDS_PER_TILE = { up: 110 / 8, down: 134 / 8 }
+
   let columns = $state<{ left: string[]; right: string[] } | null>(null)
+  const left = $derived(columns ? strip(columns.left) : [])
+  const right = $derived(columns ? strip(columns.right) : [])
 
   /**
    * Fetch once, on mount, and never again.
@@ -83,15 +100,6 @@
   }
 
   /**
-   * The list a column actually renders: repeated up to a workable length, then
-   * **doubled**.
-   *
-   * The doubling is what makes the marquee seamless. The strip animates from
-   * `translateY(0)` to `translateY(-50%)`, and at -50% the second copy sits
-   * exactly where the first began, so the loop point is invisible. Any other
-   * end value, or an odd number of copies, produces a jump once a cycle.
-   */
-  /**
    * Hide a tile whose file is already gone.
    *
    * A batch races the reaper: the URLs are valid for the TTL, but a tab left
@@ -111,6 +119,20 @@
     if (img instanceof HTMLImageElement) img.style.visibility = "hidden"
   }
 
+  /** One loop's duration for a rendered (doubled) strip: half of it is one cycle. */
+  function cycle(rendered: string[], secondsPerTile: number): string {
+    return `${(rendered.length / 2) * secondsPerTile}s`
+  }
+
+  /**
+   * The list a column actually renders: repeated up to a workable length, then
+   * **doubled**.
+   *
+   * The doubling is what makes the marquee seamless. The strip animates from
+   * `translateY(0)` to `translateY(-50%)`, and at -50% the second copy sits
+   * exactly where the first began, so the loop point is invisible. Any other
+   * end value, or an odd number of copies, produces a jump once a cycle.
+   */
   function strip(photos: string[]): string[] {
     if (photos.length === 0) return []
     const filled = [...photos]
@@ -135,8 +157,8 @@
   -->
   <div aria-hidden="true" class="pointer-events-none absolute inset-0 hidden select-none xl:block">
     <div class="wall absolute inset-y-0 left-0 w-[27%] overflow-hidden">
-      <div class="strip up">
-        {#each strip(columns.left) as src, i (i)}
+      <div class="strip up" style:animation-duration={cycle(left, SECONDS_PER_TILE.up)}>
+        {#each left as src, i (i)}
           <img
             class="tile"
             src={fileUrl(src)}
@@ -148,8 +170,8 @@
     </div>
 
     <div class="wall absolute inset-y-0 right-0 w-[27%] overflow-hidden">
-      <div class="strip down">
-        {#each strip(columns.right) as src, i (i)}
+      <div class="strip down" style:animation-duration={cycle(right, SECONDS_PER_TILE.down)}>
+        {#each right as src, i (i)}
           <img
             class="tile"
             src={fileUrl(src)}
@@ -204,9 +226,11 @@
   }
 
   /*
-    110s and 134s: slow enough that peripheral vision stops tracking the motion,
-    and coprime so the two columns never fall into step and start reading as one
-    moving object. `transform` only -- design-system.md §11 bans animating
+    110s and 134s for eight tiles: slow enough that peripheral vision stops
+    tracking the motion, and coprime so the two columns never fall into step and
+    start reading as one moving object. The inline animation-duration scales
+    these with the column's length (SECONDS_PER_TILE); the values here are the
+    fallback for eight. `transform` only -- design-system.md §11 bans animating
     height, width and box-shadow outright, and the closet PC's webview is not a
     fast machine.
   */
