@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The first-run wizard (TEMPLATE-TODO Phase B), steps 1 and 3 to 7. Step 2,
+   * The first-run wizard (CLAUDE.md §13, Phase B), steps 1 and 3 to 7. Step 2,
    * creating the admin, happens on the sign-in screen, because it is the one
    * step with no session (components/app/first-admin.svelte).
    *

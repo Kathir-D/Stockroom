@@ -1,7 +1,7 @@
 # Backup & restore
 
 **Status: specified, not yet built.** Everything below Part A is the design
-agreed on 2026-09-14; `TODO.md` Phase 7 is the checklist that implements it.
+agreed on 2026-09-14; it was built as Phase 7 (`CLAUDE.md` §11).
 What exists today is the CSV export described in Part A.1 and nothing else.
 
 `CLAUDE.md` §11 is the one-paragraph summary; this file is the detail.

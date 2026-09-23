@@ -3,7 +3,7 @@ name: release
 # Builds a binary per platform on a version tag and attaches them to a GitHub
 # release. Each one carries the web UI and every migration compiled in, so what
 # a school downloads is one file and what they run is one process
-# (TEMPLATE-TODO Phase A).
+# (CLAUDE.md §13, Phase A).
 #
 # Without this a school needs Go and Node installed to get a binary at all,
 # which is the whole difference between "download and run" and "be a

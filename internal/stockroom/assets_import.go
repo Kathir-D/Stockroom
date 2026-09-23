@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Importing an inventory from a CSV (TEMPLATE-TODO Phase B).
+// Importing an inventory from a CSV (CLAUDE.md §13, Phase B).
 //
 // A department with three hundred items cannot type them into a dialog, and
 // `roster.go` already established the shape this should take: a header row

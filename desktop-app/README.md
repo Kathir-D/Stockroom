@@ -1,16 +1,25 @@
-# README
+# Stockroom desktop app
 
-## About
+The Wails host for Stockroom. It opens a native window that renders `<StockroomApp>` from [`packages/ui`](../packages/ui). The Go side is only a window host. All data goes through the Stockroom API server over HTTP.
 
-This is the official Wails Svelte-TS template.
+## Development
 
-## Live Development
+Start the API server first (`go run ./server` from the repository root, or `./scripts/dev.sh`), then:
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+```bash
+cd desktop-app
+wails dev
+```
 
-## Building
+The frontend dev server is also reachable in a browser at http://localhost:34115.
 
-To build a redistributable, production mode package, use `wails build`.
+Set `VITE_API_BASE_URL` to point the app at a server other than `http://127.0.0.1:8080`.
+
+## Build
+
+```bash
+cd desktop-app
+wails build
+```
+
+The output is written to `build/bin/`. Platform-specific build files are in [`build/`](build/README.md).

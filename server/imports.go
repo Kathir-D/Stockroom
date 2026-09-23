@@ -9,7 +9,7 @@ import (
 	"stockroom/internal/stockroom"
 )
 
-// Bulk ways in (TEMPLATE-TODO Phase B): the category tree, the asset list,
+// Bulk ways in (CLAUDE.md §13, Phase B): the category tree, the asset list,
 // and N numbered units of one model. All admin-only inside the package.
 
 // uploadBody reads an import the way POST /users/import always has: either a

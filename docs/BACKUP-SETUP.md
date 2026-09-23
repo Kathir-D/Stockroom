@@ -1,21 +1,18 @@
 # Setting up backups
 
-Stockroom keeps a copy of everything — every item, every account, every
-checkout — and can push it somewhere off the machine every night. This page is
-the click-by-click setup, written for whoever is standing at the closet PC. You
-do not need to be technical, and you will not have to edit a file.
+Stockroom backs up every item, account and checkout every night, and can push
+the backup to Google Drive or GitHub. This page is the step-by-step setup. Apart
+from the failsafe admin in Step 6, everything is done in the admin panel.
 
 Everything here happens in **Admin → Settings**, except installing `rclone`,
 which is one command and only needed for Google Drive.
 
-**You can stop after Step 1.** A local backup folder alone is a real backup and
-is better than nothing. Google Drive and GitHub are what protect you if the
-machine itself is lost or stolen, which is the case a local folder cannot help
-with.
+Step 1 alone gives you a working local backup. Google Drive and GitHub keep a
+copy off the machine, in case the machine itself is lost or damaged.
 
 ---
 
-## Step 1 — choose a backup folder
+## Step 1: choose a backup folder
 
 1. **Admin → Settings → Folders**
 2. **Backup folder**: a full path on this machine, somewhere with room to grow.
@@ -25,23 +22,20 @@ with.
    photos. Leave it empty to skip photos entirely.
 4. **Save folders**
 
-> **It has to start with `/` (or `C:\` on Windows).** Copying a path out of a
-> Finder or Explorer window often loses the leading separator, and
-> `Users/you/Desktop/backups` is not the same place as `/Users/you/Desktop/backups`
-> — the second is your Desktop, the first is a new folder created wherever
-> Stockroom happens to be running from. Stockroom refuses a path without it
-> rather than write a perfectly good backup somewhere you will never look.
+> **The path must be absolute**, starting with `/` on macOS and Linux or a drive
+> letter such as `C:\` on Windows. Copying a path out of Finder or Explorer can
+> drop the leading separator. Stockroom refuses relative paths.
 
 Then **Admin → Backup → Back up now**. It should say how many rows it wrote and
 where. If it does not, the message on screen says what is wrong.
 
-> **Photos are only ever copied locally.** They are never pushed to Drive or
-> GitHub. If the drive dies, the photos and their mirror die with it. That was a
-> deliberate trade — see `docs/design/backup.md` §H.
+> **Photos are only copied locally.** They are not pushed to Drive or GitHub,
+> so a failed disk loses both the photos and their mirror. See
+> `docs/design/backup.md` §H.
 
 ---
 
-## Step 2 — when it runs, and how long it is kept
+## Step 2: when it runs, and how long it is kept
 
 **Admin → Settings → Schedule and retention**
 
@@ -57,10 +51,7 @@ scheduled hour, the next start runs one straight away.
 
 ---
 
-## Step 3 — Google Drive (optional)
-
-Drive is the easier of the two off-site options to hand over to somebody else
-later: it is a Google sign-in screen they already recognise.
+## Step 3: Google Drive (optional)
 
 ### 3a. Install rclone *(once, per machine)*
 
@@ -81,9 +72,8 @@ missing and repeat the command for your machine.
 2. A window appears with a sign-in link. **Open it** (or press **Copy** and
    paste it into a browser on this machine).
 3. Sign in to the Google account the backups should live in.
-4. Google will say **"Google hasn't verified this app."** That is expected —
-   rclone is open-source software and was never submitted to Google's review.
-   Click **Advanced**, then **Go to rclone (unsafe)**, then **Continue**.
+4. Google will say **"Google hasn't verified this app."** This is expected for
+   rclone. Click **Advanced**, then **Go to rclone (unsafe)**, then **Continue**.
 5. Go back to Stockroom and press **Finish**. The sign-in normally completes on
    its own, so the paste box on that window is usually left empty; fill it in
    only if Google showed you a block of text starting with `{`.
@@ -91,44 +81,34 @@ missing and repeat the command for your machine.
    something like `stockroom-backups`, and press **Save Drive settings**.
 7. Press **Test connection**. It should say Google Drive is reachable.
 
-> **Use a personal Google account, not the school one.** A school Workspace
-> administrator can block third-party apps across the whole domain. That would
-> revoke the connection silently, and the first sign anyone would get is
-> Stockroom's staleness warning two days later.
+> **Use a personal Google account, not the school one.** A Workspace
+> administrator can block third-party apps for the whole domain, which revokes
+> the connection without notice.
 
-> **If rclone mentions its client ID, you can carry on with setup.** rclone
-> prints a notice saying the shared Google client ID it ships with is being
-> retired during 2026. It still works today, and there is nowhere in Stockroom
-> to put a replacement yet, so there is nothing to do on this screen. This is
-> a temporary limitation, not a permanent all-clear: once Google retires the
-> shared ID, the Drive backup may stop working (you would see it as a failed
-> **Test connection** or a staleness warning), and each Drive remote will need
-> reconnecting after Stockroom gains support for its own client ID. That work
-> is on the open list in `CLAUDE.md` §13 — do not go and make your own client
-> ID without reading that entry first, because an OAuth consent screen left in
-> Google's default "Testing" mode stops working after seven days.
+> **rclone client ID notice.** rclone warns that its shared Google client ID is
+> being retired during 2026. It still works, and Stockroom has no setting for a
+> custom client ID yet, so no action is needed. When the shared ID stops
+> working, **Test connection** will fail and each Drive remote will need
+> reconnecting once Stockroom supports a custom client ID. See the open item in
+> `CLAUDE.md` §13 before creating your own client ID.
 
 ---
 
-## Step 4 — GitHub (optional, experimental)
+## Step 4: GitHub (optional, experimental)
 
-GitHub needs nothing installed, which is why it is worth having as well: it is
-the harder of the two for a school firewall to block.
+GitHub needs no extra software on the machine.
 
-> **This target is experimental.** It has never pushed to a real GitHub
-> account. The code is tested against a fake server and read by hand, and that
-> is all. Settings and the Backup screen both label it. Use it as a second copy
-> beside Google Drive or this machine, never as the only one, and restore from
-> it once (Step 7) before you count on it.
+> **This target is experimental.** It has not yet been tested against a real
+> GitHub account. Use it as a second copy alongside Google Drive or the local
+> folder, and test a restore from it (Step 7) before relying on it.
 
 ### 4a. Create the repository
 
 1. Go to <https://github.com> and sign in (make an account if you have none).
 2. **+** in the top right → **New repository**
 3. Name it `stockroom-backup`
-4. **Select Private.** This is not optional. The backup contains student
-   numbers, and a student number signs its owner into Stockroom with no
-   password — a public repository would publish a list of working logins.
+4. **Select Private.** The backup contains student numbers, which sign
+   students in without a password.
 5. Leave **Add a README file** unticked. Stockroom writes its own.
 6. **Create repository**
 
@@ -138,9 +118,8 @@ the harder of the two for a school firewall to block.
 2. Very bottom of the left sidebar → **Developer settings**
 3. **Personal access tokens** → **Fine-grained tokens** → **Generate new token**
 4. Token name: `stockroom-backup`
-5. Expiration: **No expiration**. A token that expires stops backups on a date
-   nobody wrote down. If school policy forbids that, pick the longest allowed —
-   the staleness warning will catch it within `Warn after` hours.
+5. Expiration: **No expiration**, or the longest your policy allows. When a
+   token expires, backups to GitHub stop and the staleness warning appears.
 6. **Repository access** → **Only select repositories** → `stockroom-backup`
 7. **Permissions** → **Repository permissions** → **Contents** → change it to
    **Read and write**. Change nothing else.
@@ -154,56 +133,49 @@ the harder of the two for a school firewall to block.
 4. Tick **Back up to GitHub every night**, then **Save GitHub settings**
 5. **Test connection**
 
-Stockroom overwrites one `backup/` folder in that repository every night rather
-than adding a new one, so the repository stays small and GitHub's own history
-becomes the list of past backups.
+Stockroom overwrites one `backup/` folder in the repository each night. Past
+backups are kept as commits in the repository history.
 
 ---
 
-## Step 5 — encrypt the archive (optional)
+## Step 5: encrypt the archive (optional)
 
 **Admin → Settings → Archive encryption**
 
 Off by default. With a passphrase set, the nightly archive is encrypted before
 it leaves this machine, so a leaked Drive folder or repository is unreadable.
 
-**If you turn this on, write the passphrase down somewhere that is not this
-machine.** It is not stored in either backup target, and nobody — including us —
-can recover an archive whose passphrase is lost. That is the trade: it swaps a
-confidentiality risk for the risk that a lost passphrase means no backup at all,
-which is why it is off unless you choose it.
+**Store the passphrase somewhere other than this machine.** It is not saved in
+any backup target, and an archive cannot be restored without it.
 
 Changing the passphrase does not re-encrypt archives already written. Those
 still need the old one.
 
 ---
 
-## Step 6 — set a failsafe admin
+## Step 6: set a failsafe admin
 
-This one *is* a file, and it is the only one. It is also the most important
-step on this page.
+This step edits `.env`. If the installer or the setup wizard already set a
+failsafe admin, skip it.
 
-If the database is ever lost, the restore is done by signing in as an admin —
-but the accounts live in the database that was lost. The failsafe admin is an
-account Stockroom recreates from `.env` every time it starts, so there is always
-somebody to sign in as.
+The failsafe admin is an account Stockroom recreates from `.env` on every start.
+It lets you sign in and restore a backup even when the database has no accounts.
 
 1. Open `.env` in the Stockroom folder
-2. Set `ADMIN_STUDENT_NUMBER` (digits only) and `ADMIN_PASSWORD` (at least 8
-   characters)
+2. Set `ADMIN_STUDENT_NUMBER` (in your student-number format) and
+   `ADMIN_PASSWORD` (8 to 72 characters)
 3. Restart Stockroom
 
-The **Admin → Backup** screen warns while this is not set. Without it, a wiped
-database leaves the admin panel unreachable at exactly the moment you need it —
-and the only way back in is the command-line restore in Step 7.
+**Admin → Backup** shows a warning while this is not set. Without it, restoring
+into an empty database requires the command-line restore in Step 7.
 
 ---
 
-## Step 7 — getting the data back
+## Step 7: getting the data back
 
-There are four routes, and the first three need no typing beyond one word.
+There are four ways to restore.
 
-1. **From a date** *(the normal one)*. Admin → Backup → **Pick a date** on the
+1. **From a date.** Admin → Backup → **Pick a date** on the
    row for This machine, Google Drive or GitHub → choose a backup → type
    `RESTORE`. Nothing is downloaded by hand.
 2. **From a file.** Admin → Backup → **Restore from a file** → choose a
@@ -217,38 +189,35 @@ There are four routes, and the first three need no typing beyond one word.
    go run ./cmd/restore --yes path/to/backup-2026-09-16.zip
    ```
 
-   Every zip contains a `RESTORE.md` with this written out. This route needs no
-   sign-in, which is exactly why it exists: it is the one that still works when
-   routes 1–3 cannot be reached.
+   This needs no sign-in. Every zip contains a `RESTORE.md` with these
+   instructions.
 
-**Restoring replaces every record in the database and signs everyone out.** It
-is checked first — the archive's own checksums, then row counts, then every
-foreign key, all before anything is committed — so a restore that fails leaves
-the database exactly as it was.
+**Restoring replaces every record in the database and signs everyone out.**
+Checksums, row counts and foreign keys are verified before anything is
+committed, so a failed restore leaves the database unchanged.
 
 ---
 
 ## When something goes wrong
 
-Stockroom does not fail quietly. A backup that has not run in `Warn after` hours
-puts a line on **everybody's** screen when they sign in: admins are told to open
-Admin → Backup, students are told which admin to mention it to.
+If no backup has succeeded within `Warn after` hours, a warning appears at every
+sign-in. Admins are told to open Admin → Backup, and students are told which
+admin to contact.
 
 **Admin → Backup** is where to look:
 
-- **The banner at the top** lists everything currently wrong, in sentences.
+- **The banner at the top** lists current problems.
 - **The target table** shows when each of This machine, Google Drive and GitHub
   last succeeded, and the exact error if the last attempt failed.
 - **Recent runs** is the log, newest first.
 
-A push that fails does not fail the whole run. The restorable archive is already
-on this machine, and one target being unreachable says nothing about the other —
-that is the point of having two.
+A failed push does not fail the run. The local archive is still written, and
+other targets are still tried.
 
 ---
 
 ## See also
 
-- `docs/design/backup.md` — the full design, the reasoning, and the known limits
-- `CLAUDE.md` §11 — the short version
-- `RESTORE.md` — inside every backup zip, for when nothing else is available
+- `docs/design/backup.md`: the full backup design
+- `CLAUDE.md` §11: summary
+- `RESTORE.md`: included in every backup zip

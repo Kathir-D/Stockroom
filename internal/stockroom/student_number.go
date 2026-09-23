@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// What a student number is allowed to look like (TEMPLATE-TODO Phase B).
+// What a student number is allowed to look like (CLAUDE.md §13, Phase B).
 //
 // This was a constant -- digits only -- and for a school whose IDs are
 // `AB12345` that made Stockroom unusable rather than merely inconvenient:

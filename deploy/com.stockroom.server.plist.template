@@ -32,8 +32,7 @@
   <true/>
 
   <!--
-    Restart on crash, and on a clean exit too. This is the item TEMPLATE-TODO
-    Phase A marks "not optional": the nightly backup is a goroutine inside this
+    Restart on crash, and on a clean exit too. This is not optional: the nightly backup is a goroutine inside this
     process, so "the server is running" and "backups happen" are the same fact.
     Without KeepAlive, one panic at 2am is forty days of missing backups that
     nobody notices until the morning they are needed.

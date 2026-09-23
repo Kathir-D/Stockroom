@@ -103,7 +103,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /assets/{id}", d.withSession(d.handleDeleteAsset, fullOnly))
 	mux.Handle("POST /assets/{id}/status", d.withSession(d.handleSetAssetStatus, fullOnly))
 	mux.Handle("POST /assets/{id}/photo", d.withSession(d.handleSetAssetPhoto, fullOnly))
-	// Barcodes and printable sheets (TEMPLATE-TODO Phase B). Admin-only,
+	// Barcodes and printable sheets (CLAUDE.md §13, Phase B). Admin-only,
 	// enforced inside internal/stockroom. `labels.pdf` and `cards.pdf` are
 	// POSTs because the id list can be hundreds of UUIDs; see server/labels.go.
 	//
