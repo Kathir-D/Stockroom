@@ -29,7 +29,7 @@
 #
 # Windows is not covered. dev.ps1 has never run on real Windows hardware
 # (CLAUDE.md §9, still open) and an untested service installer is worse than an
-# absent one; TEMPLATE-TODO Phase A carries it.
+# absent one; ROADMAP.md tracks it.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------

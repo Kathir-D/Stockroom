@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Picks what a student number looks like: digits only, letters and numbers,
-   * or a custom pattern (TEMPLATE-TODO Phase B). Used by Admin → Settings and
+   * or a custom pattern (CLAUDE.md §13, Phase B). Used by Admin → Settings and
    * by the first-run wizard, so the two cannot describe the rule differently.
    *
    * The test field is the point. A bad pattern that ships silently locks

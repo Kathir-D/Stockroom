@@ -1,6 +1,6 @@
 /**
  * What a student number may look like, as the sign-in screen needs to know it
- * before anybody has a session (TEMPLATE-TODO Phase B).
+ * before anybody has a session (CLAUDE.md §13, Phase B).
  *
  * The server is the authority (`internal/stockroom/student_number.go`); this is
  * the copy the field filters keystrokes with. They must agree, and the failure

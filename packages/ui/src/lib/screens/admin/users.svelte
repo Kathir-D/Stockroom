@@ -95,7 +95,7 @@
   /**
    * ID cards for whoever the search shows, for schools whose cards carry no
    * barcode or encode something other than the student number -- without
-   * this, scan sign-in does not work for them at all (TEMPLATE-TODO Phase B).
+   * this, scan sign-in does not work for them at all (CLAUDE.md §13, Phase B).
    */
   let printingCards = $state(false)
   async function printCards() {

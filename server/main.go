@@ -54,7 +54,7 @@ func main() {
 	// Supabase CLI, so this is the only thing that applies a migration on that
 	// machine -- and it is also the upgrade path: a new binary carries the
 	// files, the server applies whatever is pending, and nobody is ever asked
-	// to run SQL by hand (TEMPLATE-TODO Phase A).
+	// to run SQL by hand (CLAUDE.md §13, Phase A).
 	//
 	// Fatal, unlike the failsafe admin and the backup settings below. Those
 	// two are features that can be absent; a schema that is not the one this

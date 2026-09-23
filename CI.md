@@ -1,54 +1,60 @@
 # CI
 
-One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), with two jobs: `tests` on Ubuntu and `tests-windows` on Windows. It runs on every pull request against `main` and on every push to `main`. What it runs, and what it deliberately no longer runs, is in [TESTING.md](TESTING.md).
+One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), runs on every pull request against `main` and every push to `main`. It has two jobs, `tests` (Ubuntu) and `tests-windows`. A new push to a pull request cancels the run already in progress. [`TESTING.md`](TESTING.md) describes the suites themselves.
 
-## What the job does
+## `tests` (Ubuntu)
 
-1. Checks out, then decides whether any code changed (see below).
-2. Sets up Go, Node 22 and the Supabase CLI.
+1. Check out and detect whether any code changed (see [Docs-only changes](#docs-only-changes)).
+2. Set up Go, Node 22 and the Supabase CLI.
 3. `supabase start`, which applies every migration and the seed.
-4. `go vet ./...`, then `go test ./... -count=1 -p 1` with `STOCKROOM_REQUIRE_DB=1`, so a Go test that would skip on a missing database fails instead.
+4. `go vet ./...`, then `go test ./... -count=1 -p 1` with `STOCKROOM_REQUIRE_DB=1`.
 5. `supabase test db` (pgTAP).
-6. One root `npm ci` (locally, `./scripts/dev.sh deps --ci` does the same job), then `npm run check`, `npm test` and `npm run build`, each of which fans out across the workspace (`packages/ui`, `web-app`, `desktop-app/frontend`). A per-app `npm ci --prefix` would give that app its own Svelte and Vite, which breaks reactivity silently (`docs/design/design-system.md` §2.2).
-7. `supabase stop`, always, if it was started.
+6. `npm ci` at the root, then `npm run check`, `npm test` and `npm run build` across the workspace.
+7. `supabase stop`.
 
-A push to a PR cancels the run already going for it.
+## `tests-windows`
 
-## The Windows job
+Differs from the Linux job in three ways:
 
-`tests-windows` exists because Windows is the deployment target and, until it was added, nothing had ever built or run Stockroom there. It differs from `tests` in three ways, all forced by the runner:
+1. It uses the runner's built-in PostgreSQL service instead of the Supabase CLI (user `postgres`, password `root`, port 5432).
+2. It builds `stockroom.exe`, starts it against the empty database and waits for `/health`, so the server applies the schema itself as it does on a production install. It then loads `supabase/seed.sql` with `psql`.
+3. It does not run pgTAP.
 
-1. **No Supabase CLI.** The Windows image ships a PostgreSQL service, disabled by default. The job starts it (user `postgres`, password `root`, port 5432).
-2. **The schema comes from the server binary.** The job builds `stockroom.exe`, starts it against the empty database and waits for `/health`, which is exactly what happens on a school's machine: `stockroom.Migrate` applies every migration at boot. Then it loads `supabase/seed.sql` with `psql`, because the Go suite asserts against the demo data.
-3. **No pgTAP.** It needs the CLI, and the Linux job already runs it.
-
-It also parses `scripts/dev.ps1` with PowerShell's own parser, which is the least that can be done for a script nobody has run on Windows yet. It has the same docs-only skip as `tests`.
-
-## Pre-commit
-
-`.githooks/pre-commit` runs [`scripts/dev.sh test`](scripts/dev.sh) before a commit is created, so a red build is caught on the machine that broke it rather than ten minutes later in Actions. `scripts/dev.sh deps` installs it by setting `core.hooksPath` to `.githooks`, which is why the hook is tracked in the repository instead of sitting in `.git/hooks`: a hook nobody can see is a hook nobody maintains, and a fresh clone would otherwise have no protection at all.
-
-It skips itself on docs-only commits, using the same path list as the workflow below — a Markdown edit cannot break a build, and making people wait on a full suite for one is how a hook earns a permanent `--no-verify` in someone's muscle memory. The hook's `code_paths` regex and the workflow's `paths-filter` are the same entries in the same scope, including `.github/workflows/` rather than all of `.github/`, and they have to stay that way: a path the hook tests but CI skips only wastes a contributor's time, but one CI tests while the hook skips it is a red build that walked past the check meant to catch it. The hook also counts deletions (`--diff-filter=ACMRD`), since removing a migration or a component breaks a build as readily as editing one.
-
-Escapes, both honest: `git commit --no-verify` for one commit, or `STOCKROOM_SKIP_TESTS=1` when you want the reason to show up in a shell history. CI still runs the same suite on the pull request, so a skipped hook delays a failure rather than hiding it.
-
-The hook fails rather than warns when Postgres is down, because `dev.sh test` already reports a skipped pgTAP run as `FAILED` on purpose: a silent skip must never pass for a success. `supabase start` first, or `--no-verify` if the commit genuinely is not the cause.
+It also parses `scripts/dev.ps1` with PowerShell's parser.
 
 ## Docs-only changes
 
-Every step from 2 onward carries `if: steps.changes.outputs.code == 'true'`. `dorny/paths-filter` sets that output when the PR (or the push) touches `go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/` or `examples/`. The workflows entry is the workflow itself and its neighbours, not the whole `.github/` directory: an issue template, a pull-request template or a `CODEOWNERS` edit cannot change what gets built. The three npm entries matter: `packages/ui` is where all the frontend code now lives, and a lockfile change moves every dependency under it. `examples/` counts as code too, because `examples_test.go` imports every file in it, the Markdown category trees included. Anything else, which in practice means Markdown, `LICENSE` and `docs/`, is a docs-only change: the job runs a single echo step and finishes green in a few seconds.
+Every step after the change check is conditional on `dorny/paths-filter` reporting a code change. These paths count as code:
 
-The workflow grants itself `contents: read` and `pull-requests: read`. The second is for `dorny/paths-filter`, which lists a PR's changed files through the API; without it the step fails with "Resource not accessible by integration" before any test runs.
+`go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/`, `examples/`
 
-Filtering inside the job rather than with `on.push.paths` matters for branch protection. A workflow that never triggers never reports a check, and a required check that never reports blocks the merge. A job that runs and skips its steps still reports `tests: success`.
+`examples/` is included because `examples_test.go` imports every file in it. Any other change finishes in a few seconds with a green result.
+
+The filter runs inside the job rather than through `on.push.paths`, so the job always reports a status. A required check that never reports would block merging.
+
+The workflow has `contents: read` and `pull-requests: read` permissions. The second is needed for `dorny/paths-filter` to list a pull request's changed files.
+
+## Pre-commit hook
+
+`.githooks/pre-commit` runs `./scripts/dev.sh test` before each commit. `./scripts/dev.sh deps` installs it by setting `core.hooksPath` to `.githooks`.
+
+The hook skips docs-only commits using the same path list as the workflow, and counts deletions as changes. Keep the hook's `code_paths` regex and the workflow's filter in sync.
+
+To skip it, use `git commit --no-verify` or set `STOCKROOM_SKIP_TESTS=1`. CI still runs the suite on the pull request.
+
+The hook fails if Postgres is not running. Run `supabase start` first.
 
 ## Branch protection
 
-The workflow alone blocks nothing. The check has to be marked required.
+To require the checks, go to Settings → Rules → Rulesets → New branch ruleset, target the default branch, and enable:
 
-In the web UI: Settings, Rules, Rulesets, New branch ruleset. Target the default branch. Turn on "Require a pull request before merging", "Require status checks to pass" (add `tests` and `tests-windows`), and "Require branches to be up to date before merging". Set enforcement to Active. A check only appears in the search box after the workflow has run once.
+- Require a pull request before merging
+- Require status checks to pass (`tests` and `tests-windows`)
+- Require branches to be up to date before merging
 
-Or with `gh`, as classic branch protection, which needs every field:
+A check appears in the search box only after the workflow has run once.
+
+With `gh`, as classic branch protection:
 
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
@@ -61,12 +67,4 @@ gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSO
 JSON
 ```
 
-Set `"enforce_admins": false` to keep the ability to override on your own repo.
-
-## Running the same thing locally
-
-```bash
-./scripts/dev.sh test
-```
-
-It runs the same steps in the same order, skipping the database suites with a warning if Postgres is not up.
+Set `"enforce_admins": false` to allow repository admins to bypass it.

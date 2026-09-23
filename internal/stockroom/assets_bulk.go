@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Adding N units of one model at once (TEMPLATE-TODO Phase B).
+// Adding N units of one model at once (CLAUDE.md §13, Phase B).
 //
 // Linear stock -- batteries, SD cards, bags, cables -- is most of the unit
 // count in a real department and all of the tedium: twelve identical

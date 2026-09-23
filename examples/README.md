@@ -1,7 +1,7 @@
 # Example data
 
-Everything here is **obviously fake** — "Example" in every name, student
-numbers starting `900`, serials starting `EXAMPLE-` — so that nobody mistakes a
+Everything here is fake data: "Example" in every name, student
+numbers starting `900` and serials starting `EXAMPLE-`, so nobody mistakes a
 demo row for real inventory after setup.
 
 | File | Import it from | What it is |

@@ -10,7 +10,7 @@ import (
 // examples/ is shipped to schools as the thing to try Stockroom with, and the
 // install walkthrough points at it. These tests import every file through the
 // same functions the admin panel calls, so an example that stops importing
-// fails the build rather than a teacher's first afternoon (TEMPLATE-TODO
+// fails the build rather than a teacher's first afternoon (CLAUDE.md §13,
 // Phase B: "the docs and the files cannot drift apart").
 
 func openExample(t *testing.T, name string) *os.File {

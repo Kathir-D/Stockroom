@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * "Add 12 × Canon LP-E6 battery" (TEMPLATE-TODO Phase B).
+   * "Add 12 × Canon LP-E6 battery" (CLAUDE.md §13, Phase B).
    *
    * Two steps on purpose: the serials are shown before anything is written,
    * because a generator that writes first is one whose off-by-one is found as

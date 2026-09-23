@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// The student-number format (TEMPLATE-TODO Phase B): the happy path end to end
+// The student-number format (CLAUDE.md §13, Phase B): the happy path end to end
 // through the settings row, and the gate that stops a rule stranding accounts.
 func TestStudentNumberFormatSetting(t *testing.T) {
 	db := requireTestDB(t)

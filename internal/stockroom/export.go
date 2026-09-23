@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The export (TEMPLATE-TODO.md Phase C). "We want to stop using Stockroom"
+// The export (CLAUDE.md §13, Phase C). "We want to stop using Stockroom"
 // should be a button, not a rescue operation, and it is also what makes
 // adopting it low-risk: whatever goes in can come out as files anybody can
 // open.

@@ -11,7 +11,7 @@ import (
 	"stockroom/internal/stockroom"
 )
 
-// Barcodes and printable sheets (TEMPLATE-TODO Phase B).
+// Barcodes and printable sheets (CLAUDE.md §13, Phase B).
 //
 // Three routes, all admin-only inside the package. Two of them answer with a
 // PDF and one with a PNG, which makes them the only handlers here that do not

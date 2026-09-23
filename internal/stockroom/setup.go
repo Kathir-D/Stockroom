@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The first-run wizard (TEMPLATE-TODO Phase B).
+// The first-run wizard (CLAUDE.md §13, Phase B).
 //
 // Two halves with different trust, and the split is the design:
 //

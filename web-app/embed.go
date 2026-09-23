@@ -3,7 +3,7 @@
 // The deliverable for an installed Stockroom is one file: API, UI and
 // migrations in a single executable, started by a service manager, with
 // nothing to serve the frontend separately and nothing to keep in step with it
-// (TEMPLATE-TODO Phase A). The desktop app has always worked this way --
+// (CLAUDE.md §13, Phase A). The desktop app has always worked this way --
 // `desktop-app/main.go` embeds its own dist the same way -- so this is the
 // existing pattern applied to the other host.
 //

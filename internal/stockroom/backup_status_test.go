@@ -294,8 +294,7 @@ func (f fakeTarget) Versions(context.Context) ([]BackupVersion, error)    { retu
 func (f fakeTarget) Fetch(context.Context, string) (io.ReadCloser, error) { return nil, nil }
 func (f fakeTarget) Test(context.Context) error                           { return nil }
 
-// Both targets on, one broken (TODO.md, carried into TEMPLATE-TODO.md Phase
-// C). The point of two targets is that one being blocked leaves the other
+// Both targets on, one broken (CLAUDE.md §13, Phase C). The point of two targets is that one being blocked leaves the other
 // working, so the broken one must not stop the good one, and the screen must
 // say which one failed rather than that "the backup" did. Drive goes first
 // and fails, so a loop that stopped at the first error would never reach

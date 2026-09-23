@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Importing a category tree in one go (TEMPLATE-TODO Phase B).
+// Importing a category tree in one go (CLAUDE.md §13, Phase B).
 //
 // This exists because building an eight-Type tree through the *New category*
 // dialog is roughly sixty dialogs, it is the **first** thing a new school

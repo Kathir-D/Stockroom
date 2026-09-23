@@ -1,8 +1,8 @@
 # Stockroom design system
 
 The single reference for how Stockroom looks and behaves on screen, in both the Wails desktop app and
-the web app. `CLAUDE.md` is the architecture reference and `TODO.md` is the backend work list; this file
-is the UI counterpart to both. Where the two disagree about behaviour, `CLAUDE.md` wins and this file
+the web app. `CLAUDE.md` is the architecture reference; this file
+is the UI counterpart. Where they disagree about behaviour, `CLAUDE.md` wins and this file
 should be corrected.
 
 Written 2026-09-09. Direction chosen from `docs/design/mood-board.html` (open it with
@@ -696,7 +696,7 @@ admin-only; a non-admin's own history is available only via `GetUserHistory`.
 
 **Enforce it in the Go API, not the UI.** `GetAsset`, `ListAssets`, and `ScanItem` responses include the
 current custodian for every actor; `GetAssetHistory` omits all custodian identities unless the actor is an
-admin. `TODO.md` Phase 3/4 own that response shape.
+admin. backend Phase 3/4 own that response shape.
 
 **The custodian's name, not their number** (2026-09-13). `custody.student_number` is null for a non-admin
 viewer. A student number signs its owner in by scan with no password, so a browse list that carried one per
@@ -946,7 +946,7 @@ If a screen looks like it could be any SaaS product, something on this list has 
 
 ## 14. Implementation order
 
-Maps onto `TODO.md` Phase 6 (Week 8), which is where UI work is scheduled. Each step is shippable.
+Maps onto backend Phase 6 (Week 8), which is where UI work is scheduled. Each step is shippable.
 
 1. **Workspace + tokens.** Align `desktop-app/frontend` to Vite 8. Create `packages/ui`, move the fonts,
    write `tokens.css`, wire both apps' `app.css`. Verify a `bg-surface text-fg` div renders identically in
@@ -1020,7 +1020,7 @@ surface too, so the three places that can add an item all behave alike.
 The earlier note left `B1` and `B3` as coexisting modes behind a toggle. A toggle is a setting somebody
 has to find, and the two audiences are not two people: the same student wants a count on Tuesday and a
 specific serial on Thursday. Folding `B1` into the expansion of a `B3` row serves both without a mode. Cost: a per-model
-availability count that `ListAssets` does not return yet (`TODO.md` Phase 3), and one more component pair,
+availability count that `ListAssets` does not return yet (backend Phase 3), and one more component pair,
 `<ModelRow>` over `<UnitRow>`. §8.2 has the rules.
 
 **2026-09-10, cart: bottom dock, full page.** Replaces the dock-expands-into-a-drawer shape. The dock stays
@@ -1051,7 +1051,7 @@ picker and the admin custodian picker, and the dock stops carrying a commit butt
   (a student can find who has the lens they want) outweighs withholding it, and this project has no separate
   school privacy officer to seek sign-off from before shipping the open version. This applies only to who
   currently holds an item — `GetAssetHistory`'s past-custodian trail stays admin-only, and a non-admin's own
-  history is available only via `GetUserHistory`. §8.2, §8.3, and §8.6 updated; `TODO.md` Phase 3/4 own the
+  history is available only via `GetUserHistory`. §8.2, §8.3, and §8.6 updated; backend Phase 3/4 own the
   API shape (`ListAssets`/`GetAsset`/`ScanItem` include the current custodian for every actor,
   `GetAssetHistory` doesn't unless the actor is an admin).
 

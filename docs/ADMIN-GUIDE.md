@@ -1,4 +1,4 @@
-# Running Stockroom: the teacher's manual
+# Admin guide
 
 This is for whoever looks after Stockroom day to day. You do not need to be
 technical, and nothing here asks you to edit a file. Installing it is
@@ -58,8 +58,8 @@ item, and the report says what it changed.
 
 **Broken, lost or retired?** Press **Mark unavailable** on its row. It stays in
 the records, with its whole history, and nobody can borrow it. Deleting is
-only possible for an item that has never been checked out, on purpose: the
-history is the point.
+only possible for an item that has never been checked out, so its history is
+kept.
 
 ## Printing stickers
 
@@ -118,8 +118,8 @@ on the cart page.
 
 ## When a student leaves with a camera
 
-Nothing in Stockroom forgets it. The item stays checked out to them, it shows
-up on the Overdue list, and the history records who had it and when.
+The item stays checked out to them, appears on the Overdue list, and the
+history records who had it and when.
 
 1. Chase it the usual way. The Overdue list gives you the name and the date.
 2. If it comes back, scan it. Done.
@@ -128,8 +128,7 @@ up on the Overdue list, and the history records who had it and when.
    without pretending it is on the shelf, and the history still shows who had
    it last.
 
-Do not delete the student's account. Stockroom refuses to anyway, because
-their borrowing history would go with it.
+Stockroom does not allow deleting an account that still holds items.
 
 ## Handing Stockroom to next year's teacher
 

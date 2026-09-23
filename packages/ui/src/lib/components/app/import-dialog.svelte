@@ -1,7 +1,7 @@
 <script lang="ts" generics="R">
   /**
    * Upload one file to an import endpoint and show what happened
-   * (TEMPLATE-TODO Phase B). Used for the category tree and the asset list;
+   * (CLAUDE.md §13, Phase B). Used for the category tree and the asset list;
    * the roster keeps its own dialog because it also takes a photo folder.
    *
    * The result stays on screen until the dialog is closed. An import report is
