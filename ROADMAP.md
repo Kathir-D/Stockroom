@@ -221,13 +221,13 @@ Blocked: waiting on the school to provide the closet PC and the barcode scanner.
 - [ ] `stockroom doctor`: check the Docker daemon, what holds port 8080, and disk space.
 - [ ] A support bundle: doctor output and log tails, with secrets removed.
 - [ ] Uninstall instructions.
-- [ ] Decide whether to write `SECURITY.md`.
 - [ ] A data-deletion flow for students beyond deleting the account.
 
 # Not planned
 
 - Configurable product name, logo or colours
 - A `member_noun` setting; the product says "student" throughout
+- `SECURITY.md`; not worth it at this scale (decided 2026-09-23)
 - Multiple departments in one install (use one install per department)
 - Category trees deeper than three levels (assets can file at any node, see `docs/adr/0001`)
 - Scan-to-create in the admin catalogue, and a column-mapping or dry-run step for CSV import
