@@ -86,7 +86,7 @@ The rule for the Go suites is one happy path per module plus, where the module h
 |---|---|
 | `010_structure` | every table, view, enum, index and trigger the Go row structs scan against, including the two kit indexes that hold the rules Go would otherwise be the only keeper of |
 | `050_views` | `active_custody` and `overdue_custody`, which the sign-in warning and the checkout block both read |
-| `080_seed` | `seed.sql` loads: the category tree from `Catagories.md`, the two accounts, an open custody row behind every checked-out asset, and the seeded kit — four units, all available, none of them in a second kit |
+| `080_seed` | `seed.sql` loads: the category tree from `examples/categories.media-department.md`, the two accounts, an open custody row behind every checked-out asset, and the seeded kit — four units, all available, none of them in a second kit |
 | `090_app_settings` | the single-row constraint, every default, and the three bounds the settings endpoint repeats in words (`keep_days >= 1`, `stale_hours >= 1`, `schedule_hour` 0–23) |
 
 ### Frontends

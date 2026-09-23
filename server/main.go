@@ -46,6 +46,9 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer db.Close()
+	// Where the setup wizard writes the failsafe admin (setup.go). Only ever
+	// the file this process was configured from.
+	db.EnvPath = cfg.EnvPath
 
 	// The schema, before anything reads it. An installed Stockroom has no
 	// Supabase CLI, so this is the only thing that applies a migration on that
@@ -69,6 +72,27 @@ func main() {
 			len(applied), strings.Join(applied, ", "))
 	}
 
+	// Settings live in the database; .env seeds the backup ones the first
+	// time this runs against a fresh one. A failure here is logged and not
+	// fatal, for the same reason the failsafe admin is not: a backup that
+	// cannot be configured must not stop students borrowing cameras.
+	//
+	// Loaded BEFORE the failsafe admin, because the settings row carries the
+	// student-number format and the failsafe's number is validated against
+	// it. The other order checks an `AB12345` failsafe against the digits
+	// default and silently starts the server with no way in.
+	if settings, err := db.EnsureSettings(ctx, cfg); err != nil {
+		log.Printf("warning: could not load settings: %v", err)
+	} else if err := stockroom.SetStudentNumberFormat(
+		stockroom.StudentNumberFormat(settings.StudentNumberFormat), settings.StudentNumberPattern,
+	); err != nil {
+		// SaveSettings refuses a pattern that does not compile, so this is a
+		// row edited by hand. Digits stays in force, which is the historical
+		// rule, and the log names what was ignored.
+		log.Printf("warning: student number format %q ignored, using digits: %v",
+			settings.StudentNumberFormat, err)
+	}
+
 	// The failsafe admin (CLAUDE.md §7) is re-applied on every start so a
 	// forgotten password or a bad roster import can never lock out the admin
 	// panel. Nothing here is fatal. The failsafe exists to prevent a lockout,
@@ -88,14 +112,6 @@ func main() {
 		log.Printf("warning: no failsafe admin, check ADMIN_STUDENT_NUMBER / ADMIN_PASSWORD: %v", err)
 	default:
 		stockroom.SetFailsafeAdminConfigured(true)
-	}
-
-	// Backup settings live in the database; .env seeds them the first time
-	// this runs against a fresh one. A failure here is logged and not fatal,
-	// for the same reason the failsafe admin is not: a backup that cannot be
-	// configured must not stop students borrowing cameras.
-	if _, err := db.EnsureSettings(ctx, cfg); err != nil {
-		log.Printf("warning: could not load backup settings: %v", err)
 	}
 
 	// The nightly backup, scheduled in-process rather than by the operating

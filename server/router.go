@@ -47,6 +47,8 @@ func newRouter(d deps) http.Handler {
 	// there is no session to require yet. Both routes are nil-safe on a reel
 	// that was never built, which is the common case -- see server/photowall.go.
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
+	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
+	mux.HandleFunc("POST /setup/admin", d.handleCreateFirstAdmin)
 	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))
 
 	// A limited session (scan login, no password yet) may only set its
@@ -101,6 +103,22 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("DELETE /assets/{id}", d.withSession(d.handleDeleteAsset, fullOnly))
 	mux.Handle("POST /assets/{id}/status", d.withSession(d.handleSetAssetStatus, fullOnly))
 	mux.Handle("POST /assets/{id}/photo", d.withSession(d.handleSetAssetPhoto, fullOnly))
+	// Barcodes and printable sheets (TEMPLATE-TODO Phase B). Admin-only,
+	// enforced inside internal/stockroom. `labels.pdf` and `cards.pdf` are
+	// POSTs because the id list can be hundreds of UUIDs; see server/labels.go.
+	//
+	// `GET /assets/{id}/barcode.png` is registered before nothing in
+	// particular -- Go's mux prefers the most specific pattern, so it wins over
+	// `GET /assets/{id}` without either needing to know about the other.
+	mux.Handle("GET /labels/layouts", d.withSession(d.handleLabelLayouts, fullOnly))
+	mux.Handle("POST /assets/labels.pdf", d.withSession(d.handlePrintAssetLabels, fullOnly))
+	mux.Handle("POST /users/cards.pdf", d.withSession(d.handlePrintUserCards, fullOnly))
+	mux.Handle("GET /assets/{id}/barcode.png", d.withSession(d.handleAssetBarcodePNG, fullOnly))
+
+	mux.Handle("POST /assets/import", d.withSession(d.handleImportAssets, fullOnly))
+	mux.Handle("POST /assets/bulk-preview", d.withSession(d.handleBulkPreview, fullOnly))
+	mux.Handle("POST /assets/bulk", d.withSession(d.handleBulkAdd, fullOnly))
+	mux.Handle("POST /categories/import", d.withSession(d.handleImportCategories, fullOnly))
 	mux.Handle("POST /categories", d.withSession(d.handleCreateCategory, fullOnly))
 	mux.Handle("PUT /categories/{id}", d.withSession(d.handleUpdateCategory, fullOnly))
 	mux.Handle("DELETE /categories/{id}", d.withSession(d.handleDeleteCategory, fullOnly))
@@ -111,6 +129,11 @@ func newRouter(d deps) http.Handler {
 	// internal/stockroom. The restore routes are the destructive ones and each
 	// carries its own typed confirmation, checked in the package rather than
 	// here so the CLI is held to it too.
+	mux.Handle("GET /setup", d.withSession(d.handleGetSetup, fullOnly))
+	mux.Handle("PUT /setup", d.withSession(d.handleSaveSetup, fullOnly))
+	mux.Handle("POST /setup/failsafe", d.withSession(d.handleConfigureFailsafe, fullOnly))
+	mux.Handle("POST /setup/examples", d.withSession(d.handleLoadExamples, fullOnly))
+	mux.Handle("DELETE /setup/examples", d.withSession(d.handleRemoveExamples, fullOnly))
 	mux.Handle("GET /admin/settings", d.withSession(d.handleGetSettings, fullOnly))
 	mux.Handle("PUT /admin/settings", d.withSession(d.handleSaveSettings, fullOnly))
 	mux.Handle("POST /admin/settings/test", d.withSession(d.handleTestTarget, fullOnly))

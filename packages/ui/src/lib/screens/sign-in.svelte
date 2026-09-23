@@ -24,8 +24,18 @@
   import { Label } from "@stockroom/ui/components/ui/label"
   import PasswordInput from "../components/app/password-input.svelte"
   import PhotoWall from "../components/app/photo-wall.svelte"
+  import FirstAdmin from "../components/app/first-admin.svelte"
   import * as api from "../api/index"
-  import { attachScanner, looksLikeStudentNumber } from "../scanner"
+  import { attachScanner } from "../scanner"
+  import {
+    DIGITS_RULE,
+    MAX_STUDENT_NUMBER_LENGTH,
+    filterStudentNumber,
+    formatHint,
+    looksLikeStudentNumber,
+    ruleFrom,
+    type StudentNumberRule,
+  } from "../student-number"
   import { session } from "../stores/session.svelte"
 
   let { onSignedIn }: { onSignedIn: () => void } = $props()
@@ -45,22 +55,40 @@
   let busy = $state(false)
 
   /**
-   * Mirrors `MaxStudentNumberLength` in `internal/stockroom/password.go`. The
-   * server is still the authority; this only stops the field accepting a value
-   * it already knows will be refused.
+   * The install's student-number rule, served by `GET /signin/config`. Digits
+   * until it arrives -- the historical rule, and what an install that never
+   * changed the setting uses -- and digits if it never does: a server that
+   * cannot answer this cannot sign anybody in either.
    */
-  const MAX_STUDENT_NUMBER_LENGTH = 32
+  let rule = $state<StudentNumberRule>(DIGITS_RULE)
+  /**
+   * No accounts exist yet: this screen becomes "create the first admin"
+   * (the setup wizard's step 2). The same request as the rule, so a fresh
+   * install costs sign-in nothing extra.
+   */
+  let needsSetup = $state(false)
+  $effect(() => {
+    api.signInConfig().then(
+      (raw) => {
+        rule = ruleFrom(raw)
+        needsSetup = (raw as { needs_setup?: unknown } | null)?.needs_setup === true
+      },
+      () => {},
+    )
+  })
 
   /**
    * The field's filter, as a function, so the burst handler can apply the same
-   * one when it asks whether the buffer and the field still agree.
+   * one when it asks whether the buffer and the field still agree. It MUST be
+   * the same filter in both places (lib/student-number.ts says why).
    */
-  function digitsOnly(value: string): string {
-    return value.replace(/\D+/g, "").slice(0, MAX_STUDENT_NUMBER_LENGTH)
+  function fieldFilter(value: string): string {
+    return filterStudentNumber(value, rule)
   }
 
   /**
-   * Keep the student-number field digits-only.
+   * Keep the student-number field to the characters the rule allows (digits,
+   * unless the install says otherwise).
    *
    * `NormalizeStudentNumber` refuses anything else server-side, so letters were
    * never going to sign anyone in — but the field accepted them, and the person
@@ -77,12 +105,12 @@
    * to produce "that looks like an item barcode", not a silently stripped
    * number that fails as a bad login (§15 Q4).
    */
-  function keepDigitsOnly(event: Event & { currentTarget: HTMLInputElement }) {
+  function keepToRule(event: Event & { currentTarget: HTMLInputElement }) {
     const el = event.currentTarget
-    const digits = digitsOnly(el.value)
+    const digits = fieldFilter(el.value)
     if (digits !== el.value) {
       const caret = el.selectionStart ?? el.value.length
-      const removedBeforeCaret = el.value.slice(0, caret).replace(/\d/g, "").length
+      const removedBeforeCaret = caret - fieldFilter(el.value.slice(0, caret)).length
       el.value = digits
       const next = Math.max(0, caret - removedBeforeCaret)
       el.setSelectionRange(next, next)
@@ -163,7 +191,7 @@
        * like an item barcode" message (§15 Q4) would be lost with it.
        */
       onBurst: ({ code, fast }) => {
-        const inSync = target.value === digitsOnly(code)
+        const inSync = target.value === fieldFilter(code)
         handleBurst(inSync ? code : target.value, fast && inSync)
       },
     })
@@ -189,13 +217,13 @@
 
     if (!trimmed) return
 
-    if (!looksLikeStudentNumber(trimmed)) {
+    if (!looksLikeStudentNumber(trimmed, rule)) {
       // An item barcode scanned with nobody signed in. Say so explicitly instead
       // of failing as a bad login: the code is valid, it's just not a student
       // number (§15 Q4).
       error = fast
         ? "That looks like an item barcode. Scan your student ID to sign in first."
-        : "Student numbers are digits only."
+        : formatHint(rule)
       studentNumber = ""
       return
     }
@@ -295,9 +323,16 @@
     <!-- Wordmark. Left-aligned like the rest of the app; the input below it is
          what the eye needs to land on. -->
     <p class="text-2xl font-semibold tracking-tight text-fg">Stockroom</p>
-    <p class="mt-1 text-fg-muted">Media department equipment checkout</p>
+    <p class="mt-1 text-fg-muted">Equipment checkout</p>
 
-    {#if step === "number"}
+    {#if needsSetup}
+      <FirstAdmin
+        onCreated={async (result) => {
+          await session.adopt(result)
+          onSignedIn()
+        }}
+      />
+    {:else if step === "number"}
       <form
         class="mt-8 flex flex-col gap-2"
         onsubmit={(event) => {
@@ -320,9 +355,9 @@
           id="student-number"
           bind:ref={numberInput}
           value={studentNumber}
-          oninput={keepDigitsOnly}
-          inputmode="numeric"
-          pattern="[0-9]*"
+          oninput={keepToRule}
+          inputmode={rule.format === "digits" ? "numeric" : "text"}
+          pattern={rule.format === "digits" ? "[0-9]*" : undefined}
           maxlength={MAX_STUDENT_NUMBER_LENGTH}
           autocomplete="off"
           spellcheck={false}

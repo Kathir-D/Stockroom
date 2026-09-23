@@ -38,6 +38,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STOCKROOM_HOME="${STOCKROOM_HOME:-$HOME/Stockroom}"
 SERVER_ADDR="${SERVER_ADDR:-127.0.0.1:8080}"
+ADDR_GIVEN=0
 INSTALL_SERVICE=1
 OPEN_BROWSER=1
 ADMIN_NUMBER="${ADMIN_STUDENT_NUMBER:-}"
@@ -63,7 +64,7 @@ usage() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --home)           STOCKROOM_HOME="$2"; shift 2 ;;
-    --addr)           SERVER_ADDR="$2"; shift 2 ;;
+    --addr)           SERVER_ADDR="$2"; ADDR_GIVEN=1; shift 2 ;;
     --admin-number)   ADMIN_NUMBER="$2"; shift 2 ;;
     --admin-password-file)
       # First line only, so a trailing newline in the file is not part of it.
@@ -243,6 +244,17 @@ chmod +x "$STOCKROOM_HOME/stockroom-run.sh"
 ENV_FILE="$STOCKROOM_HOME/.env"
 if [ -f "$ENV_FILE" ]; then
   ok "keeping the existing .env (settings live in the database now, not here)"
+  # The server listens where the kept .env says, so the health wait and the
+  # summary below have to use that address too -- otherwise an install made
+  # with --addr polls the default for three minutes and reports a working
+  # upgrade as a failure.
+  saved_addr="$(sed -n "s/^SERVER_ADDR=['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}[[:space:]]*$/\1/p" "$ENV_FILE" | tail -1)"
+  if [ -n "$saved_addr" ]; then
+    if [ "$ADDR_GIVEN" = 1 ] && [ "$saved_addr" != "$SERVER_ADDR" ]; then
+      warn "--addr $SERVER_ADDR ignored: the existing .env says SERVER_ADDR=$saved_addr. Edit $ENV_FILE to change it."
+    fi
+    SERVER_ADDR="$saved_addr"
+  fi
 else
   # 32 characters out of /dev/urandom. postgres:postgres is correct for a
   # localhost dev stack and wrong on a machine in a closet that students walk

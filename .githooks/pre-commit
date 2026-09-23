@@ -44,7 +44,7 @@ fi
 # through the check meant to catch it. Note .github/workflows/ rather than all of
 # .github/ — an issue template or a CODEOWNERS edit cannot break a build, and CI
 # scopes it the same way.
-code_paths='^(go\.(mod|sum)|internal/|server/|cmd/|supabase/|packages/|desktop-app/|web-app/|package\.json|package-lock\.json|scripts/|\.githooks/|\.github/workflows/)'
+code_paths='^(go\.(mod|sum)|internal/|server/|cmd/|supabase/|packages/|desktop-app/|web-app/|package\.json|package-lock\.json|scripts/|\.githooks/|\.github/workflows/|examples/)'
 
 if ! printf '%s\n' "$staged" | grep -qE "$code_paths"; then
   echo "pre-commit: docs-only change, skipping the suite."

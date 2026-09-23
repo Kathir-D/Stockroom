@@ -46,6 +46,7 @@
   import History from "@stockroom/ui/screens/history.svelte"
   import Kits from "@stockroom/ui/screens/kits.svelte"
   import SignIn from "@stockroom/ui/screens/sign-in.svelte"
+  import Setup from "@stockroom/ui/screens/setup.svelte"
   import * as api from "./api/index"
   import type { AssetDetail, AssetListItem, CheckoutResult, KitCheckInResult } from "./api/types"
   import { attachKeepAlive } from "./keep-alive"
@@ -152,6 +153,17 @@
     // The overdue warning is blocking and comes before the browse screen (§8.1).
     overdueOpen = session.hasOverdue
     router.go({ name: "browse", category: catalog.category })
+    // An admin on an install whose setup guide is unfinished goes back to it,
+    // so closing the laptop half way resumes rather than strands. Best
+    // effort: if the read fails they simply land on browse.
+    if (session.isAdmin) {
+      api.getSetup().then(
+        (s) => {
+          if (!s.completed) router.go({ name: "setup" })
+        },
+        () => {},
+      )
+    }
   }
 
   async function signOut() {
@@ -345,8 +357,9 @@
                than only on the admin one: a stale backup is a fact about the
                machine, and the admin is the person least likely to be standing
                at it (docs/design/backup.md §E.7). The server decides the wording
-               and who sees which sentence; this only places it. -->
-          {#if session.visibleBackupWarning}
+               and who sees which sentence; this only places it. Not on the
+               setup guide, whose last step is choosing that folder. -->
+          {#if session.visibleBackupWarning && route.name !== "setup"}
             <BackupNotice
               warning={session.visibleBackupWarning}
               isAdmin={session.isAdmin}
@@ -361,6 +374,8 @@
             <Kits onCheckedIn={onKitCheckedIn} />
           {:else if route.name === "history"}
             <History />
+          {:else if route.name === "setup" && session.isAdmin}
+            <Setup />
           {:else if route.name === "admin" && session.isAdmin}
             {#if route.tab === "assets"}
               <AdminAssets />

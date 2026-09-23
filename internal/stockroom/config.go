@@ -47,21 +47,30 @@ type Config struct {
 	SignInPhotosBatch         int
 	SignInPhotosTTLMinutes    int
 	SignInPhotosManifestHours int
+
+	// EnvPath is the .env file this configuration was read from, or "" when
+	// there was none. The setup wizard writes the failsafe admin into it,
+	// because that account has to survive the database being lost and so
+	// cannot live in the database (CLAUDE.md §7).
+	EnvPath string
 }
 
 // LoadConfig reads .env (searching the current directory and its parents, so
 // `go run ./server` works from the repo root or a subdirectory) and then the
 // process environment. Real environment variables win over .env values.
 func LoadConfig() (Config, error) {
+	envPath := ""
 	if path, ok := findDotEnv(); ok {
 		if err := godotenv.Load(path); err != nil {
 			return Config{}, fmt.Errorf("load %s: %w", path, err)
 		}
+		envPath = path
 	}
 
 	// Values with a sensible local default fall back to it when unset; the
 	// admin failsafe and backup dir are deliberately blank until configured.
 	cfg := Config{
+		EnvPath:            envPath,
 		DatabaseURL:        getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres"),
 		ServerAddr:         getenv("SERVER_ADDR", "127.0.0.1:8080"),
 		AdminStudentNumber: os.Getenv("ADMIN_STUDENT_NUMBER"),

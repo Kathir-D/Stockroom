@@ -1,17 +1,21 @@
--- Sample data for local development, loaded by `supabase db reset`. Not for
--- production: the real inventory is entered through the admin panel and the
--- real roster through the CSV import.
+-- DEMO DATA, FOR DEVELOPMENT ONLY. Loaded by `supabase db reset` and by
+-- nothing else. An install (scripts/install.sh, docs/INSTALL.md) never runs
+-- this file: a school's database starts empty, and the only way in is the
+-- first-run wizard or the .env failsafe admin (CLAUDE.md §7). That matters
+-- because this file ships two accounts with the password "password", and a
+-- known login on a closet PC is the one thing the install must never have.
 --
--- Category tree: Type -> Category -> Model, from Catagories.md. Every physical
--- unit is an asset whose category_id points at a Model node. Names are unique
--- across the whole table, so parents are looked up by name below.
+-- Category tree: Type -> Category -> Model, identical to
+-- examples/categories.media-department.md. The two are held to each other by
+-- examples_test.go, which imports that file over this seed and expects it to
+-- create nothing. Every physical unit is an asset whose category_id points at
+-- a Model node. Names are unique across the whole table, so parents are looked
+-- up by name below.
 --
--- Every Type and Model name here is Catagories.md's, unchanged. The Category
--- level is only partly its: Catagories.md names the three under Lenses (Zooms,
--- Primes, Accessories) and the one under Cameras/Bodies (Camera Model), but
--- lists models straight under the other six types. Those Categories are
--- invented here so every branch is the same depth and the browse filter has a
--- middle level to show:
+-- The media department's own list named the Categories under Lenses (Zooms,
+-- Primes, Accessories) and Cameras/Bodies (Camera Model) but listed models
+-- straight under the other six types. These middle levels were invented so
+-- every branch is the same depth and the browse filter has a level to show:
 --
 --   Lights              -> Studio Lights, Light Modifiers
 --   Audio Stuff         -> Wireless Mics, Wired Mics
@@ -20,10 +24,10 @@
 --   Batteries           -> Camera Batteries
 --   Misc                -> Other
 --
--- Splitting a type in two (Lights, Audio Stuff, Tripods/Monopods) is a reading
--- of the inventory, not a rule; rename or merge them freely, they hold no data
--- of their own. Primes is seeded with no Models under it because Catagories.md
--- says there are none in inventory yet, so not every branch reaches depth 3.
+-- Splitting a type in two is a reading of the inventory, not a rule; rename or
+-- merge them freely, they hold no data of their own. Primes is seeded with no
+-- Models under it because the department has none yet, so not every branch
+-- reaches depth 3.
 --
 -- Accounts: one admin (123456) and one student (234567). Both sign in by
 -- scanning their student number, and both also have the typed-login password
@@ -37,7 +41,7 @@
 
 -- Types --------------------------------------------------------------------
 -- sort_order is a row's position among its siblings (categories.sort_order):
--- these eight are Catagories.md's document order, which is what the browse
+-- these eight are examples/categories.media-department.md's document order, which is what the browse
 -- filters and the asset list sort by.
 insert into categories (name, sort_order) values
   ('Cameras/Bodies',      1),
@@ -228,3 +232,8 @@ insert into kit_items (kit_id, asset_id) values
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000105'), -- Canon 70-200mm f/2.8
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000107'), -- DJI Wireless Lavalier
   ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000112'); -- Backpack
+
+-- The development database is set up already; do not send the seeded admin
+-- through the first-run wizard on every reset. (It is still reachable from
+-- Admin -> Settings -> "Run the setup guide again".)
+update app_settings set setup_completed_at = now() where id = true;

@@ -409,6 +409,10 @@ export interface Settings {
   archive_passphrase: string;
   photo_min_free_gb: number;
   photo_max_generations: number;
+  /** What a student number may look like (lib/student-number.ts). */
+  student_number_format: "digits" | "alphanumeric" | "custom";
+  /** Only meaningful when the format is custom; kept when switching away. */
+  student_number_pattern: string;
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;
@@ -567,4 +571,82 @@ export interface PhotoWallStatus {
 
   last_error: string;
   last_error_at: string | null;
+}
+
+/* ------------------------------------------------ bulk ways in (Phase B) ---- */
+
+export interface CategoryImportResult {
+  created: number;
+  existing: number;
+  failed: number;
+  format: "text" | "csv";
+  rows: { path: string[]; created: boolean; error?: string }[];
+}
+
+export interface AssetImportResult {
+  created: number;
+  updated: number;
+  failed: number;
+  rows: {
+    line: number;
+    serial_number: string;
+    name: string;
+    action: "created" | "updated" | "failed";
+    error?: string;
+    /** On an update: the item that already had this serial. */
+    note?: string;
+  }[];
+}
+
+export interface BulkAddInput {
+  name: string;
+  prefix: string;
+  count: number;
+  category_id?: string | null;
+  /** Zero-padding of the number; 0 means 3. */
+  digits?: number;
+  /** 0 means "after the highest already used". */
+  start_at?: number;
+}
+
+export interface BulkPreview {
+  serials: string[];
+  existing: string[];
+  name: string;
+}
+
+export interface LabelLayout {
+  key: string;
+  label: string;
+  paper: string;
+  per_sheet: number;
+  max_serial_chars: number;
+  hint: string;
+}
+
+/* ----------------------------------------------------- the setup wizard ---- */
+
+export interface FirstAdminInput {
+  student_number: string;
+  first_name: string;
+  last_name: string;
+  password: string;
+  student_number_format: "digits" | "alphanumeric" | "custom";
+  student_number_pattern: string;
+}
+
+export interface SetupState {
+  needs_admin: boolean;
+  step: number;
+  completed: boolean;
+  failsafe_configured: boolean;
+  failsafe_writable: boolean;
+  examples_present: boolean;
+}
+
+export interface ExamplesResult {
+  categories: CategoryImportResult;
+  assets: AssetImportResult;
+  people: RosterResult;
+  skipped?: string[];
 }

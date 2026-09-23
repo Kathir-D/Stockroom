@@ -1,0 +1,6 @@
+serial_number,name,category,model,status
+EXAMPLE-CAM1,Example Canon T7i,Camera Model,T7i,available
+EXAMPLE-CAM2,Example Canon T7i,Camera Model,T7i,available
+EXAMPLE-LENS1,Example Canon 70-200mm f/2.8,Zooms,Canon 70-200mm f/2.8,available
+EXAMPLE-BAT1,Example Canon battery,,Canon Camera Batteries,available
+EXAMPLE-BAG1,Example backpack,,Backpacks,unavailable

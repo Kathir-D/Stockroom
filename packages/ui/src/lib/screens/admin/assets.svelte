@@ -18,6 +18,14 @@
   import ImageIcon from "@lucide/svelte/icons/image"
   import CircleSlashIcon from "@lucide/svelte/icons/circle-slash"
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check"
+  import BarcodeIcon from "@lucide/svelte/icons/barcode"
+  import PrinterIcon from "@lucide/svelte/icons/printer"
+  import UploadIcon from "@lucide/svelte/icons/upload"
+  import CopyPlusIcon from "@lucide/svelte/icons/copy-plus"
+  import BarcodeDialog from "@stockroom/ui/components/app/barcode-dialog.svelte"
+  import BulkAddDialog from "@stockroom/ui/components/app/bulk-add-dialog.svelte"
+  import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
+  import PrintLabelsDialog, { type LabelItem } from "@stockroom/ui/components/app/print-labels-dialog.svelte"
   import { toast } from "svelte-sonner"
   import * as AlertDialog from "@stockroom/ui/components/ui/alert-dialog"
   import { Button } from "@stockroom/ui/components/ui/button"
@@ -31,7 +39,14 @@
   import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
   import { session } from "../../stores/session.svelte"
   import * as api from "../../api/index"
-  import type { AssetCustody, AssetInput, AssetListItem, CategoryNode } from "../../api/types"
+  import type {
+    AssetCustody,
+    AssetDetail,
+    AssetImportResult,
+    AssetInput,
+    AssetListItem,
+    CategoryNode,
+  } from "../../api/types"
   import { catalog } from "../../stores/catalog.svelte"
 
   let units = $state<AssetListItem[]>([])
@@ -205,6 +220,61 @@
     }
   }
 
+  /* ------------------------------------------- barcodes and bulk ways in ---- */
+
+  /**
+   * Fake cameras that outlive setup are worse than no demo at all, because
+   * the catalogue looks authoritative and is wrong. So while the examples are
+   * loaded this screen says so, every time, with the button to remove them.
+   */
+  let examplesPresent = $state(false)
+  $effect(() => {
+    api.getSetup().then(
+      (s) => (examplesPresent = s.examples_present),
+      () => {},
+    )
+  })
+  async function removeExamples() {
+    try {
+      const r = await api.removeExamples()
+      examplesPresent = false
+      toast.success(
+        `Removed ${r.assets} example items and ${r.people} example people` +
+          (r.people_kept ? `; kept ${r.people_kept} who appear in a real item's history` : ""),
+      )
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  let barcodeTarget = $state<AssetListItem | null>(null)
+  let barcodeOpen = $state(false)
+
+  let printOpen = $state(false)
+  let printItems = $state<LabelItem[]>([])
+
+  let importOpen = $state(false)
+  let bulkOpen = $state(false)
+
+  function asLabel(u: { id: string; name: string; serial_number: string | null }): LabelItem {
+    return { id: u.id, name: u.name, serial: u.serial_number ?? "" }
+  }
+
+  /** The units on screen, i.e. whatever the search has narrowed to. */
+  function printShown() {
+    printItems = units.filter((u) => u.serial_number).map(asLabel)
+    printOpen = true
+  }
+
+  /** Straight from bulk add to the printer: new units are unscannable until labelled. */
+  async function afterBulk(made: AssetDetail[]) {
+    toast.success(`${made.length} units created`)
+    await load()
+    printItems = made.map(asLabel)
+    printOpen = true
+  }
+
   /**
    * The holder's trail, opened by pressing a row's status (2026-09-16). Same
    * dialog and same gesture as the browse list — <UnitRow> is shared, so this
@@ -223,11 +293,33 @@
   <div class="flex items-center gap-3">
     <Input bind:value={search} placeholder="Search name, serial, tag…" class="max-w-xs" />
     <span class="flex-1"></span>
+    <Button variant="ghost" onclick={() => (importOpen = true)}>
+      <UploadIcon aria-hidden="true" />
+      Import CSV
+    </Button>
+    <Button variant="ghost" disabled={units.length === 0} onclick={printShown}>
+      <PrinterIcon aria-hidden="true" />
+      Print labels
+    </Button>
+    <Button variant="secondary" onclick={() => (bulkOpen = true)}>
+      <CopyPlusIcon aria-hidden="true" />
+      Add several
+    </Button>
     <Button onclick={openCreate}>
       <PlusIcon aria-hidden="true" />
       New asset
     </Button>
   </div>
+
+  {#if examplesPresent}
+    <div class="flex items-center gap-3 rounded-xl border border-line-strong bg-surface p-3 text-sm">
+      <p class="flex-1 text-fg-muted">
+        The example items and people from setup are still here. Remove them once your own equipment
+        is in, so nobody tries to borrow a camera that doesn't exist.
+      </p>
+      <Button variant="secondary" onclick={removeExamples}>Remove the examples</Button>
+    </div>
+  {/if}
 
   {#if error}
     <EmptyState title="Couldn't load assets" description={error}>
@@ -269,6 +361,27 @@
                   {/snippet}
                 </Tooltip.Trigger>
                 <Tooltip.Content>Edit</Tooltip.Content>
+              </Tooltip.Root>
+
+              <Tooltip.Root>
+                <Tooltip.Trigger>
+                  {#snippet child({ props })}
+                    <Button
+                      {...props}
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Barcode for ${row.name}`}
+                      disabled={!row.serial_number}
+                      onclick={() => {
+                        barcodeTarget = row
+                        barcodeOpen = true
+                      }}
+                    >
+                      <BarcodeIcon aria-hidden="true" />
+                    </Button>
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>Barcode</Tooltip.Content>
               </Tooltip.Root>
 
               <Tooltip.Root>
@@ -461,3 +574,41 @@
   userId={holder?.custodian_id ?? null}
   userName={holder?.custodian_name ?? ""}
 />
+
+<BarcodeDialog
+  bind:open={barcodeOpen}
+  assetId={barcodeTarget?.id ?? null}
+  name={barcodeTarget?.name ?? ""}
+  serial={barcodeTarget?.serial_number ?? ""}
+/>
+
+<PrintLabelsDialog bind:open={printOpen} items={printItems} />
+
+<BulkAddDialog bind:open={bulkOpen} categories={categoryOptions} onCreated={afterBulk} />
+
+<ImportDialog
+  bind:open={importOpen}
+  title="Import assets"
+  accept=".csv,text/csv"
+  upload={api.importAssets}
+  onDone={load}
+>
+  {#snippet description()}
+    A CSV with <code class="font-mono">serial_number</code> and <code class="font-mono">name</code>
+    columns, plus optional <code class="font-mono">category</code>, <code class="font-mono">model</code>
+    and <code class="font-mono">status</code>. A serial you already have updates that item. Import
+    your category tree first — a category the file names that doesn't exist fails that row.
+  {/snippet}
+  {#snippet report(r: AssetImportResult)}
+    <p class="text-sm text-fg">
+      {r.created} created, {r.updated} updated{r.failed ? `, ${r.failed} failed` : ""}.
+    </p>
+    <ul class="mt-1 flex flex-col gap-1 text-xs">
+      {#each r.rows.filter((row) => row.action !== "created") as row (row.line)}
+        <li class={row.action === "failed" ? "text-status-overdue" : "text-fg-muted"}>
+          Line {row.line} <span class="font-mono">{row.serial_number}</span>: {row.error ?? row.note}
+        </li>
+      {/each}
+    </ul>
+  {/snippet}
+</ImportDialog>

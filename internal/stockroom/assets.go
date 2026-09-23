@@ -157,7 +157,7 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 }
 
 // sortBrowseList puts the list in the order the browse screen reads in
-// (design doc §8.2, decided 2026-09-12): category first, in Catagories.md's
+// (design doc §8.2, decided 2026-09-12): category first, in examples/categories.media-department.md's
 // document order rather than alphabetically, then available units ahead of the
 // ones nobody can take today, then by name. asset_tag breaks the last tie so
 // two identically named units never swap places between two requests.

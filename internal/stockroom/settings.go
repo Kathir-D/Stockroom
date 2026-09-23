@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -50,6 +51,13 @@ type Settings struct {
 
 	PhotoMinFreeGB      int `json:"photo_min_free_gb"`
 	PhotoMaxGenerations int `json:"photo_max_generations"`
+
+	// What a student number may look like (student_number.go). Not a backup
+	// setting, but app_settings is already "the things an admin configures
+	// without opening a file", and a second settings table would be a second
+	// screen for one field.
+	StudentNumberFormat  string `json:"student_number_format"`
+	StudentNumberPattern string `json:"student_number_pattern"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -107,12 +115,16 @@ type SettingsInput struct {
 
 	PhotoMinFreeGB      *int `json:"photo_min_free_gb"`
 	PhotoMaxGenerations *int `json:"photo_max_generations"`
+
+	StudentNumberFormat  *string `json:"student_number_format"`
+	StudentNumberPattern *string `json:"student_number_pattern"`
 }
 
 const settingsColumns = `backup_dir, photo_backup_dir, keep_days, stale_hours, schedule_hour,
 	drive_enabled, drive_remote, drive_path,
 	github_enabled, github_repo, github_token, archive_passphrase,
-	photo_min_free_gb, photo_max_generations, updated_at`
+	photo_min_free_gb, photo_max_generations,
+	student_number_format, student_number_pattern, updated_at`
 
 func scanSettings(row pgx.Row) (Settings, error) {
 	var s Settings
@@ -120,16 +132,19 @@ func scanSettings(row pgx.Row) (Settings, error) {
 	// "" rather than making every caller test for nil. Nothing downstream
 	// distinguishes an unset path from a blank one.
 	var backupDir, photoDir, driveRemote, drivePath, repo, token, passphrase *string
+	var snPattern *string
 	err := row.Scan(&backupDir, &photoDir, &s.KeepDays, &s.StaleHours, &s.ScheduleHour,
 		&s.DriveEnabled, &driveRemote, &drivePath,
 		&s.GitHubEnabled, &repo, &token, &passphrase,
-		&s.PhotoMinFreeGB, &s.PhotoMaxGenerations, &s.UpdatedAt)
+		&s.PhotoMinFreeGB, &s.PhotoMaxGenerations,
+		&s.StudentNumberFormat, &snPattern, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, ErrNotFound
 	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("scan settings: %w", err)
 	}
+	s.StudentNumberPattern = deref(snPattern)
 	s.BackupDir = deref(backupDir)
 	s.PhotoBackupDir = deref(photoDir)
 	s.DriveRemote = deref(driveRemote)
@@ -264,6 +279,45 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	if in.PhotoMaxGenerations != nil {
 		next.PhotoMaxGenerations = *in.PhotoMaxGenerations
 	}
+	if in.StudentNumberFormat != nil {
+		next.StudentNumberFormat = strings.TrimSpace(*in.StudentNumberFormat)
+	}
+	if in.StudentNumberPattern != nil {
+		next.StudentNumberPattern = strings.TrimSpace(*in.StudentNumberPattern)
+	}
+
+	// Compiled and checked before the write; *installed* after the commit.
+	// A pattern that does not compile locks every account out of sign-in, and
+	// the way back in is the failsafe admin, whose number has to satisfy the
+	// same rule -- so it is proven here. Installing it here too would mean a
+	// save whose transaction then failed had silently changed how sign-in
+	// behaves until the next restart.
+	if err := ValidateStudentNumberFormat(
+		StudentNumberFormat(next.StudentNumberFormat), next.StudentNumberPattern,
+	); err != nil {
+		return Settings{}, err
+	}
+
+	// A rule the existing accounts do not satisfy is refused, not saved with
+	// a warning: the accounts it strands cannot sign in to read one. Only
+	// checked when the rule actually changes, so an unrelated card's save is
+	// never blocked by it.
+	if next.StudentNumberFormat != cur.StudentNumberFormat ||
+		next.StudentNumberPattern != cur.StudentNumberPattern {
+		count, examples, err := accountsRefusedBy(ctx, tx,
+			StudentNumberFormat(next.StudentNumberFormat), next.StudentNumberPattern)
+		if err != nil {
+			return Settings{}, err
+		}
+		if count > 0 {
+			who := strings.Join(examples, ", ")
+			if count > len(examples) {
+				who += ", …"
+			}
+			return Settings{}, fmt.Errorf("%w: %d existing account(s) have student numbers this rule would refuse, so they could not sign in (%s). Change their numbers first, or pick a rule that fits them",
+				ErrInvalid, count, who)
+		}
+	}
 
 	if err := next.validate(); err != nil {
 		return Settings{}, err
@@ -297,6 +351,7 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			github_enabled = $9, github_repo = $10, github_token = $11,
 			archive_passphrase = $12,
 			photo_min_free_gb = $13, photo_max_generations = $14,
+			student_number_format = $15, student_number_pattern = $16,
 			updated_at = now()
 		where id = true`,
 		nullable(next.BackupDir), nullable(next.PhotoBackupDir),
@@ -304,12 +359,24 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		next.DriveEnabled, nullable(next.DriveRemote), nullable(next.DrivePath),
 		next.GitHubEnabled, nullable(next.GitHubRepo), nullable(next.GitHubToken),
 		nullable(next.ArchivePassphrase),
-		next.PhotoMinFreeGB, next.PhotoMaxGenerations)
+		next.PhotoMinFreeGB, next.PhotoMaxGenerations,
+		next.StudentNumberFormat, nullable(next.StudentNumberPattern))
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Settings{}, fmt.Errorf("save settings: %w", err)
+	}
+
+	// Now that the row is durable, make the running process agree with it.
+	// Validated above, so this cannot fail; logged rather than ignored if it
+	// somehow does, because the alternative is a database and a process that
+	// disagree about who may sign in.
+	if err := SetStudentNumberFormat(
+		StudentNumberFormat(next.StudentNumberFormat), next.StudentNumberPattern,
+	); err != nil {
+		log.Printf("warning: saved student-number format %q but could not apply it: %v",
+			next.StudentNumberFormat, err)
 	}
 	return db.GetSettings(ctx, actor)
 }

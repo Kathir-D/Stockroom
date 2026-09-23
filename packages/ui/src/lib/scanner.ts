@@ -246,19 +246,11 @@ function reportTimings(burst: ScanBurst | null, thresholdMs: number) {
 }
 
 /**
- * Whether a burst could be a student number: digits only, 1 to 32 of them.
- *
- * Mirrors `NormalizeStudentNumber` server-side (CLAUDE.md §13, 2026-09-08).
- * Cards encode six digits, but the bound is a mis-scan guard rather than a
- * format, so a reissued or imported number still works. The sign-in screen uses
- * this to tell an item barcode scanned with nobody signed in from a real login
- * attempt, and says "sign in first" instead of a generic bad-login error
- * (design-system.md §15 Q4).
+ * Whether a burst could be a student number. Lives in `student-number.ts` now,
+ * because the answer depends on the install's format setting; re-exported so
+ * existing imports keep working.
  */
-export function looksLikeStudentNumber(code: string): boolean {
-  const trimmed = code.trim()
-  return /^[0-9]{1,32}$/.test(trimmed)
-}
+export { looksLikeStudentNumber } from "./student-number"
 
 /** Trim a scanned serial the way the server does before looking it up. */
 export function normalizeSerial(code: string): string {

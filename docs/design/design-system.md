@@ -658,7 +658,7 @@ Rules that make the two levels behave predictably:
   `ListAssets`, so the row carries it without opening detail — but it is no longer a column of its own. It
   was the widest thing in the row and the least often needed, and the status is exactly the thing a person
   is already looking at when they want to know who has it.
-- **Sort order.** Categories (the model-row grouping's parent) follow `Catagories.md`'s document order
+- **Sort order.** Categories (the model-row grouping's parent) follow `examples/categories.media-department.md`'s document order
   (Cameras/Bodies, Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries, Misc), not
   alphabetical. Within any list, available units sort before checked-out ones.
 
@@ -1056,7 +1056,7 @@ picker and the admin custodian picker, and the dock stops carrying a commit butt
   `GetAssetHistory` doesn't unless the actor is an admin).
 
 Also settled in the same session: `SESSION_IDLE_MINUTES`, decided as 5 minutes and raised to **10** on 2026-09-14, measured from the last interaction. Browse-list sort order (not
-previously specified anywhere): categories in `Catagories.md`'s document order, available units before
+previously specified anywhere): categories in `examples/categories.media-department.md`'s document order, available units before
 checked-out ones within any list. Backup (`CLAUDE.md` §11) moves from "local CSV, Drive client syncs it"
 to "local CSV, then `rclone copy` pushes it directly" — a one-time human `rclone config` OAuth step replaces
 writing custom Google API/OAuth code.
