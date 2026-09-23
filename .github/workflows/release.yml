@@ -1,0 +1,119 @@
+name: release
+
+# Builds a binary per platform on a version tag and attaches them to a GitHub
+# release. Each one carries the web UI and every migration compiled in, so what
+# a school downloads is one file and what they run is one process
+# (TEMPLATE-TODO Phase A).
+#
+# Without this a school needs Go and Node installed to get a binary at all,
+# which is the whole difference between "download and run" and "be a
+# developer". scripts/install.sh currently builds from a checkout instead; that
+# is the honest state until these artefacts exist and have been downloaded onto
+# a machine that is not this one.
+on:
+  push:
+    tags: ['v*']
+  # Manual runs build the matrix without publishing anything, so the workflow
+  # itself can be proven before a tag depends on it.
+  workflow_dispatch:
+
+# Read-only by default. The build job runs `npm ci`, which runs dependency
+# lifecycle scripts, so a write token there is a write token handed to every
+# package in the lockfile. Only `publish` -- which runs no third-party code
+# beyond the release action -- gets to write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin,  goarch: arm64, ext: '' }
+          - { goos: darwin,  goarch: amd64, ext: '' }
+          - { goos: linux,   goarch: amd64, ext: '' }
+          - { goos: windows, goarch: amd64, ext: '.exe' }
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # No Go cache in a release build. The module and build caches are
+      # restored as trusted, and a cache written by any other workflow run
+      # could put its objects into a signed-off binary. npm keeps its cache:
+      # `npm ci` checks every tarball against the lockfile's integrity hash.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # One install at the repository root. A per-app `npm ci --prefix` is the
+      # nested-node_modules bug in the place nobody watches (CLAUDE.md §13,
+      # 2026-09-14).
+      - run: npm ci
+
+      # Before the Go build, not after: the binary embeds web-app/dist, so a
+      # build that runs first silently ships the tracked empty directory and
+      # the result is a server that answers every page with "this binary was
+      # built without the web UI".
+      - run: npm run build --workspace=web-app
+
+      - name: Verify the UI is actually there
+        run: test -f web-app/dist/index.html
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          out="stockroom_${GOOS}_${GOARCH}${{ matrix.ext }}"
+          go build -trimpath -ldflags "-s -w" -o "$out" ./server
+          echo "ARTIFACT=$out" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    # Only a tag push publishes. A manual run stops after the matrix, which is
+    # what makes this workflow safe to exercise -- and the event check is what
+    # makes that true: workflow_dispatch can be run *against* a tag, which sets
+    # github.ref to refs/tags/v... exactly as a push does.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    # No checkout: this job only downloads the artefacts and creates the
+    # release, and a checkout would be one more place the token is persisted.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Checksums travel with the binaries so somebody who downloads over a
+      # school network can tell a truncated file from a complete one.
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum stockroom_* > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/stockroom_*
+            artifacts/checksums.txt
+          generate_release_notes: true

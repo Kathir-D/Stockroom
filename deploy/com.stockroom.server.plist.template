@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS service definition. scripts/install.sh substitutes __STOCKROOM_HOME__
+  and __USER__ and writes the result to ~/Library/LaunchAgents/.
+
+  A LaunchAgent, not a LaunchDaemon, and that is a real trade rather than an
+  oversight. A daemon starts at boot with no user logged in, which is what a
+  closet machine wants -- but Docker Desktop for Mac only runs inside a user
+  session, so a daemon would start, find no Docker daemon, and give up. The
+  agent starts at login instead, which means the closet PC has to be set to log
+  in automatically (System Settings -> Users & Groups -> Automatic login).
+  docs/INSTALL.md says so, because a machine that reboots at 3am and sits at a
+  login window is a machine that has silently stopped backing up.
+
+  On Linux, Docker runs as a system service and none of this applies; see
+  stockroom.service.template.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.stockroom.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__STOCKROOM_HOME__/stockroom-run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__STOCKROOM_HOME__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!--
+    Restart on crash, and on a clean exit too. This is the item TEMPLATE-TODO
+    Phase A marks "not optional": the nightly backup is a goroutine inside this
+    process, so "the server is running" and "backups happen" are the same fact.
+    Without KeepAlive, one panic at 2am is forty days of missing backups that
+    nobody notices until the morning they are needed.
+  -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!--
+    launchd's own floor is 10 seconds between restarts; saying it explicitly
+    documents that a crash loop is throttled rather than a spin.
+  -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__STOCKROOM_HOME__/logs/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STOCKROOM_HOME__/logs/server.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!--
+      launchd gives an agent /usr/bin:/bin:/usr/sbin:/sbin and nothing more, so
+      `docker` is not on it. stockroom-run.sh widens PATH as well; both, because
+      either one alone is a single point of failure for a service that is
+      otherwise invisible when it does not start.
+    -->
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

@@ -1,0 +1,87 @@
+# The database for an installed Stockroom: one plain Postgres, nothing else.
+#
+# Development still uses the Supabase CLI (`supabase start`) -- migrations,
+# seed.sql, Studio and the pgTAP suite all run through it and none of that
+# changes. What the CLI does not do is travel to a school. It brings Kong,
+# GoTrue, PostgREST, Realtime, Storage and Studio, all of which Stockroom has
+# never used (CLAUDE.md §4 says so outright), and it asks the person installing
+# it to install the CLI as well as Docker.
+#
+# The decisive reason is not the container count. Shipping the stack puts
+# Studio on the closet PC, on port 54323, with no authentication at all --
+# full read and write on every table, including the roster, for anyone who
+# walks past and opens a browser.
+#
+# Run it from the install directory, where the generated .env sits beside it:
+#
+#     docker compose up -d
+#
+# `deploy/stockroom-run.sh` does exactly that before starting the server, so on
+# a normal machine nobody types this.
+name: stockroom
+
+services:
+  db:
+    image: postgres:17
+    # The closet PC's normal failure mode is a power cut, and the nightly
+    # backup is a goroutine inside a server that cannot run without this
+    # container. `unless-stopped` rather than `always` so that a deliberate
+    # `docker compose stop` stays stopped.
+    restart: unless-stopped
+    environment:
+      # No default. A compose file that silently falls back to `postgres` is
+      # one that boots a closet machine with a guessable superuser password
+      # and never mentions it; install.sh generates one into .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (scripts/install.sh generates one)}
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+    ports:
+      # Bound to loopback explicitly, not "54322:5432". Docker's default
+      # publishes on every interface and punches its own hole through the host
+      # firewall while doing it, so the short form would put the database on
+      # the school network. CLAUDE.md §2 keeps this machine localhost-only.
+      #
+      # The host port stays 54322 -- the same one the Supabase stack uses in
+      # development -- so DATABASE_URL, every doc, every script and CI all say
+      # one number. "5432 is conventional" buys nothing here, since nobody ever
+      # types it, and a second value is one more place to miss an edit. It also
+      # avoids colliding with whatever Postgres the school may already run.
+      - "127.0.0.1:54322:5432"
+    volumes:
+      - stockroom-db:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` answers true while Postgres is still running its own
+      # first-boot initialisation, so the server's connect retry (server/main.go,
+      # dbConnectBudget) is still what actually covers a cold start. This is
+      # here for `docker compose ps` to be readable.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    # Postgres puts its shared buffers in /dev/shm, and Docker's 64 MB default
+    # is small enough that a restore's larger sorts fall over on it.
+    shm_size: 256mb
+
+    # How long Docker waits after SIGINT before it SIGKILLs. The default is
+    # TEN SECONDS, and that is the number worth overriding: the official
+    # postgres image stops on SIGINT, which is a *fast* shutdown -- roll back
+    # open transactions, checkpoint, exit -- and a checkpoint with a lot of
+    # dirty buffers can take longer than ten seconds on a slow disk.
+    #
+    # Being cut short is not data loss. Committed transactions are in the WAL
+    # and Postgres replays them on the next start; that was verified by
+    # SIGKILLing the container outright with an uncommitted-looking write
+    # outstanding and finding the row intact afterwards, with "redo starts" /
+    # "redo done" in the log. But crash recovery on every single shutdown is
+    # slower to come back and gives an operator a scary log to read on a
+    # morning when nothing is actually wrong, and a minute costs nothing.
+    stop_grace_period: 1m
+
+volumes:
+  stockroom-db:
+    name: stockroom-db
+    # NB for anybody automating around this file: `docker compose down` keeps
+    # this volume and `docker compose down -v` DELETES THE DATABASE. Nothing
+    # in the repository runs the second form against an install, and nothing
+    # should; scripts/install.sh never calls `down` at all.

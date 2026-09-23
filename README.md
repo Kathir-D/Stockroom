@@ -28,16 +28,21 @@ do not need to understand the code. You do need a terminal for now — see the h
 first, because they describe the behaviour the code has to keep.
 
 > [!IMPORTANT]
-> **Honest status on installation.** Stockroom is not yet a one-click install. Today, setting it up
-> means installing four developer tools, cloning this repository and running a script. It works, it
-> is reliable, and thousands of words below explain every step — but it is not yet something you
-> can hand to a colleague who has never opened a terminal.
+> **Installing it on the machine it will live on is now [`docs/INSTALL.md`](docs/INSTALL.md)** —
+> `./scripts/install.sh` on macOS or Linux. That gets you one plain Postgres container, one binary
+> holding the API, the web UI and every database migration, and a service that restarts it if it
+> dies. On Linux the service starts at boot; on macOS it is a LaunchAgent that starts when the
+> configured user **logs in**, so the Mac has to be set to log in automatically. It is also the upgrade: run it again.
 >
-> Making it that is tracked, in detail, in [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) — Phase T5
-> (one binary instead of a toolchain) and **Phase T6** (an installer that checks and installs its
-> own dependencies, then a twelve-step wizard that walks you through adding your equipment and your
-> people). If you are evaluating Stockroom for a school that does not have somebody technical, read
-> those two phases first and decide whether to wait.
+> **Honest status.** It still needs Go and Node *on the machine you install from*, because it
+> builds rather than downloading a release binary, and there is no Windows installer yet. And once
+> it is running there is still **no way to print a barcode** — for an asset or an ID card — which
+> for a barcode-driven product is a real gap. Both are tracked in
+> [`TEMPLATE-TODO.md`](TEMPLATE-TODO.md) (Phase A and Phase B). If you are evaluating Stockroom for
+> a school with nobody technical, read those first and decide whether to wait.
+>
+> Everything below this point is the **development** setup, which is a different thing: the
+> Supabase CLI, `seed.sql`, Studio and `./scripts/dev.sh`. Do not follow it for an install.
 
 ---
 
