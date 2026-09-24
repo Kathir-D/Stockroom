@@ -178,8 +178,8 @@ type photoTile struct {
 // session store it is pure memory plus, here, a directory it owns outright.
 //
 // Every exported method is safe on a nil receiver, because "the wall is off"
-// is the common case -- SIGNIN_PHOTOS_REMOTE unset, rclone missing, the cache
-// directory unusable -- and §9's invariant is that no failure in this
+// is the common case -- nobody signed in to Google for it, rclone missing, the
+// cache directory unusable -- and §9's invariant is that no failure in this
 // subsystem may delay, block or visibly break sign-in. A handler that has to
 // remember a nil check is a handler that will one day forget it.
 type PhotoWall struct {
@@ -398,9 +398,8 @@ func (w *PhotoWall) Run(ctx context.Context) {
 }
 
 // needsFill reports whether there is room in the buffer, room under the
-// ceiling, and somewhere to fetch from. A nil source is the
-// SIGNIN_PHOTOS_REMOTE-unset state: the reel simply idles, reaping nothing,
-// forever.
+// ceiling, and somewhere to fetch from. A nil source is a reel with nowhere
+// to fetch from: it simply idles, reaping nothing, forever.
 //
 // The ceiling is what keeps hand-outs from turning into downloads (see
 // photoWallCeilingFactor). While it holds, the reel is short of fresh tiles

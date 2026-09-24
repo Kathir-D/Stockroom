@@ -131,13 +131,25 @@ func truncate(s string, n int) string {
 // revealing nothing the sign-in screen does not already show to everyone who
 // walks up to the machine.
 type PhotoWallStatus struct {
-	// Enabled is whether a reel exists at all: SIGNIN_PHOTOS_REMOTE set, the
-	// cache directory usable. False is the common case and not an error.
+	// Enabled is whether a reel is running: Google signed in to, rclone
+	// installed, the cache directory usable. False is the common case on a
+	// fresh install and not an error.
 	Enabled bool `json:"enabled"`
 	// RcloneInstalled is reported separately because it is the one failure an
 	// admin can fix without leaving the machine, and because a wall that is
 	// enabled with no rclone looks exactly like one that is simply empty.
 	RcloneInstalled bool `json:"rclone_installed"`
+	// GoogleConnected is whether rclone has the wall's remote: somebody has
+	// signed in to Google for it. It is the switch (photowall_google.go), and
+	// the screen's Sign in with Google button says "required" until it is true.
+	GoogleConnected bool `json:"google_connected"`
+	// CanConnectGoogle is whether that button would get past its first gate,
+	// for the same reason CanSetFolder exists: refuse before the press, not
+	// after it.
+	CanConnectGoogle bool `json:"can_connect_google"`
+	// Remote is the rclone remote's name. A name, not a credential -- the
+	// token stays in rclone's config file.
+	Remote string `json:"remote"`
 	// CanSetFolder is whether SetPhotoWallFolder would get past its first
 	// gate, and exists so the screen can refuse the paste before the admin
 	// types it rather than after.
@@ -231,21 +243,22 @@ func (db *DB) GetPhotoWallStatus(ctx context.Context, actor Actor) (PhotoWallSta
 	if err != nil {
 		return PhotoWallStatus{}, err
 	}
-	return db.photoWallStatus(f), nil
+	return db.photoWallStatus(ctx, f), nil
 }
 
-// photoWallStatus composes the three places the answer lives: the settings
-// row, the source's manifest progress, and the reel's counts.
-func (db *DB) photoWallStatus(f photoWallFolder) PhotoWallStatus {
-	src := db.PhotoWallSource.Status()
-	ready, served := db.PhotoWall.Counts()
+// photoWallStatus composes the places the answer lives: rclone's remotes, the
+// settings row, the source's manifest progress, and the reel's counts.
+func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallStatus {
+	wall, source := db.photoWallParts()
+	src := source.Status()
+	ready, served := wall.Counts()
 
 	st := PhotoWallStatus{
-		Enabled:         db.PhotoWall != nil,
+		Enabled:         wall != nil,
 		RcloneInstalled: rcloneInstalled(),
 		// Deliberately the same expression SetPhotoWallFolder guards on, and
 		// the only one, so the screen and the write cannot disagree.
-		CanSetFolder: db.PhotoWallSource != nil,
+		CanSetFolder: source != nil,
 		FolderSet:    f.id != "",
 		FolderLabel:  f.label,
 		ChangedAt:    f.changedAt,
@@ -270,7 +283,18 @@ func (db *DB) photoWallStatus(f photoWallFolder) PhotoWallStatus {
 	// of two thousand photographs and was resting after 25 failed downloads
 	// reported no error while showing nothing. Newer wins, because the older
 	// of the two has usually been overtaken by the newer.
-	if err, at := db.PhotoWall.fillFailure(); err != nil && (st.LastErrorAt == nil || at.After(*st.LastErrorAt)) {
+	if cfg := db.photoWallConfig(); cfg != nil {
+		st.Remote = cfg.Remote
+		st.CanConnectGoogle = st.RcloneInstalled
+		if st.RcloneInstalled {
+			// Asked of rclone per read, like RcloneInstalled: an admin who
+			// signs in on this screen should see the answer change on the
+			// response to that press, not after a restart. A failure reads as
+			// not connected, which is what the button then offers to fix.
+			st.GoogleConnected, _ = rcloneHasRemote(ctx, cfg.Remote)
+		}
+	}
+	if err, at := wall.fillFailure(); err != nil && (st.LastErrorAt == nil || at.After(*st.LastErrorAt)) {
 		st.LastError = describeFillFailure(err)
 		st.LastErrorAt = &at
 	}
@@ -283,8 +307,11 @@ func (db *DB) photoWallStatus(f photoWallFolder) PhotoWallStatus {
 	// thing the backup banner was corrected for (CLAUDE.md §13). A missing
 	// binary is *why* there is no source, so naming both reads as two
 	// problems.
-	if st.FolderSet && !src.Configured && st.LastError == "" && st.RcloneInstalled {
-		st.LastError = "the running server has no Drive source for this folder; check that SIGNIN_PHOTOS_REMOTE is set in .env, then restart"
+	//
+	// Nor when Google has not been signed in to: the button saying "required"
+	// is that line already.
+	if st.FolderSet && !src.Configured && st.LastError == "" && st.RcloneInstalled && st.GoogleConnected {
+		st.LastError = "signed in to Google, but the wall is not running on this server; the server log says why it could not start"
 	}
 	return st
 }
@@ -345,13 +372,14 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	if n := utf8.RuneCountInString(label); n > maxPhotoWallLabel {
 		return PhotoWallStatus{}, fmt.Errorf("%w: that name is %d characters; keep it under %d", ErrInvalid, n, maxPhotoWallLabel)
 	}
-	if db.PhotoWallSource == nil {
-		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall has no Drive source on this server. Set SIGNIN_PHOTOS_REMOTE, install rclone, and restart", ErrNotConfigured)
+	wall, source := db.photoWallParts()
+	if source == nil {
+		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall is not running yet. Sign in with Google above first", ErrNotConfigured)
 	}
 
 	// Nothing is written until Drive has answered for this exact id. A failure
 	// here leaves the previous folder live and the reel untouched.
-	if err := db.PhotoWallSource.Probe(ctx, folderID); err != nil {
+	if err := source.Probe(ctx, folderID); err != nil {
 		return PhotoWallStatus{}, err
 	}
 
@@ -373,15 +401,15 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	// rename it, or to be sure -- is a label edit, and tearing the reel down
 	// for it would empty the wall for the minutes a refill takes while every
 	// tile it threw away was from the right folder.
-	if db.PhotoWallSource.SetFolder(folderID) {
-		db.PhotoWall.Invalidate()
+	if source.SetFolder(folderID) {
+		wall.Invalidate()
 	}
 
 	f, err := db.loadPhotoWallFolder(ctx)
 	if err != nil {
 		return PhotoWallStatus{}, err
 	}
-	return db.photoWallStatus(f), nil
+	return db.photoWallStatus(ctx, f), nil
 }
 
 // savePhotoWallFolder writes the row and the audit line in one transaction, so
@@ -447,11 +475,12 @@ func (db *DB) RebuildPhotoWallManifest(ctx context.Context, actor Actor) (PhotoW
 	if f.id == "" {
 		return PhotoWallStatus{}, fmt.Errorf("%w: no Drive folder has been chosen for the sign-in photo wall yet", ErrNotConfigured)
 	}
-	if db.PhotoWallSource == nil {
-		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall has no Drive source on this server", ErrNotConfigured)
+	_, source := db.photoWallParts()
+	if source == nil {
+		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall is not running. Sign in with Google first", ErrNotConfigured)
 	}
-	db.PhotoWallSource.Rebuild()
-	return db.photoWallStatus(f), nil
+	source.Rebuild()
+	return db.photoWallStatus(ctx, f), nil
 }
 
 // PhotoWallPreview is GET /admin/photo-wall/preview: up to n tile URLs that
@@ -467,5 +496,5 @@ func (db *DB) PhotoWallPreview(ctx context.Context, actor Actor, n int) ([]strin
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err
 	}
-	return db.PhotoWall.PreviewPhotos(n), nil
+	return db.SignInPhotoWall().PreviewPhotos(n), nil
 }

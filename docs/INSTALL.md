@@ -95,7 +95,7 @@ After editing `~/Stockroom/.env`, restart the service.
 |---|---|
 | `ADMIN_STUDENT_NUMBER`, `ADMIN_PASSWORD` | Yes. Applied on every start |
 | `SESSION_IDLE_MINUTES` | Yes |
-| `SIGNIN_PHOTOS_REMOTE` | Yes. Blank disables the sign-in photo wall |
+| `SIGNIN_PHOTOS_REMOTE` | Yes. Only the rclone remote's name (blank means `gdrive-photos`); the wall is turned on by **Sign in with Google** in Admin → Photo wall |
 | `SERVER_ADDR` | Yes. The browser address changes to match |
 | `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE`, `SIGNIN_PHOTOS_FOLDER_ID` | No. Read on the first start only, then managed in the admin panel |
 | `DATABASE_URL`, `POSTGRES_PASSWORD` | No. Must match the existing database container |

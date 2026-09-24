@@ -49,7 +49,7 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
 	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
 	mux.HandleFunc("POST /setup/admin", d.handleCreateFirstAdmin)
-	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.PhotoWall))
+	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.SignInPhotoWall))
 
 	// A limited session (scan login, no password yet) may only set its
 	// password, sign out, or ask who it is.
@@ -157,6 +157,8 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("PUT /admin/photo-wall", d.withSession(d.handleSetPhotoWallFolder, fullOnly))
 	mux.Handle("POST /admin/photo-wall/rebuild", d.withSession(d.handleRebuildPhotoWall, fullOnly))
 	mux.Handle("GET /admin/photo-wall/preview", d.withSession(d.handlePhotoWallPreview, fullOnly))
+	mux.Handle("POST /admin/photo-wall/google/connect", d.withSession(d.handlePhotoWallGoogleConnect, fullOnly))
+	mux.Handle("POST /admin/photo-wall/google/finish", d.withSession(d.handlePhotoWallGoogleFinish, fullOnly))
 
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))

@@ -3,6 +3,8 @@ package stockroom
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,28 +59,30 @@ type DB struct {
 	// means there was none, and that step answers ErrNotConfigured.
 	EnvPath string
 
-	// PhotoWall is the sign-in photo wall's reel
-	// (docs/design/signin-photo-wall.html §2), or nil when the feature is
-	// off. Every method on it is nil-safe, so callers do not branch on this.
+	// photoWall is the sign-in photo wall's reel and the Drive source feeding
+	// it (docs/design/signin-photo-wall.html §2, §3), or nil when the feature
+	// is off. Read through photoWallParts and written through SetPhotoWall.
 	//
-	// It is assigned by the caller rather than built by Open, unlike
-	// Sessions. Open reports its errors by refusing to start, and the wall's
-	// §9 invariant is that no failure in this subsystem may break sign-in --
-	// a bad SIGNIN_PHOTOS_DIR must cost the decoration and nothing else. So
-	// server/main.go calls NewPhotoWall, logs a warning on failure and serves
-	// without one, which is exactly how it already treats the failsafe admin.
-	PhotoWall *PhotoWall
+	// It is not built by Open, unlike Sessions. Open reports its errors by
+	// refusing to start, and the wall's §9 invariant is that no failure in
+	// this subsystem may break sign-in -- a bad SIGNIN_PHOTOS_DIR must cost
+	// the decoration and nothing else. StartPhotoWall logs and carries on.
+	//
+	// One atomic pointer to the *pair*, because the wall can now start while
+	// the server is running: the admin panel's Google sign-in is the switch
+	// (photowall_google.go), so the sign-in screen and the admin screen may be
+	// reading these at the moment a Finish press writes them. Two separate
+	// fields would let a reader see the new reel beside the old nil source.
+	photoWall atomic.Pointer[photoWallParts]
 
-	// PhotoWallSource is where that reel's photographs come from (§3), or nil
-	// when rclone is missing, no remote is configured, or the reel is off.
-	// Assigned alongside PhotoWall by server/main.go, for the same reason.
-	//
-	// It is the concrete type rather than the PhotoSource interface the reel
-	// holds, because §7's admin screen needs three things no photo source in
-	// general has: the folder switch, the manifest's listing progress, and
-	// the reachability probe a pasted link is validated against. Every method
-	// on it is nil-safe too.
-	PhotoWallSource *DrivePhotoSource
+	// photoWallStart serialises starting the wall -- at boot, and from a
+	// Google sign-in finishing -- so two presses cannot build two reels over
+	// one cache directory. photoWallCfg and photoWallCtx are what StartPhotoWall
+	// recorded at boot, kept so a later sign-in can start the wall with the
+	// same settings and the server's lifetime rather than a request's.
+	photoWallStart sync.Mutex
+	photoWallCfg   *PhotoWallConfig
+	photoWallCtx   context.Context
 }
 
 // Open connects to Postgres at databaseURL and verifies the connection with a

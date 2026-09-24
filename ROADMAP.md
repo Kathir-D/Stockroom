@@ -56,7 +56,7 @@ At the measured rate of one photo every 20 to 25 seconds, filling 150 takes abou
 - [ ] Go tests for folder-balanced selection, the per-folder cap, gradual refresh, removal of deleted photos, folder switching, and the memory limit.
 - [ ] Update the frontend smoke tests for the new endpoint.
 - [ ] Manual checks: unplug the network and confirm sign-in is unaffected, and watch a full cycle in the Wails window on the slowest machine available.
-- [ ] Set up the read-only rclone remote on the closet PC and connect the student media photos folder (after the PC is available, see section 4).
+- [ ] On the closet PC, press **Sign in with Google** in Admin → Photo wall and connect the student media photos folder (after the PC is available, see section 4). The button creates the read-only rclone remote; no terminal needed.
 - [ ] Update the design doc, `CLAUDE.md` §8.1 and §13, and `.env.example`.
 
 ## 2. Closet camera and activity log

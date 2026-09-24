@@ -89,10 +89,9 @@ func TestPhotoWallProbeGatesTheWrite(t *testing.T) {
 
 	const oldID = "1OLDfolderIDaaaaaaaaaaaaaaa"
 	source := probeSource(t, oldID, nil)
-	db.PhotoWallSource = source
 	wall, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: &stubSource{data: []byte("tile")}})
-	db.PhotoWall = wall
-	t.Cleanup(func() { db.PhotoWall, db.PhotoWallSource = nil, nil })
+	db.SetPhotoWall(wall, source)
+	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
 	// A folder that does work, so there is a previous setting to protect.
 	if _, err := db.SetPhotoWallFolder(ctx, admin, "https://drive.google.com/drive/folders/"+oldID, "Last season"); err != nil {
@@ -144,10 +143,9 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 		BuiltAt:  time.Now(),
 		Entries:  []photoEntry{{Path: "a.jpg", Size: 10}},
 	}
-	db.PhotoWallSource = source
 	wall, clock := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 2, Source: &stubSource{data: []byte("tile")}})
-	db.PhotoWall = wall
-	t.Cleanup(func() { db.PhotoWall, db.PhotoWallSource = nil, nil })
+	db.SetPhotoWall(wall, source)
+	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
 	fill(t, wall)
 	served, _ := wall.TakePhotos(2)
@@ -203,10 +201,9 @@ func TestPhotoWallRepastingTheLiveFolderKeepsTheReel(t *testing.T) {
 
 	const id = "1SAMEfolderIDbbbbbbbbbbbbbb"
 	source := probeSource(t, id, nil)
-	db.PhotoWallSource = source
 	wall, _ := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 2, Source: &stubSource{data: []byte("tile")}})
-	db.PhotoWall = wall
-	t.Cleanup(func() { db.PhotoWall, db.PhotoWallSource = nil, nil })
+	db.SetPhotoWall(wall, source)
+	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
 	fill(t, wall)
 	genBefore := wall.gen
@@ -239,17 +236,18 @@ func TestPhotoWallStatusExplainsARestingReel(t *testing.T) {
 	src := &stubSource{err: portrait}
 	w, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: src})
 	captureLog(t)
-	db := &DB{PhotoWall: w}
+	db := &DB{}
+	db.SetPhotoWall(w, nil)
 
 	for i := 0; i < photoWallFailureCap-1; i++ {
 		w.fillOne(context.Background())
 	}
-	if st := db.photoWallStatus(photoWallFolder{}); st.LastError != "" {
+	if st := db.photoWallStatus(context.Background(), photoWallFolder{}); st.LastError != "" {
 		t.Errorf("failures short of the rest already show as %q", st.LastError)
 	}
 
 	w.fillOne(context.Background())
-	st := db.photoWallStatus(photoWallFolder{})
+	st := db.photoWallStatus(context.Background(), photoWallFolder{})
 	if !strings.Contains(st.LastError, "3:2") || !strings.Contains(st.LastError, "portrait") || st.LastErrorAt == nil {
 		t.Errorf("a reel resting on the ratio gate reads %q, want §9's no-usable-photos sentence naming 3:2", st.LastError)
 	}
@@ -258,7 +256,7 @@ func TestPhotoWallStatusExplainsARestingReel(t *testing.T) {
 	src.err = errors.New("download a.jpg: dial tcp: no such host")
 	src.mu.Unlock()
 	w.fillOne(context.Background())
-	if st := db.photoWallStatus(photoWallFolder{}); !strings.Contains(st.LastError, "paused") || !strings.Contains(st.LastError, "no such host") {
+	if st := db.photoWallStatus(context.Background(), photoWallFolder{}); !strings.Contains(st.LastError, "paused") || !strings.Contains(st.LastError, "no such host") {
 		t.Errorf("a reel resting on the network reads %q, want paused and the cause", st.LastError)
 	}
 }
@@ -270,8 +268,8 @@ func TestPhotoWallStatusNeverCarriesTheFolderID(t *testing.T) {
 	defer restorePhotoWallFolder(t, db)()
 
 	const id = "1SECRETfolderIDdddddddddddd"
-	db.PhotoWallSource = probeSource(t, "", nil)
-	t.Cleanup(func() { db.PhotoWallSource = nil })
+	db.SetPhotoWall(nil, probeSource(t, "", nil))
+	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
 	written, err := db.SetPhotoWallFolder(ctx, admin, "https://drive.google.com/drive/folders/"+id, "Department photos")
 	if err != nil {

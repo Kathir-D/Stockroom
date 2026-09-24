@@ -43,7 +43,7 @@ type signInPhotosResponse struct {
 // may delay, block or visibly break sign-in, and an error status here would be
 // a red herring in the log on the one screen that must never look broken.
 func (d deps) handleSignInPhotos(w http.ResponseWriter, r *http.Request) {
-	urls, ttl := d.db.PhotoWall.TakePhotos(0)
+	urls, ttl := d.db.SignInPhotoWall().TakePhotos(0)
 	if urls == nil {
 		// json.Marshal writes a nil slice as null, and the component would
 		// then have to guard against it. An empty list is the honest shape.
@@ -72,10 +72,15 @@ func (d deps) handleSignInPhotos(w http.ResponseWriter, r *http.Request) {
 //
 // A nil reel returns "" from TileDir, and fileServer answers an empty dir with
 // a 404 handler, so the off state needs no branch here or in the router.
-func photoTileServer(wall *stockroom.PhotoWall) http.Handler {
-	files := fileServer(stockroom.PhotoWallPrefix, wall.TileDir())
-
+//
+// The reel is looked up per request rather than captured when the router is
+// built, because it can start after that: an admin signing in to Google on
+// the Photo wall screen starts it on a running server (photowall_google.go).
+func photoTileServer(currentWall func() *stockroom.PhotoWall) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wall := currentWall()
+		files := fileServer(stockroom.PhotoWallPrefix, wall.TileDir())
+
 		// Tile names are random and single-use, so the bytes at a given URL
 		// can never change -- immutable is exactly true.
 		//
@@ -169,4 +174,37 @@ func (d deps) handlePhotoWallPreview(w http.ResponseWriter, r *http.Request, act
 	// screen at files that are gone.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"photos": urls})
+}
+
+// POST /admin/photo-wall/google/connect
+// Starts `rclone authorize` for a read-only Drive token and returns the link
+// to open. The token never passes through here: Google sends it to rclone.
+func (d deps) handlePhotoWallGoogleConnect(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	res, err := d.db.ConnectPhotoWallGoogle(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// POST /admin/photo-wall/google/finish  {"id", "code"?}
+// Writes the rclone remote and starts the wall. `code` is the block rclone
+// printed, for when the browser's callback did not reach it. The response is
+// the status, which carries whether Google is connected and never the token.
+func (d deps) handlePhotoWallGoogleFinish(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in struct {
+		ID   string `json:"id"`
+		Code string `json:"code"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	status, err := d.db.FinishPhotoWallGoogle(r.Context(), actor, in.ID, in.Code)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }

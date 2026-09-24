@@ -120,8 +120,9 @@ var photoExtensions = map[string]bool{
 
 // DrivePhotoSourceOptions is what NewDrivePhotoSource needs.
 type DrivePhotoSourceOptions struct {
-	// Remote is the rclone remote name holding the photographs, from
-	// SIGNIN_PHOTOS_REMOTE. Required.
+	// Remote is the rclone remote name holding the photographs: the one the
+	// Photo wall screen's Google sign-in creates, DefaultPhotoWallRemote unless
+	// SIGNIN_PHOTOS_REMOTE renames it. Required.
 	Remote string
 	// FolderID is the Drive folder to read. It may be empty: §7 makes this an
 	// admin-panel value, so "configured but no folder chosen yet" is a normal
@@ -215,7 +216,7 @@ type PhotoWallSourceStatus struct {
 // it in the most complete way available.
 func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error) {
 	if strings.TrimSpace(opts.Remote) == "" {
-		return nil, fmt.Errorf("%w: SIGNIN_PHOTOS_REMOTE is not set", ErrNotConfigured)
+		return nil, fmt.Errorf("%w: no rclone remote named for the photo wall", ErrNotConfigured)
 	}
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("%w: SIGNIN_PHOTOS_DIR is not set, so there is nowhere to keep the manifest", ErrNotConfigured)
@@ -769,10 +770,12 @@ func (s *DrivePhotoSource) explain(folderID string, err error) error {
 	lower := strings.ToLower(msg)
 	if strings.Contains(lower, "invalid_grant") || strings.Contains(lower, "couldn't fetch token") ||
 		strings.Contains(lower, "cannot fetch token") || strings.Contains(lower, "token expired") {
-		// rclone's own advice names the remote as `gdrive{AbCdE}:`, its
-		// internal name for a connection string -- not something anybody can
-		// type. The remote as configured is.
-		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. On this machine run `rclone config reconnect %s:` and sign in again; nothing needs restarting",
+		// The button comes first: it is the fix that needs no terminal
+		// (photowall_google.go). rclone's own advice names the remote as
+		// `gdrive{AbCdE}:`, its internal name for a connection string -- not
+		// something anybody can type -- so the command given is the remote
+		// as configured.
+		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. Press Sign in again under Google account in Admin → Photo wall (or on this machine run `rclone config reconnect %s:`); nothing needs restarting",
 			errPhotoDriveAuth, s.remote)
 		s.mu.Lock()
 		first := !s.authWarned

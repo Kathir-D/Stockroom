@@ -714,3 +714,28 @@ export function rebuildPhotoWall() {
 export function photoWallPreview() {
   return request<{ photos: string[] }>("/admin/photo-wall/preview");
 }
+
+/**
+ * Sign in to Google for the photo wall: starts `rclone authorize` for a
+ * **read-only** Drive token and returns the link to open. The same flow as
+ * `connectDrive()`, with a narrower grant — the wall can read the folder and
+ * nothing else.
+ */
+export function connectPhotoWallGoogle() {
+  return request<DriveConnectResult>("/admin/photo-wall/google/connect", {
+    method: "POST",
+  });
+}
+
+/**
+ * Finishes the sign-in: the server writes the rclone remote and starts the
+ * wall, with no restart. `code` is the block rclone printed, needed only when
+ * the browser callback did not reach it. The token never comes back; the
+ * status says `google_connected`.
+ */
+export function finishPhotoWallGoogle(id: string, code: string) {
+  return request<PhotoWallStatus>("/admin/photo-wall/google/finish", {
+    method: "POST",
+    body: { id, code },
+  });
+}

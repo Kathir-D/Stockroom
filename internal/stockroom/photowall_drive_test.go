@@ -191,8 +191,9 @@ func TestDriveErrorsNeverCarryTheFolderID(t *testing.T) {
 		_, err = s.NextPhoto(ctx)
 	}
 	clean("NextPhoto's error", err.Error())
-	if !errors.Is(err, errPhotoDriveAuth) || !strings.Contains(err.Error(), "rclone config reconnect gdrive:") {
-		t.Errorf("an expired sign-in reads %q, want the reconnect command for the configured remote", err)
+	if !errors.Is(err, errPhotoDriveAuth) || !strings.Contains(err.Error(), "rclone config reconnect gdrive:") ||
+		!strings.Contains(err.Error(), "Admin → Photo wall") {
+		t.Errorf("an expired sign-in reads %q, want the Photo wall button and the reconnect command for the configured remote", err)
 	}
 	if n := strings.Count(logged.String(), "warning: sign-in photo wall"); n != 1 {
 		t.Errorf("%d expired-sign-in warnings after three failed downloads, want exactly 1:\n%s", n, logged.String())

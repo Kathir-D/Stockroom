@@ -227,6 +227,11 @@ type DriveConnectResult struct {
 	URL string `json:"url"`
 	// ID is the pending authorization this token will be handed back to.
 	ID string `json:"id"`
+	// PasteCommand is what to run on another machine when the link will not
+	// open on this one; its output is the block the dialog's paste box takes.
+	// It carries the scope, which is why the server supplies it rather than
+	// the screen spelling it out.
+	PasteCommand string `json:"paste_command"`
 }
 
 // ConnectDrive starts `rclone authorize "drive"` and returns the URL it
@@ -244,7 +249,7 @@ func (db *DB) ConnectDrive(ctx context.Context, actor Actor) (DriveConnectResult
 	if _, err := exec.LookPath(rcloneBinary); err != nil {
 		return DriveConnectResult{}, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then reload this page", ErrNotConfigured)
 	}
-	return startDriveAuthorize(ctx)
+	return startDriveAuthorize(ctx, driveScopeFull)
 }
 
 // FinishDriveConnect takes the code Google showed the admin, writes the rclone
@@ -253,7 +258,7 @@ func (db *DB) FinishDriveConnect(ctx context.Context, actor Actor, id, code, rem
 	if err := RequireAdmin(actor); err != nil {
 		return Settings{}, err
 	}
-	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code))
+	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code), driveScopeFull)
 	if err != nil {
 		return Settings{}, err
 	}
