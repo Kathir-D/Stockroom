@@ -1092,6 +1092,11 @@ has to come from Drive again.</p>
 <hr />
 
 <h2 id="config"><span class="num">8</span>Configuration</h2>
+<p><em>Superseded 2026-09-24:</em> <code>SIGNIN_PHOTOS_REMOTE</code> is no longer the switch. The wall is off until an
+admin presses <strong>Sign in with Google</strong> on the Photo wall screen, which runs <code>rclone authorize</code>
+for a <code>drive.readonly</code> token, writes the remote and starts the wall on the running server
+(<code>photowall_google.go</code>, CLAUDE.md §13). The variable survives as the remote's <em>name</em>, blank meaning
+<code>gdrive-photos</code>. The rest of this section is as it was designed.</p>
 <p><code>SIGNIN_PHOTOS_REMOTE</code> is an install-time value and stays in <code>.env</code>.
 <strong>The folder is seeded from <code>.env</code> on first boot and then owned by <code>app_settings</code></strong>,
 because the admin panel (§7) is the interface for changing it and a value living in two places drifts. This is the

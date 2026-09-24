@@ -29,8 +29,11 @@ type Config struct {
 	RcloneRemote   string
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). The
-	// remote is the switch: blank disables the feature entirely and no
-	// goroutine starts, which is the state every existing .env is in.
+	// remote is only a *name* now, defaulting to DefaultPhotoWallRemote. It
+	// used to be the switch, blank meaning off; since 2026-09-24 the switch
+	// is an admin signing in to Google on the Photo wall screen, which is
+	// what creates the remote (photowall_google.go). Until somebody has, no
+	// reel is built and no goroutine starts, exactly as blank used to mean.
 	//
 	// SignInPhotosFolderID is a first-boot seed rather than a setting, the
 	// same shape as the three backup values above: §7 makes the live folder
@@ -80,7 +83,7 @@ func LoadConfig() (Config, error) {
 		PhotoBackupDir:     os.Getenv("PHOTO_BACKUP_DIR"),
 		RcloneRemote:       os.Getenv("RCLONE_REMOTE"),
 
-		SignInPhotosRemote:   os.Getenv("SIGNIN_PHOTOS_REMOTE"),
+		SignInPhotosRemote:   getenv("SIGNIN_PHOTOS_REMOTE", DefaultPhotoWallRemote),
 		SignInPhotosFolderID: os.Getenv("SIGNIN_PHOTOS_FOLDER_ID"),
 		SignInPhotosDir:      getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
 	}

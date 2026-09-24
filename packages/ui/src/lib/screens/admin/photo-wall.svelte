@@ -26,18 +26,28 @@
    * against Drive *before* anything is written, so a typo or an unshared
    * folder is a message here rather than a wall that silently empties ten
    * minutes later with nothing on any screen connecting the two events.
+   *
+   * **Signing in to Google is the switch.** The wall is off until an admin
+   * presses Sign in with Google here, which creates the read-only rclone
+   * remote and starts the wall on the running server — no `.env` line, no
+   * restart. Until then the button is marked Required and the folder form
+   * waits on it. The token goes into rclone's own config file; this screen
+   * only ever learns `google_connected`.
    */
   import ImagesIcon from "@lucide/svelte/icons/images"
   import RefreshIcon from "@lucide/svelte/icons/refresh-cw"
   import FolderIcon from "@lucide/svelte/icons/folder"
   import LinkIcon from "@lucide/svelte/icons/link"
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
+  import CheckIcon from "@lucide/svelte/icons/check"
+  import KeyIcon from "@lucide/svelte/icons/key-round"
   import { toast } from "svelte-sonner"
   import { Button } from "@stockroom/ui/components/ui/button"
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
+  import GoogleConnectDialog from "@stockroom/ui/components/app/google-connect-dialog.svelte"
   import * as api from "../../api/index"
   import { fileUrl } from "../../api/index"
   import type { PhotoWallStatus } from "../../api/types"
@@ -120,6 +130,57 @@
     }
   }
 
+  /* ------------------------------------------------- signing in to Google ---- */
+
+  let googleOpen = $state(false)
+  let googleUrl = $state("")
+  let googleId = $state("")
+  let googlePasteCommand = $state("")
+  let googleCode = $state("")
+  let googleError = $state<string | null>(null)
+  let googleStartError = $state<string | null>(null)
+  let googleStarting = $state(false)
+  let googleFinishing = $state(false)
+
+  async function startGoogle() {
+    googleStarting = true
+    googleStartError = null
+    try {
+      const result = await api.connectPhotoWallGoogle()
+      googleUrl = result.url
+      googleId = result.id
+      googlePasteCommand = result.paste_command
+      googleCode = ""
+      googleError = null
+      googleOpen = true
+    } catch (err) {
+      // 503 when rclone is not installed, with the install command in the
+      // message. It belongs beside the button, not in a toast.
+      googleStartError = err instanceof Error ? err.message : String(err)
+    } finally {
+      googleStarting = false
+    }
+  }
+
+  async function finishGoogle() {
+    googleFinishing = true
+    googleError = null
+    try {
+      const wasConnected = status?.google_connected ?? false
+      status = await api.finishPhotoWallGoogle(googleId, googleCode.trim())
+      googleOpen = false
+      googleCode = ""
+      toast.success(wasConnected ? "Signed in to Google again" : "Signed in to Google — the photo wall is on")
+      await load(true)
+    } catch (err) {
+      // "Google has not sent the code back yet" is the common one and is a
+      // retry, not a failure — so the dialog stays open with the message in it.
+      googleError = err instanceof Error ? err.message : String(err)
+    } finally {
+      googleFinishing = false
+    }
+  }
+
   async function rebuild() {
     rebuilding = true
     saveError = null
@@ -176,6 +237,71 @@
       {/each}
     </div>
   {:else}
+    <!-- ------------------------------------------------------- google ---- -->
+    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+        <KeyIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        Google account
+      </h2>
+
+      {#if status.google_connected}
+        <p class="flex items-start gap-2 text-xs text-fg-muted">
+          <CheckIcon class="mt-0.5 size-4 shrink-0 text-fg" aria-hidden="true" />
+          <span>
+            Signed in. The wall reads Google Drive through the rclone connection
+            <code class="font-mono">{status.remote}</code>, read-only — this machine can open the
+            folder's photographs and can never change or delete anything in that Drive.
+          </span>
+        </p>
+      {:else}
+        <p class="text-xs text-fg-muted">
+          The wall's photographs come from Google Drive, so it stays off until somebody signs in.
+          Use a Google account that can open the photo folder. The access is read-only: this machine
+          can never change or delete anything in that Drive.
+        </p>
+      {/if}
+
+      {#if !status.rclone_installed}
+        <p class="flex items-start gap-2 text-xs text-fg-muted">
+          <AlertTriangleIcon class="mt-0.5 size-4 shrink-0 text-status-due-soon" aria-hidden="true" />
+          <span>
+            <code class="font-mono">rclone</code> is not installed on this machine, and it is what
+            talks to Google Drive. Install it (<code class="font-mono">brew install rclone</code> on
+            macOS, <code class="font-mono">winget install Rclone.Rclone</code> on Windows), then
+            reload this page.
+          </span>
+        </p>
+      {/if}
+
+      {#if googleStartError}
+        <p class="text-sm text-status-overdue" role="alert">{googleStartError}</p>
+      {/if}
+
+      <div class="flex flex-wrap items-center gap-2">
+        {#if status.google_connected}
+          <Button
+            variant="secondary"
+            disabled={googleStarting || !status.can_connect_google}
+            onclick={startGoogle}
+          >
+            {googleStarting ? "Starting…" : "Sign in again"}
+          </Button>
+          <p class="text-xs text-fg-faint">
+            If the wall says the Google sign-in has expired, this is the fix.
+          </p>
+        {:else}
+          <Button disabled={googleStarting || !status.can_connect_google} onclick={startGoogle}>
+            {googleStarting ? "Starting…" : "Sign in with Google"}
+          </Button>
+          <span
+            class="rounded-(--radius-sm) border border-line px-1.5 text-xs font-normal text-fg-muted"
+          >
+            Required
+          </span>
+        {/if}
+      </div>
+    </section>
+
     <!-- ------------------------------------------------------- status ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
@@ -184,14 +310,16 @@
       </h2>
 
       {#if !status.enabled}
-        <!-- The common case, and not an error: SIGNIN_PHOTOS_REMOTE is the
-             install-time switch, so this is the one value on the whole feature
-             that is still a line in .env. -->
+        <!-- The common case on a fresh install, and not an error: the sign-in
+             above is the switch. -->
         <p class="text-xs text-fg-muted">
-          The wall is switched off on this machine. It is turned on at install time by setting
-          <code class="font-mono">SIGNIN_PHOTOS_REMOTE</code> in
-          <code class="font-mono">.env</code> to the rclone remote holding the photographs, then
-          restarting the server. Sign-in looks exactly as it does now until then.
+          {#if status.google_connected}
+            Signed in to Google, but the wall is not running on this server. The server log says
+            why it could not start.
+          {:else}
+            Off until somebody signs in to Google above. Sign-in looks exactly as it does now until
+            then.
+          {/if}
         </p>
       {:else}
         <dl class="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
@@ -234,21 +362,6 @@
             </dd>
           </div>
         </dl>
-
-        {#if !status.rclone_installed}
-          <p class="flex items-start gap-2 text-xs text-fg-muted">
-            <AlertTriangleIcon
-              class="mt-0.5 size-4 shrink-0 text-status-due-soon"
-              aria-hidden="true"
-            />
-            <span>
-              <code class="font-mono">rclone</code> is not installed on this machine, so nothing can
-              be read from Drive. Install it (<code class="font-mono">brew install rclone</code> on
-              macOS, <code class="font-mono">winget install Rclone.Rclone</code> on Windows) and
-              restart the server.
-            </span>
-          </p>
-        {/if}
 
         {#if status.last_error}
           <!-- Hue on the icon, never as a fill: the five status colours belong
@@ -347,9 +460,14 @@
           §13).
         -->
         <p class="text-xs text-fg-muted">
-          Not available yet — this server has no Drive source to check a folder against, so a link
-          pasted here could not be verified and would not be saved. <strong>Status</strong> above
-          says which piece is missing.
+          {#if !status.google_connected}
+            Sign in with Google above first. A link pasted here is checked against Drive before it
+            is saved, and that check needs the sign-in.
+          {:else}
+            Not available yet — this server has no Drive source to check a folder against, so a
+            link pasted here could not be verified and would not be saved.
+            <strong>Status</strong> above says which piece is missing.
+          {/if}
         </p>
       {:else}
         <p class="text-xs text-fg-muted">
@@ -412,3 +530,15 @@
     </section>
   {/if}
 </div>
+
+<GoogleConnectDialog
+  bind:open={googleOpen}
+  bind:code={googleCode}
+  url={googleUrl}
+  pasteCommand={googlePasteCommand}
+  title="Sign in with Google"
+  description="Open the link, sign in to a Google account that can open the photo folder, and allow access. Google will say it hasn't verified this app — press Advanced, then continue. Access is read-only."
+  busy={googleFinishing}
+  error={googleError}
+  onfinish={finishGoogle}
+/>

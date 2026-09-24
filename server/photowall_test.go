@@ -28,7 +28,7 @@ func readPhotos(t *testing.T, rec *httptest.ResponseRecorder) signInPhotosRespon
 }
 
 // TestSignInPhotosWithNoWall is the state the feature spends most of its life
-// in: SIGNIN_PHOTOS_REMOTE unset, so DB.PhotoWall is nil.
+// in: nobody has signed in to Google for it, so no reel is running.
 //
 // It has to be a 200 with an empty list rather than a 404 or a 503. The caller
 // is the sign-in screen, "draw no columns" is the only thing it can do with
@@ -111,7 +111,7 @@ func TestSignInPhotosServesTiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPhotoWall: %v", err)
 	}
-	db.PhotoWall = wall
+	db.SetPhotoWall(wall, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -212,7 +212,7 @@ func TestSignInPhotosNeverServesTheManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPhotoWall: %v", err)
 	}
-	db.PhotoWall = wall
+	db.SetPhotoWall(wall, nil)
 
 	// A manifest where §3 puts it, in the cache root.
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
@@ -289,6 +289,8 @@ func TestPhotoWallAdminRoutes(t *testing.T) {
 		{http.MethodPut, "/admin/photo-wall", map[string]any{"link": "1abcdefghijklmnop", "label": "x"}},
 		{http.MethodPost, "/admin/photo-wall/rebuild", nil},
 		{http.MethodGet, "/admin/photo-wall/preview", nil},
+		{http.MethodPost, "/admin/photo-wall/google/connect", nil},
+		{http.MethodPost, "/admin/photo-wall/google/finish", map[string]any{"id": "x"}},
 	} {
 		if code, _ := call(t, h, route.method, route.path, "", route.body); code != http.StatusUnauthorized {
 			t.Errorf("%s %s with no token = %d, want 401", route.method, route.path, code)
@@ -371,8 +373,8 @@ func TestPhotoWallPreviewDoesNotConsumeOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPhotoWall: %v", err)
 	}
-	d.db.PhotoWall = wall
-	t.Cleanup(func() { d.db.PhotoWall = nil })
+	d.db.SetPhotoWall(wall, nil)
+	t.Cleanup(func() { d.db.SetPhotoWall(nil, nil) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -36,15 +36,14 @@
   import ImageIcon from "@lucide/svelte/icons/image"
   import LockIcon from "@lucide/svelte/icons/lock"
   import RefreshIcon from "@lucide/svelte/icons/refresh-cw"
-  import ExternalLinkIcon from "@lucide/svelte/icons/external-link"
   import { toast } from "svelte-sonner"
   import { Button } from "@stockroom/ui/components/ui/button"
   import { Checkbox } from "@stockroom/ui/components/ui/checkbox"
-  import * as Dialog from "@stockroom/ui/components/ui/dialog"
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
+  import GoogleConnectDialog from "@stockroom/ui/components/app/google-connect-dialog.svelte"
   import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
   import IdCardIcon from "@lucide/svelte/icons/id-card"
@@ -271,6 +270,7 @@
 
   let connectOpen = $state(false)
   let connectUrl = $state("")
+  let connectPasteCommand = $state("")
   let connectId = $state("")
   let connectCode = $state("")
   let connectRemote = $state("stockroom-drive")
@@ -283,6 +283,7 @@
     try {
       const result = await api.connectDrive()
       connectUrl = result.url
+      connectPasteCommand = result.paste_command
       connectId = result.id
       connectCode = ""
       connectRemote = draft.drive_remote.trim() || "stockroom-drive"
@@ -309,17 +310,6 @@
       connectError = err instanceof Error ? err.message : String(err)
     } finally {
       connecting = false
-    }
-  }
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(connectUrl)
-      toast.success("Link copied")
-    } catch {
-      // Clipboard access can be refused in a webview. The link is on screen
-      // and selectable either way, so this is not worth an error surface.
-      toast.info("Select the link and copy it by hand.")
     }
   }
 
@@ -786,71 +776,22 @@
 <!-- The Drive connect flow. rclone is already running and waiting for Google's
      callback by the time this opens; the dialog is the link plus the fallback
      for when the callback doesn't arrive. -->
-<Dialog.Root bind:open={connectOpen}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>Connect Google Drive</Dialog.Title>
-      <Dialog.Description>
-        Open the link, sign in to the Google account the backups should live in, and allow access.
-        Google will say it hasn't verified this app — press Advanced, then continue.
-      </Dialog.Description>
-    </Dialog.Header>
-
-    <div class="flex flex-col gap-3">
-      <div class="flex flex-col gap-1">
-        <Label for="connect-url">Sign-in link</Label>
-        <!-- Readonly input rather than a bare anchor: the Wails webview may
-             refuse to hand a link to the system browser, and a link nobody can
-             copy is a dead end. Both affordances are here on purpose. -->
-        <div class="flex gap-2">
-          <Input id="connect-url" readonly value={connectUrl} class="font-mono text-xs" />
-          <Button variant="secondary" onclick={copyLink}>Copy</Button>
-        </div>
-        <a
-          href={connectUrl}
-          target="_blank"
-          rel="noreferrer"
-          class="flex items-center gap-1 text-xs text-fg-muted underline underline-offset-2 hover:text-fg"
-        >
-          <ExternalLinkIcon class="size-3" aria-hidden="true" />
-          Open in a browser
-        </a>
-      </div>
-
-      <div class="flex flex-col gap-1">
-        <Label for="connect-remote">Name this connection</Label>
-        <Input id="connect-remote" bind:value={connectRemote} spellcheck={false} autocomplete="off" />
-        <p class="text-xs text-fg-faint">No spaces, colons or slashes.</p>
-      </div>
-
-      <div class="flex flex-col gap-1">
-        <Label for="connect-code">If Google showed you a block of text, paste it here</Label>
-        <Input
-          id="connect-code"
-          bind:value={connectCode}
-          placeholder="{'{'}&quot;access_token&quot;: …{'}'}"
-          spellcheck={false}
-          autocomplete="off"
-          class="font-mono text-xs"
-        />
-        <p class="text-xs text-fg-faint">
-          Usually not needed — the sign-in normally completes on its own. Leave it blank and press
-          Finish.
-        </p>
-      </div>
-
-      {#if connectError}
-        <p class="text-sm text-status-overdue" role="alert">{connectError}</p>
-      {/if}
+<GoogleConnectDialog
+  bind:open={connectOpen}
+  bind:code={connectCode}
+  url={connectUrl}
+  pasteCommand={connectPasteCommand}
+  title="Connect Google Drive"
+  description="Open the link, sign in to the Google account the backups should live in, and allow access. Google will say it hasn't verified this app — press Advanced, then continue."
+  busy={connecting}
+  error={connectError}
+  onfinish={finishConnect}
+>
+  {#snippet fields()}
+    <div class="flex flex-col gap-1">
+      <Label for="connect-remote">Name this connection</Label>
+      <Input id="connect-remote" bind:value={connectRemote} spellcheck={false} autocomplete="off" />
+      <p class="text-xs text-fg-faint">No spaces, colons or slashes.</p>
     </div>
-
-    <Dialog.Footer>
-      <Button variant="ghost" onclick={() => (connectOpen = false)} disabled={connecting}>
-        Cancel
-      </Button>
-      <Button onclick={finishConnect} disabled={connecting}>
-        {connecting ? "Finishing…" : "Finish"}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+  {/snippet}
+</GoogleConnectDialog>

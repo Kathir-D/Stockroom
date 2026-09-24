@@ -87,9 +87,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 }
 
 // TestLoadConfigPhotoWallDefaults pins the sign-in photo wall's defaults
-// (docs/design/signin-photo-wall.html §8). The remote is the switch and has no
-// default on purpose: unset must mean the feature is cleanly off, so an
-// existing .env keeps today's sign-in screen.
+// (docs/design/signin-photo-wall.html §8). The remote is a name with a
+// default, not the switch: the wall stays off until an admin signs in to
+// Google for it, which is what creates a remote by that name
+// (photowall_google.go).
 func TestLoadConfigPhotoWallDefaults(t *testing.T) {
 	isolateEnv(t)
 	chdirNoDotEnv(t)
@@ -98,8 +99,8 @@ func TestLoadConfigPhotoWallDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.SignInPhotosRemote != "" {
-		t.Errorf("SignInPhotosRemote = %q, want empty so the wall stays off", cfg.SignInPhotosRemote)
+	if cfg.SignInPhotosRemote != DefaultPhotoWallRemote {
+		t.Errorf("SignInPhotosRemote = %q, want %q", cfg.SignInPhotosRemote, DefaultPhotoWallRemote)
 	}
 	if cfg.SignInPhotosDir != DefaultPhotoWallDir {
 		t.Errorf("SignInPhotosDir = %q, want %q", cfg.SignInPhotosDir, DefaultPhotoWallDir)

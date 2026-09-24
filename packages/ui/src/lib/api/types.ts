@@ -504,6 +504,8 @@ export interface RestoreResult {
 export interface DriveConnectResult {
   url: string;
   id: string;
+  /** What to run elsewhere when the link will not open here; carries the scope. */
+  paste_command: string;
 }
 
 export interface HealthResult {
@@ -542,9 +544,18 @@ export interface SignInPhotos {
  * ("are the right photographs showing?") better than an id could.
  */
 export interface PhotoWallStatus {
-  /** Whether a reel exists at all. False is the common case, not an error. */
+  /** Whether the wall is running. Off until Google is signed in to. */
   enabled: boolean;
   rclone_installed: boolean;
+  /**
+   * Whether rclone has the wall's remote — somebody has signed in to Google
+   * for it. This is the switch: the wall starts the moment it becomes true.
+   */
+  google_connected: boolean;
+  /** Whether the Sign in with Google button can work on this machine. */
+  can_connect_google: boolean;
+  /** The rclone remote's name. A name, never a credential. */
+  remote: string;
   /**
    * Whether `setPhotoWallFolder` would get past its first gate. The server
    * reports it rather than letting this screen infer it from the two above,
