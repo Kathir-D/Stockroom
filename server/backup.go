@@ -63,38 +63,6 @@ func (d deps) handleTestTarget(w http.ResponseWriter, r *http.Request, actor sto
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// POST /admin/drive/connect
-// Starts `rclone authorize drive` and hands back the link to open.
-func (d deps) handleDriveConnect(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	res, err := d.db.ConnectDrive(r.Context(), actor)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-// POST /admin/drive/finish  {"id", "code"?, "remote"?}
-// Completes the connection: `code` is the block rclone printed, for the case
-// where the browser callback did not reach it.
-func (d deps) handleDriveFinish(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	var in struct {
-		ID     string `json:"id"`
-		Code   string `json:"code"`
-		Remote string `json:"remote"`
-	}
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, err)
-		return
-	}
-	s, err := d.db.FinishDriveConnect(r.Context(), actor, in.ID, in.Code, in.Remote)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s)
-}
-
 // GET /admin/backup/status
 func (d deps) handleBackupStatus(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	res, err := d.db.BackupStatus(r.Context(), actor)

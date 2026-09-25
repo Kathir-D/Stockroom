@@ -29,25 +29,29 @@
    *
    * **Signing in to Google is the switch.** The wall reads Drive through the
    * one Google connection the backup uses too (google.go), so it is off until
-   * an admin signs in — here, or with Connect under Settings → Google Drive —
-   * and then starts on the running server, no `.env` line, no restart. Until then the button is marked Required and the folder form
-   * waits on it. The token goes into rclone's own config file; this screen
-   * only ever learns `google_connected`.
+   * an admin signs in — here or on Settings, the same one-click button
+   * (google-account.svelte) — and then starts on the running server, no `.env`
+   * line, no restart.
+   *
+   * **Two ways to name the folder.** Click through Drive in the picker —
+   * including Shared with me, where a department's photo folder usually is —
+   * or paste its link. The picker hands out handles, never Drive ids, so the
+   * write-only rule above holds for both.
    */
   import ImagesIcon from "@lucide/svelte/icons/images"
   import RefreshIcon from "@lucide/svelte/icons/refresh-cw"
   import FolderIcon from "@lucide/svelte/icons/folder"
   import LinkIcon from "@lucide/svelte/icons/link"
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
-  import CheckIcon from "@lucide/svelte/icons/check"
-  import KeyIcon from "@lucide/svelte/icons/key-round"
+  import FolderOpenIcon from "@lucide/svelte/icons/folder-open"
   import { toast } from "svelte-sonner"
   import { Button } from "@stockroom/ui/components/ui/button"
   import { Input } from "@stockroom/ui/components/ui/input"
   import { Label } from "@stockroom/ui/components/ui/label"
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
-  import GoogleConnectDialog from "@stockroom/ui/components/app/google-connect-dialog.svelte"
+  import GoogleAccount from "@stockroom/ui/components/app/google-account.svelte"
+  import FolderPicker, { type FolderChoice } from "@stockroom/ui/components/app/folder-picker.svelte"
   import * as api from "../../api/index"
   import { fileUrl } from "../../api/index"
   import type { PhotoWallStatus } from "../../api/types"
@@ -117,6 +121,7 @@
       status = await api.setPhotoWallFolder(link.trim(), label.trim())
       link = ""
       label = ""
+      pasteOpen = false
       toast.success("Folder replaced — the wall is rebuilding")
       await load(true)
     } catch (err) {
@@ -130,55 +135,15 @@
     }
   }
 
-  /* ------------------------------------------------- signing in to Google ---- */
+  /* ------------------------------------------------ choosing a folder ---- */
 
-  let googleOpen = $state(false)
-  let googleUrl = $state("")
-  let googleId = $state("")
-  let googlePasteCommand = $state("")
-  let googleCode = $state("")
-  let googleError = $state<string | null>(null)
-  let googleStartError = $state<string | null>(null)
-  let googleStarting = $state(false)
-  let googleFinishing = $state(false)
+  let pickerOpen = $state(false)
+  let pasteOpen = $state(false)
 
-  async function startGoogle() {
-    googleStarting = true
-    googleStartError = null
-    try {
-      const result = await api.connectPhotoWallGoogle()
-      googleUrl = result.url
-      googleId = result.id
-      googlePasteCommand = result.paste_command
-      googleCode = ""
-      googleError = null
-      googleOpen = true
-    } catch (err) {
-      // 503 when rclone is not installed, with the install command in the
-      // message. It belongs beside the button, not in a toast.
-      googleStartError = err instanceof Error ? err.message : String(err)
-    } finally {
-      googleStarting = false
-    }
-  }
-
-  async function finishGoogle() {
-    googleFinishing = true
-    googleError = null
-    try {
-      const wasConnected = status?.google_connected ?? false
-      status = await api.finishPhotoWallGoogle(googleId, googleCode.trim())
-      googleOpen = false
-      googleCode = ""
-      toast.success(wasConnected ? "Signed in to Google again" : "Signed in to Google — the photo wall is on")
-      await load(true)
-    } catch (err) {
-      // "Google has not sent the code back yet" is the common one and is a
-      // retry, not a failure — so the dialog stays open with the message in it.
-      googleError = err instanceof Error ? err.message : String(err)
-    } finally {
-      googleFinishing = false
-    }
+  async function pickFolder(choice: FolderChoice) {
+    status = await api.choosePhotoWallFolder(choice.handle!)
+    toast.success(`Showing photos from “${choice.name}” — the wall is rebuilding`)
+    await load(true)
   }
 
   async function rebuild() {
@@ -238,70 +203,10 @@
     </div>
   {:else}
     <!-- ------------------------------------------------------- google ---- -->
-    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
-        <KeyIcon class="size-4 text-fg-muted" aria-hidden="true" />
-        Google account
-      </h2>
-
-      {#if status.google_connected}
-        <p class="flex items-start gap-2 text-xs text-fg-muted">
-          <CheckIcon class="mt-0.5 size-4 shrink-0 text-fg" aria-hidden="true" />
-          <span>
-            Signed in. The wall reads Google Drive through
-            <code class="font-mono">{status.remote}</code>, the same connection the Drive backup
-            uses; it only ever reads from the photo folder.
-          </span>
-        </p>
-      {:else}
-        <p class="text-xs text-fg-muted">
-          The wall's photographs come from Google Drive, so it stays off until somebody signs in.
-          This is the same Google connection the Drive backup uses — signing in here, or pressing
-          Connect under Settings → Google Drive, connects both. Use a Google account that can open
-          the photo folder.
-        </p>
-      {/if}
-
-      {#if !status.rclone_installed}
-        <p class="flex items-start gap-2 text-xs text-fg-muted">
-          <AlertTriangleIcon class="mt-0.5 size-4 shrink-0 text-status-due-soon" aria-hidden="true" />
-          <span>
-            <code class="font-mono">rclone</code> is not installed on this machine, and it is what
-            talks to Google Drive. Install it (<code class="font-mono">brew install rclone</code> on
-            macOS, <code class="font-mono">winget install Rclone.Rclone</code> on Windows), then
-            reload this page.
-          </span>
-        </p>
-      {/if}
-
-      {#if googleStartError}
-        <p class="text-sm text-status-overdue" role="alert">{googleStartError}</p>
-      {/if}
-
-      <div class="flex flex-wrap items-center gap-2">
-        {#if status.google_connected}
-          <Button
-            variant="secondary"
-            disabled={googleStarting || !status.can_connect_google}
-            onclick={startGoogle}
-          >
-            {googleStarting ? "Starting…" : "Sign in again"}
-          </Button>
-          <p class="text-xs text-fg-faint">
-            If the wall says the Google sign-in has expired, this is the fix.
-          </p>
-        {:else}
-          <Button disabled={googleStarting || !status.can_connect_google} onclick={startGoogle}>
-            {googleStarting ? "Starting…" : "Sign in with Google"}
-          </Button>
-          <span
-            class="rounded-(--radius-sm) border border-line px-1.5 text-xs font-normal text-fg-muted"
-          >
-            Required
-          </span>
-        {/if}
-      </div>
-    </section>
+    <GoogleAccount
+      purpose="The wall's photographs come from Google Drive. Sign in with an account that can open the photo folder; it is the same account the Drive backup uses."
+      onchange={() => load(true)}
+    />
 
     <!-- ------------------------------------------------------- status ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
@@ -444,102 +349,100 @@
     <!-- ------------------------------------------------------- change ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
-        <LinkIcon class="size-4 text-fg-muted" aria-hidden="true" />
-        {status.folder_set ? "Replace the folder" : "Choose a folder"}
+        <FolderIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        {status.folder_set ? "Change the folder" : "Choose a folder"}
       </h2>
       {#if !status.can_set_folder}
-        <!--
-          The form is shown and disabled rather than hidden. Hidden, an admin
-          who has been told "choose a folder in the admin panel" hunts for a
-          box that is not there and concludes the screen is broken. Left
-          enabled, every press is a 503 they had no way to see coming — which
-          is exactly what happened the first time somebody used this screen.
-
-          The reason is one line pointing upward, not a second copy of it:
-          Status already says which piece is missing and what to do, and
-          saying it twice in two wordings reads as two problems (CLAUDE.md
-          §13).
-        -->
+        <!-- Shown and disabled rather than hidden, so an admin told "choose a
+             folder" finds the button and the reason it is waiting. -->
         <p class="text-xs text-fg-muted">
           {#if !status.google_connected}
-            Sign in with Google above first. A link pasted here is checked against Drive before it
-            is saved, and that check needs the sign-in.
+            Sign in with Google above first.
           {:else}
-            Not available yet — this server has no Drive source to check a folder against, so a
-            link pasted here could not be verified and would not be saved.
+            Not available yet — this server has no Drive source to check a folder against.
             <strong>Status</strong> above says which piece is missing.
           {/if}
         </p>
       {:else}
         <p class="text-xs text-fg-muted">
-          Open the folder in Google Drive, press <strong>Share</strong> → <strong>Copy link</strong>,
-          and paste it here. The Google account this machine is signed in to has to be able to open
-          it, so either share the folder with that account or set the folder to anyone-with-the-link.
+          Pick the Drive folder the photographs are in. Photos in its subfolders are used too.
         </p>
       {/if}
 
-      <div class="flex flex-col gap-1">
-        <Label for="wall-label">Name for this folder</Label>
-        <Input
-          id="wall-label"
-          bind:value={label}
-          placeholder="Fall 2026 game photos"
-          autocomplete="off"
-          maxlength={120}
+      <div class="flex flex-wrap items-center gap-2">
+        <Button disabled={!status.can_set_folder} onclick={() => (pickerOpen = true)}>
+          <FolderOpenIcon aria-hidden="true" />
+          Choose from Google Drive
+        </Button>
+        <Button
+          variant="ghost"
           disabled={!status.can_set_folder}
-        />
-        <p class="text-xs text-fg-faint">
-          Shown on this screen and in the log in place of the link. Anything you would recognise.
-        </p>
+          onclick={() => (pasteOpen = !pasteOpen)}
+          aria-expanded={pasteOpen}
+        >
+          <LinkIcon aria-hidden="true" />
+          Paste a link instead
+        </Button>
       </div>
 
-      <div class="flex flex-col gap-1">
-        <Label for="wall-link">Drive folder link</Label>
-        <Input
-          id="wall-link"
-          bind:value={link}
-          placeholder="https://drive.google.com/drive/folders/…"
-          spellcheck={false}
-          autocomplete="off"
-          disabled={!status.can_set_folder}
-        />
-        <p class="text-xs text-fg-faint">
-          Never shown back. A folder link is a key to the folder, so this box starts empty every
-          time — including right after you have set one. To find out which folder is live, look at
-          the name above and the photographs in the strip.
-        </p>
-      </div>
+      {#if pasteOpen && status.can_set_folder}
+        <div class="flex flex-col gap-3 border-t border-line pt-3">
+          <p class="text-xs text-fg-muted">
+            In Google Drive, open the folder, press <strong>Share</strong> →
+            <strong>Copy link</strong>, and paste it here. The Google account above has to be able to
+            open it.
+          </p>
+          <div class="flex flex-col gap-1">
+            <Label for="wall-link">Drive folder link</Label>
+            <Input
+              id="wall-link"
+              bind:value={link}
+              placeholder="https://drive.google.com/drive/folders/…"
+              spellcheck={false}
+              autocomplete="off"
+            />
+            <p class="text-xs text-fg-faint">
+              Never shown back — a folder link is a key to the folder, so this box starts empty
+              every time.
+            </p>
+          </div>
+          <div class="flex flex-col gap-1">
+            <Label for="wall-label">Name <span class="text-fg-faint">(optional)</span></Label>
+            <Input
+              id="wall-label"
+              bind:value={label}
+              placeholder="Fall 2026 game photos"
+              autocomplete="off"
+              maxlength={120}
+            />
+          </div>
+          <div>
+            <Button disabled={saving || !link.trim()} onclick={replaceFolder}>
+              {saving ? "Checking the folder…" : "Use this link"}
+            </Button>
+          </div>
+        </div>
+      {/if}
 
       {#if saveError}
         <p class="text-sm text-status-overdue" role="alert">{saveError}</p>
       {/if}
-
-      <div class="flex items-center gap-3">
-        <Button
-          disabled={saving || !status.can_set_folder || !link.trim() || !label.trim()}
-          onclick={replaceFolder}
-        >
-          {saving ? "Checking the folder…" : status.folder_set ? "Replace folder" : "Use this folder"}
-        </Button>
-        {#if status.can_set_folder}
-          <p class="text-xs text-fg-faint">
-            Checked against Drive before anything is saved. If it cannot be opened, nothing changes
-            and the folder in use now stays live.
-          </p>
-        {/if}
-      </div>
+      {#if status.can_set_folder}
+        <p class="text-xs text-fg-faint">
+          Drive is checked before anything is saved. If the folder can't be opened, nothing changes
+          and the folder in use now stays live.
+        </p>
+      {/if}
     </section>
   {/if}
 </div>
 
-<GoogleConnectDialog
-  bind:open={googleOpen}
-  bind:code={googleCode}
-  url={googleUrl}
-  pasteCommand={googlePasteCommand}
-  title="Sign in with Google"
-  description="Open the link, sign in to a Google account that can open the photo folder, and allow access. Google will say it hasn't verified this app — press Advanced, then continue. The Drive backup uses this same connection."
-  busy={googleFinishing}
-  error={googleError}
-  onfinish={finishGoogle}
+<FolderPicker
+  bind:open={pickerOpen}
+  source="drive"
+  shared
+  allowCreate={false}
+  title="Choose the photo folder"
+  description="Click into the folder with the photographs, then choose it. A folder somebody shared with you is under Shared with me."
+  onpick={pickFolder}
 />

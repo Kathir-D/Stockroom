@@ -138,8 +138,15 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /admin/settings", d.withSession(d.handleGetSettings, fullOnly))
 	mux.Handle("PUT /admin/settings", d.withSession(d.handleSaveSettings, fullOnly))
 	mux.Handle("POST /admin/settings/test", d.withSession(d.handleTestTarget, fullOnly))
-	mux.Handle("POST /admin/drive/connect", d.withSession(d.handleDriveConnect, fullOnly))
-	mux.Handle("POST /admin/drive/finish", d.withSession(d.handleDriveFinish, fullOnly))
+	// The one Google connection (google_admin.go): its status, the sign-in,
+	// and the Drive folder picker. The local picker is for the backup folders.
+	mux.Handle("GET /admin/google", d.withSession(d.handleGoogleStatus, fullOnly))
+	mux.Handle("POST /admin/google/connect", d.withSession(d.handleGoogleConnect, fullOnly))
+	mux.Handle("POST /admin/google/finish", d.withSession(d.handleGoogleFinish, fullOnly))
+	mux.Handle("GET /admin/google/folders", d.withSession(d.handleGoogleFolders, fullOnly))
+	mux.Handle("POST /admin/google/folders", d.withSession(d.handleCreateGoogleFolder, fullOnly))
+	mux.Handle("GET /admin/local-folders", d.withSession(d.handleLocalFolders, fullOnly))
+	mux.Handle("POST /admin/local-folders", d.withSession(d.handleCreateLocalFolder, fullOnly))
 	mux.Handle("GET /admin/backup/status", d.withSession(d.handleBackupStatus, fullOnly))
 	mux.Handle("GET /admin/backup/versions", d.withSession(d.handleBackupVersions, fullOnly))
 	mux.Handle("POST /admin/restore", d.withSession(d.handleRestoreUpload, fullOnly))
@@ -157,8 +164,6 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("PUT /admin/photo-wall", d.withSession(d.handleSetPhotoWallFolder, fullOnly))
 	mux.Handle("POST /admin/photo-wall/rebuild", d.withSession(d.handleRebuildPhotoWall, fullOnly))
 	mux.Handle("GET /admin/photo-wall/preview", d.withSession(d.handlePhotoWallPreview, fullOnly))
-	mux.Handle("POST /admin/photo-wall/google/connect", d.withSession(d.handlePhotoWallGoogleConnect, fullOnly))
-	mux.Handle("POST /admin/photo-wall/google/finish", d.withSession(d.handlePhotoWallGoogleFinish, fullOnly))
 
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))

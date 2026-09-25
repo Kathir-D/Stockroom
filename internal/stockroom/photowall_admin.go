@@ -366,7 +366,11 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	}
 	label = strings.TrimSpace(label)
 	if label == "" {
-		return PhotoWallStatus{}, fmt.Errorf("%w: give the folder a short name. It is what this screen and the log show in place of the link, which is never displayed", ErrInvalid)
+		// A pasted link carries no name, and rclone cannot look one up by id.
+		// Picked folders arrive named (ChoosePhotoWallFolder); a paste with no
+		// name typed gets this rather than a refusal, since the status and
+		// the log need something to say in place of the link.
+		label = "Linked Drive folder"
 	}
 	// Counted in characters, not bytes: the field's maxlength counts what the
 	// admin sees, and "Fotos del partido — otoño" must not be refused as too

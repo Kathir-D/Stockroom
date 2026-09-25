@@ -221,8 +221,9 @@ func runRclone(ctx context.Context, timeout time.Duration, args ...string) ([]by
 
 /* ------------------------------------------------------------- connect ---- */
 
-// DriveConnectResult is the first half of connecting a Google account from the
-// admin panel: the URL to open and the handle that identifies this attempt.
+// DriveConnectResult is the first half of signing in to Google from the admin
+// panel (ConnectGoogle, google_admin.go): the URL to open and the handle that
+// identifies this attempt.
 type DriveConnectResult struct {
 	URL string `json:"url"`
 	// ID is the pending authorization this token will be handed back to.
@@ -232,39 +233,4 @@ type DriveConnectResult struct {
 	// It carries the scope, which is why the server supplies it rather than
 	// the screen spelling it out.
 	PasteCommand string `json:"paste_command"`
-}
-
-// ConnectDrive starts `rclone authorize "drive"` and returns the URL it
-// prints.
-//
-// This exists so the single most likely failure -- a revoked Google token --
-// can be fixed from the admin panel rather than from a terminal. A recovery
-// procedure that begins "open a terminal on the closet PC" is a procedure that
-// will not be followed, and the "no admin edits a file" rule in §B means the
-// same thing about shells.
-func (db *DB) ConnectDrive(ctx context.Context, actor Actor) (DriveConnectResult, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return DriveConnectResult{}, err
-	}
-	return db.startGoogleSignIn(ctx)
-}
-
-// FinishDriveConnect takes the code Google showed the admin, writes the one
-// Google remote (google.go), and enables the target. The photo wall reads
-// through the same remote, so it starts too if it was waiting on a sign-in.
-func (db *DB) FinishDriveConnect(ctx context.Context, actor Actor, id, code, remote string) (Settings, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return Settings{}, err
-	}
-	remote, err := db.finishGoogleSignIn(ctx, id, code, remote)
-	if err != nil {
-		return Settings{}, err
-	}
-	enabled := true
-	s, err := db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote, DriveEnabled: &enabled})
-	if err != nil {
-		return Settings{}, err
-	}
-	logGoogleWallError(db.googleSignedIn(ctx))
-	return s, nil
 }

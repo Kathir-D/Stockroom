@@ -289,8 +289,9 @@ func TestPhotoWallAdminRoutes(t *testing.T) {
 		{http.MethodPut, "/admin/photo-wall", map[string]any{"link": "1abcdefghijklmnop", "label": "x"}},
 		{http.MethodPost, "/admin/photo-wall/rebuild", nil},
 		{http.MethodGet, "/admin/photo-wall/preview", nil},
-		{http.MethodPost, "/admin/photo-wall/google/connect", nil},
-		{http.MethodPost, "/admin/photo-wall/google/finish", map[string]any{"id": "x"}},
+		{http.MethodPut, "/admin/photo-wall", map[string]any{"folder": "x"}},
+		{http.MethodPost, "/admin/google/folders", map[string]any{"in": "my-drive", "name": "x"}},
+		{http.MethodPost, "/admin/local-folders", map[string]any{"parent": "/tmp", "name": "x"}},
 	} {
 		if code, _ := call(t, h, route.method, route.path, "", route.body); code != http.StatusUnauthorized {
 			t.Errorf("%s %s with no token = %d, want 401", route.method, route.path, code)

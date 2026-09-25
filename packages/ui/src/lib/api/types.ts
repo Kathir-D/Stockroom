@@ -513,10 +513,56 @@ export interface RestoreResult {
 }
 
 export interface DriveConnectResult {
+  /** Google's sign-in page, through rclone's local callback. */
   url: string;
   id: string;
-  /** What to run elsewhere when the link will not open here; carries the scope. */
+  /** What to run on another machine when the page will not open here. */
   paste_command: string;
+}
+
+/** `GET /admin/google`: the one Google connection. Never a token. */
+export interface GoogleStatus {
+  rclone_installed: boolean;
+  connected: boolean;
+  /** The Google account signed in to, when known; "" otherwise. */
+  account: string;
+  /** Whether sign-ins use the school's own Google client. */
+  own_client: boolean;
+  backup_enabled: boolean;
+  /** The folder in My Drive backups go to; "" until one is chosen. */
+  backup_folder: string;
+  /** Whether this server runs the sign-in photo wall at all. */
+  photo_wall: boolean;
+}
+
+/** `POST /admin/google/finish`: `done` is false until Google calls back. */
+export interface GoogleSignInResult {
+  done: boolean;
+  google?: GoogleStatus;
+}
+
+/**
+ * A folder in the Drive picker. `handle` means something only to this server,
+ * for an hour: no response carries a Drive folder id (photowall_admin.go).
+ */
+export interface GoogleFolder {
+  handle: string;
+  name: string;
+}
+
+export interface LocalFolder {
+  name: string;
+  path: string;
+}
+
+/** `GET /admin/local-folders`: the folders inside `path`. */
+export interface LocalFolderList {
+  path: string;
+  /** "" at the top of a disk. */
+  parent: string;
+  folders: LocalFolder[];
+  /** Home, Desktop, Documents and any external drives. */
+  places: LocalFolder[];
 }
 
 export interface HealthResult {

@@ -11,8 +11,9 @@ import (
 // Turning the sign-in photo wall on from the admin panel. The wall reads
 // Drive through the one Google remote the whole application shares
 // (google.go), so it runs exactly when that remote exists: an admin pressing
-// Sign in with Google here, or Connect under Settings → Google Drive, turns it
-// on with no terminal, no .env edit and no restart.
+// Sign in with Google -- on this screen or on Settings, it is one button
+// (google_admin.go) -- turns it on with no terminal, no .env edit and no
+// restart.
 //
 // **The sign-in is the switch** (2026-09-24), and it is asked of the
 // credential itself rather than of a flag that could disagree with it:
@@ -195,73 +196,4 @@ func rcloneHasRemote(ctx context.Context, remote string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-/* ------------------------------------------------------------ sign-in ---- */
-
-// ConnectPhotoWallGoogle is POST /admin/photo-wall/google/connect: the same
-// sign-in as Settings → Google Drive's Connect (google.go), started from this
-// screen.
-func (db *DB) ConnectPhotoWallGoogle(ctx context.Context, actor Actor) (DriveConnectResult, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return DriveConnectResult{}, err
-	}
-	if db.photoWallConfig() == nil {
-		return DriveConnectResult{}, fmt.Errorf("%w: this server was started without the sign-in photo wall", ErrNotConfigured)
-	}
-	return db.startGoogleSignIn(ctx)
-}
-
-// FinishPhotoWallGoogle is POST /admin/photo-wall/google/finish: write the
-// shared Google remote with the token Google sent back, log who did it, and
-// start the wall. It does not turn on Drive backups -- that is the Settings
-// screen's switch -- but a backup already pointed at this remote picks up the
-// fresh token too.
-//
-// `rclone config create` on an existing name replaces it, so Reconnect is the
-// same call, and it is the fix for an expired sign-in (§9).
-func (db *DB) FinishPhotoWallGoogle(ctx context.Context, actor Actor, id, code string) (PhotoWallStatus, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return PhotoWallStatus{}, err
-	}
-	if db.photoWallConfig() == nil {
-		return PhotoWallStatus{}, fmt.Errorf("%w: this server was started without the sign-in photo wall", ErrNotConfigured)
-	}
-	remote, err := db.finishGoogleSignIn(ctx, id, code, "")
-	if err != nil {
-		return PhotoWallStatus{}, err
-	}
-	if _, err := db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote}); err != nil {
-		return PhotoWallStatus{}, err
-	}
-	if err := db.logPhotoWallGoogle(ctx, actor, remote); err != nil {
-		return PhotoWallStatus{}, err
-	}
-	if err := db.googleSignedIn(ctx); err != nil {
-		return PhotoWallStatus{}, fmt.Errorf("signed in to Google, but the photo wall could not start: %w", err)
-	}
-
-	f, err := db.loadPhotoWallFolder(ctx)
-	if err != nil {
-		return PhotoWallStatus{}, err
-	}
-	return db.photoWallStatus(ctx, f), nil
-}
-
-// logPhotoWallGoogle records who connected the account. The remote's name
-// only; which Google account it is, rclone does not say and the token is not
-// written anywhere but rclone's own file.
-func (db *DB) logPhotoWallGoogle(ctx context.Context, actor Actor, remote string) error {
-	var actorID *string
-	if actor.ID != "" && !actor.trustedCLI {
-		id := actor.ID
-		actorID = &id
-	}
-	if _, err := db.Pool.Exec(ctx, `
-		insert into activity_log (asset_id, actor_id, action, details)
-		values (null, $1, 'signin_photo_wall_google', jsonb_build_object('remote', $2::text))`,
-		actorID, remote); err != nil {
-		return mapPgError("log the photo wall's Google sign-in", err)
-	}
-	return nil
 }

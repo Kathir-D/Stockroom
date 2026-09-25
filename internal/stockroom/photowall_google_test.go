@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,8 +16,8 @@ import (
 	"time"
 )
 
-// Tests for the one Google connection (google.go) and for signing in to it
-// from Admin → Photo wall (photowall_google.go).
+// Tests for the one Google connection (google.go, google_admin.go) and the
+// photo wall it starts (photowall_google.go).
 // rclone is replaced by a shell script on PATH that records its arguments, so
 // nothing here reaches Google or touches the machine's real rclone.conf.
 
@@ -45,7 +48,8 @@ func fakeRcloneBlob() string {
 //     pipes, as it would a real rclone.
 //   - config create records that the remote now exists; listremotes then
 //     names it.
-//   - lsjson answers an empty folder, so a wall that starts has nothing to do.
+//   - lsjson answers $FAKE_RCLONE_LSJSON, or an empty folder, so a wall that
+//     starts has nothing to do.
 func fakeRclone(t *testing.T) (argsLog string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -71,7 +75,7 @@ case "$1" in
     echo "$3" > "$FAKE_RCLONE_DIR/remote"
     ;;
   lsjson)
-    echo "[]"
+    echo "${FAKE_RCLONE_LSJSON:-[]}"
     ;;
 esac
 `
@@ -166,15 +170,15 @@ func TestAuthorizeTokenReadsBothShapes(t *testing.T) {
 func googleSettings(t *testing.T, db *DB, remote, clientID, clientSecret string) {
 	t.Helper()
 	ctx := context.Background()
-	var r, id, secret *string
+	var r, id, secret, account *string
 	var enabled bool
-	if err := db.Pool.QueryRow(ctx, `select drive_remote, drive_enabled, google_client_id, google_client_secret
-		from app_settings where id = true`).Scan(&r, &enabled, &id, &secret); err != nil {
+	if err := db.Pool.QueryRow(ctx, `select drive_remote, drive_enabled, google_client_id, google_client_secret, google_account
+		from app_settings where id = true`).Scan(&r, &enabled, &id, &secret, &account); err != nil {
 		t.Fatalf("read settings: %v", err)
 	}
 	t.Cleanup(func() {
 		db.Pool.Exec(context.Background(), `update app_settings set drive_remote = $1, drive_enabled = $2,
-			google_client_id = $3, google_client_secret = $4 where id = true`, r, enabled, id, secret)
+			google_client_id = $3, google_client_secret = $4, google_account = $5 where id = true`, r, enabled, id, secret, account)
 	})
 	if _, err := db.Pool.Exec(ctx, `update app_settings set drive_remote = $1, drive_enabled = false,
 		google_client_id = $2, google_client_secret = $3 where id = true`,
@@ -183,12 +187,30 @@ func googleSettings(t *testing.T, db *DB, remote, clientID, clientSecret string)
 	}
 }
 
-// The whole feature, end to end: off until somebody signs in, then a sign-in
-// on the Photo wall screen writes the one shared Google remote and starts the
-// wall on the running server with no restart. The token reaches rclone's
+// fakeGoogleAbout stands in for Drive's "who is this token for".
+func fakeGoogleAbout(t *testing.T, email string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ya29.FAKE-ACCESS-SECRET" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprintf(w, `{"user":{"emailAddress":%q}}`, email)
+	}))
+	t.Cleanup(srv.Close)
+	old := googleAboutURL
+	googleAboutURL = srv.URL
+	t.Cleanup(func() { googleAboutURL = old })
+}
+
+// The whole feature, end to end: off until somebody signs in, then one
+// sign-in writes the shared Google remote, records which account it is, and
+// starts the wall on the running server with no restart. It does not turn
+// backups on -- choosing a backup folder does. The token reaches rclone's
 // config and no response.
-func TestPhotoWallGoogleSignInStartsTheWall(t *testing.T) {
+func TestGoogleSignInStartsTheWall(t *testing.T) {
 	argsLog := fakeRclone(t)
+	fakeGoogleAbout(t, "media@example.org")
 	db := requireTestDB(t)
 	googleSettings(t, db, "", "", "")
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
@@ -199,54 +221,61 @@ func TestPhotoWallGoogleSignInStartsTheWall(t *testing.T) {
 	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 	t.Cleanup(func() {
 		db.Pool.Exec(context.Background(),
-			`delete from activity_log where action = 'signin_photo_wall_google' and actor_id = $1`, admin.ID)
+			`delete from activity_log where action = 'google_sign_in' and actor_id = $1`, admin.ID)
 	})
 
 	db.StartPhotoWall(ctx, PhotoWallConfig{Dir: t.TempDir()})
 	if db.SignInPhotoWall() != nil {
 		t.Fatal("the wall started with nobody signed in to Google")
 	}
-	st, err := db.GetPhotoWallStatus(ctx, admin)
+	g, err := db.GetGoogleStatus(ctx, admin)
 	if err != nil {
-		t.Fatalf("GetPhotoWallStatus: %v", err)
+		t.Fatalf("GetGoogleStatus: %v", err)
 	}
-	if st.Enabled || st.GoogleConnected || !st.CanConnectGoogle || st.Remote != DefaultGoogleRemote {
-		t.Errorf("before sign-in: enabled=%v connected=%v can_connect=%v remote=%q; want off, not connected, connectable, %q",
-			st.Enabled, st.GoogleConnected, st.CanConnectGoogle, st.Remote, DefaultGoogleRemote)
+	if g.Connected || !g.RcloneInstalled || !g.PhotoWall {
+		t.Errorf("before sign-in: %+v; want not connected, rclone installed, a photo wall", g)
 	}
 
-	res, err := db.ConnectPhotoWallGoogle(ctx, admin)
+	res, err := db.ConnectGoogle(ctx, admin)
 	if err != nil {
-		t.Fatalf("ConnectPhotoWallGoogle: %v", err)
+		t.Fatalf("ConnectGoogle: %v", err)
 	}
 	if !strings.Contains(res.URL, "127.0.0.1:53682") {
 		t.Errorf("sign-in link = %q, want rclone's local callback", res.URL)
 	}
 
-	// The fake prints its token straight after the link; Finish polls for it.
-	st, err = db.FinishPhotoWallGoogle(ctx, admin, res.ID, "")
-	if err != nil {
-		t.Fatalf("FinishPhotoWallGoogle: %v", err)
+	// The fake prints its token straight after the link; the screen polls.
+	var done GoogleSignInResult
+	for deadline := time.Now().Add(10 * time.Second); !done.Done && time.Now().Before(deadline); {
+		if done, err = db.FinishGoogle(ctx, admin, res.ID, ""); err != nil {
+			t.Fatalf("FinishGoogle: %v", err)
+		}
 	}
-	if !st.Enabled || !st.GoogleConnected || !st.CanSetFolder {
-		t.Errorf("after sign-in: enabled=%v connected=%v can_set_folder=%v; want all true, with no restart",
-			st.Enabled, st.GoogleConnected, st.CanSetFolder)
+	if !done.Done || done.Google == nil || !done.Google.Connected || done.Google.Account != "media@example.org" {
+		t.Fatalf("after sign-in: %+v; want done, connected, as media@example.org", done)
+	}
+	if done.Google.BackupEnabled {
+		t.Error("signing in turned Drive backups on; choosing a backup folder is what does that")
 	}
 	if db.SignInPhotoWall() == nil {
-		t.Error("the sign-in screen's reel is still nil after the wall started")
+		t.Error("the sign-in screen's reel is still nil after signing in")
+	}
+	st, err := db.GetPhotoWallStatus(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Enabled || !st.GoogleConnected || !st.CanSetFolder || st.Remote != DefaultGoogleRemote {
+		t.Errorf("photo wall after sign-in: enabled=%v connected=%v can_set_folder=%v remote=%q",
+			st.Enabled, st.GoogleConnected, st.CanSetFolder, st.Remote)
 	}
 
-	var sawAuthorize, sawCreate bool
+	var sawCreate bool
 	for _, call := range rcloneCalls(t, argsLog) {
-		switch {
-		case strings.HasPrefix(call, "authorize drive"):
-			sawAuthorize = true
-		case strings.HasPrefix(call, "config create "):
+		if strings.HasPrefix(call, "config create ") {
 			sawCreate = true
 			if !strings.HasPrefix(call, "config create "+DefaultGoogleRemote+" drive ") || !strings.Contains(call, "scope=drive ") {
 				t.Errorf("config ran as %q, want the shared %s remote with scope=drive", call, DefaultGoogleRemote)
 			}
-			// The token rclone printed, unframed -- not the arrows around it.
 			if !strings.Contains(call, "token="+fakeRcloneToken) {
 				t.Errorf("config ran as %q, want the token JSON rclone authorize returned", call)
 			}
@@ -255,88 +284,153 @@ func TestPhotoWallGoogleSignInStartsTheWall(t *testing.T) {
 			}
 		}
 	}
-	if !sawAuthorize || !sawCreate {
-		t.Errorf("rclone calls %v, want an authorize and a config create", rcloneCalls(t, argsLog))
+	if !sawCreate {
+		t.Errorf("rclone calls %v, want a config create", rcloneCalls(t, argsLog))
 	}
 
-	s, err := db.loadSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
+	for _, v := range []any{done, st} {
+		body, _ := json.Marshal(v)
+		if strings.Contains(string(body), "SECRET") {
+			t.Errorf("a response carries the token: %s", body)
+		}
 	}
-	if s.DriveRemote != DefaultGoogleRemote || s.DriveEnabled {
-		t.Errorf("after the photo wall's sign-in: drive_remote=%q drive_enabled=%v; want the shared remote recorded and backups left as they were",
-			s.DriveRemote, s.DriveEnabled)
-	}
-
-	body, _ := json.Marshal(st)
-	if strings.Contains(string(body), "SECRET") {
-		t.Errorf("the status carries the token: %s", body)
-	}
-
 	var logged int
 	if err := db.Pool.QueryRow(ctx,
-		`select count(*) from activity_log where action = 'signin_photo_wall_google' and actor_id = $1`,
+		`select count(*) from activity_log where action = 'google_sign_in' and actor_id = $1`,
 		admin.ID).Scan(&logged); err != nil || logged != 1 {
 		t.Errorf("activity_log rows = %d (%v), want 1 naming who signed in", logged, err)
 	}
 }
 
-// One connection, from the other side: Connect under Settings → Google Drive
-// writes the same remote, turns backups on, and starts a photo wall that was
-// waiting for a sign-in. The school's own client reaches both `rclone
-// authorize` (through the environment) and the remote, and its secret reaches
+// While Google has not called back, finishing is "not yet", not an error:
+// the screen polls on it after opening Google's page itself.
+func TestGoogleSignInWaitsForGoogle(t *testing.T) {
+	fakeRclone(t)
+	t.Setenv("FAKE_RCLONE_HANG", "1")
+	db := requireTestDB(t)
+	googleSettings(t, db, "", "", "")
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	ctx := context.Background()
+
+	res, err := db.ConnectGoogle(ctx, admin)
+	if err != nil {
+		t.Fatalf("ConnectGoogle: %v", err)
+	}
+	got, err := db.FinishGoogle(ctx, admin, res.ID, "")
+	if err != nil || got.Done {
+		t.Errorf("FinishGoogle before Google called back = %+v, %v; want done=false and no error", got, err)
+	}
+}
+
+// The school's own client reaches both `rclone authorize` (through the
+// environment, never the command line) and the remote, and its secret reaches
 // no response.
-func TestBackupConnectIsTheOneGoogleConnection(t *testing.T) {
+func TestGoogleSignInUsesTheSchoolsClient(t *testing.T) {
 	argsLog := fakeRclone(t)
+	fakeGoogleAbout(t, "media@example.org")
 	db := requireTestDB(t)
 	const clientID, clientSecret = "123-abc.apps.googleusercontent.com", "GOCSPX-FAKE-CLIENT-SECRET"
 	googleSettings(t, db, "", clientID, clientSecret)
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 	captureLog(t)
+	ctx := context.Background()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
-	db.StartPhotoWall(ctx, PhotoWallConfig{Dir: t.TempDir()})
-
-	res, err := db.ConnectDrive(ctx, admin)
+	res, err := db.ConnectGoogle(ctx, admin)
 	if err != nil {
-		t.Fatalf("ConnectDrive: %v", err)
+		t.Fatalf("ConnectGoogle: %v", err)
 	}
 	if !strings.Contains(res.PasteCommand, clientID) || strings.Contains(res.PasteCommand, clientSecret) {
 		t.Errorf("paste command = %q, want the client id and not its secret", res.PasteCommand)
 	}
-	s, err := db.FinishDriveConnect(ctx, admin, res.ID, "", "")
-	if err != nil {
-		t.Fatalf("FinishDriveConnect: %v", err)
+	// The pasted-block path, as from another machine.
+	got, err := db.FinishGoogle(ctx, admin, res.ID, fakeRcloneBlob())
+	if err != nil || !got.Done || !got.Google.OwnClient {
+		t.Fatalf("FinishGoogle with a pasted block = %+v, %v", got, err)
 	}
-	if s.DriveRemote != DefaultGoogleRemote || !s.DriveEnabled {
-		t.Errorf("drive_remote=%q drive_enabled=%v, want %q and on", s.DriveRemote, s.DriveEnabled, DefaultGoogleRemote)
+	body, _ := json.Marshal(got)
+	if strings.Contains(string(body), clientSecret) {
+		t.Errorf("the response carries the client secret: %s", body)
 	}
-	if s.GoogleClientSecret != "" || !s.GoogleClientSecretSet || s.GoogleClientID != clientID {
-		t.Errorf("settings response: client_id=%q secret=%q secret_set=%v; want the id, a blank secret and _set", s.GoogleClientID, s.GoogleClientSecret, s.GoogleClientSecretSet)
-	}
-	if db.SignInPhotoWall() == nil {
-		t.Error("the backup's Connect did not start the photo wall, which reads through the same remote")
-	}
-
 	calls := strings.Join(rcloneCalls(t, argsLog), "\n")
-	if !strings.Contains(calls, "client="+clientID+" secret="+clientSecret) {
-		t.Errorf("rclone authorize did not get the school's client in its environment:\n%s", calls)
-	}
 	if !strings.Contains(calls, "client_id="+clientID) || !strings.Contains(calls, "client_secret="+clientSecret) {
 		t.Errorf("the remote was written without the school's client:\n%s", calls)
 	}
 	if strings.Contains(calls, "authorize drive "+clientID) {
 		t.Errorf("the client went onto authorize's command line:\n%s", calls)
 	}
+}
 
-	st, err := db.GetPhotoWallStatus(ctx, admin)
+// The Drive picker hands out handles, never Drive ids, and a handle sent back
+// reaches rclone as the folder it stood for.
+func TestGoogleFolderPickerUsesHandles(t *testing.T) {
+	argsLog := fakeRclone(t)
+	t.Setenv("FAKE_RCLONE_LSJSON", `[{"Path":"Photos","Name":"Photos","IsDir":true,"ID":"1FAKEFOLDERIDxyz"},{"Path":"a.jpg","Name":"a.jpg","IsDir":false,"ID":"1FAKEFILEIDxyz"},{"Path":"Backups","Name":"Backups","IsDir":true,"ID":"1FAKEBACKUPSxyz"}]`)
+	db := requireTestDB(t)
+	googleSettings(t, db, "", "", "")
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	ctx := context.Background()
+
+	folders, err := db.GoogleFolders(ctx, admin, GoogleSharedWithMe)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("GoogleFolders: %v", err)
 	}
-	if !st.GoogleConnected || st.Remote != DefaultGoogleRemote {
-		t.Errorf("photo wall after the backup's Connect: connected=%v remote=%q", st.GoogleConnected, st.Remote)
+	if len(folders) != 2 || folders[0].Name != "Backups" || folders[1].Name != "Photos" {
+		t.Fatalf("folders = %+v, want Backups and Photos, sorted, and no file", folders)
+	}
+	body, _ := json.Marshal(folders)
+	if strings.Contains(string(body), "FAKE") {
+		t.Errorf("the picker's response carries a Drive id: %s", body)
+	}
+	if _, err := db.GoogleFolders(ctx, admin, folders[1].Handle); err != nil {
+		t.Fatalf("GoogleFolders(handle): %v", err)
+	}
+	calls := strings.Join(rcloneCalls(t, argsLog), "\n")
+	if !strings.Contains(calls, "lsjson "+DefaultGoogleRemote+": --drive-shared-with-me") ||
+		!strings.Contains(calls, "--drive-root-folder-id 1FAKEFOLDERIDxyz") {
+		t.Errorf("rclone calls:\n%s\nwant Shared with me, then the Photos folder by its id", calls)
+	}
+	if _, err := db.GoogleFolders(ctx, admin, "not-a-handle"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown handle = %v, want ErrNotFound", err)
+	}
+	if _, err := db.CreateGoogleFolder(ctx, admin, GoogleSharedWithMe, "x"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a new folder in Shared with me = %v, want ErrInvalid", err)
+	}
+}
+
+// The local picker lists folders only, skips hidden ones, and makes one.
+func TestLocalFolderPicker(t *testing.T) {
+	db := requireTestDB(t)
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, d := range []string{"b", "A", ".hidden"} {
+		os.Mkdir(filepath.Join(dir, d), 0o755)
+	}
+	os.WriteFile(filepath.Join(dir, "file.txt"), nil, 0o644)
+
+	list, err := db.LocalFolders(ctx, admin, dir)
+	if err != nil {
+		t.Fatalf("LocalFolders: %v", err)
+	}
+	if len(list.Folders) != 2 || list.Folders[0].Name != "A" || list.Folders[1].Name != "b" || list.Parent != filepath.Dir(dir) {
+		t.Errorf("list = %+v, want A and b under %s", list, filepath.Dir(dir))
+	}
+	made, err := db.CreateLocalFolder(ctx, admin, dir, "Stockroom Backups")
+	if err != nil {
+		t.Fatalf("CreateLocalFolder: %v", err)
+	}
+	if info, err := os.Stat(made.Path); err != nil || !info.IsDir() {
+		t.Errorf("made %q: %v", made.Path, err)
+	}
+	if _, err := db.LocalFolders(ctx, admin, "relative/path"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a relative path = %v, want ErrInvalid", err)
+	}
+	if _, err := db.CreateLocalFolder(ctx, admin, dir, "../escape"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a name with a slash = %v, want ErrInvalid", err)
+	}
+	student := actorFor(insertTestProfile(t, db, false, "student-pw"))
+	if _, err := db.LocalFolders(ctx, student, dir); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a student listing folders = %v, want ErrForbidden", err)
 	}
 }
 

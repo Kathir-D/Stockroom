@@ -229,6 +229,11 @@ func (a *driveAuth) finish(err error) {
 	}
 }
 
+// errGoogleWaiting is finishDriveAuthorize's "not yet": the sign-in page is
+// open and Google has not called back. The screen polls on it, so it is a
+// state rather than a failure, and FinishGoogle turns it into done=false.
+var errGoogleWaiting = fmt.Errorf("%w: Google has not sent the sign-in back yet. Finish signing in in the Google window", ErrConflict)
+
 // finishDriveAuthorize returns the token for a pending authorization: the one
 // the callback produced, or the blob the admin pasted.
 func finishDriveAuthorize(ctx context.Context, id, pasted string) (string, error) {
@@ -269,7 +274,7 @@ func finishDriveAuthorize(ctx context.Context, id, pasted string) (string, error
 			return "", err
 		}
 		if done || time.Now().After(deadline) || ctx.Err() != nil {
-			return "", fmt.Errorf("%w: Google has not sent the code back yet. Finish signing in, then press Save again -- or paste the block rclone printed", ErrConflict)
+			return "", errGoogleWaiting
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

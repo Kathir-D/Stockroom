@@ -37,8 +37,9 @@
   const MIN_TILES_PER_COLUMN = 6
 
   /**
-   * Seconds each tile takes to scroll past, per column: 110s and 134s over the
-   * eight tiles a column held when those numbers were chosen.
+   * Seconds each tile takes to scroll past, per column: 88s and 107s over the
+   * eight tiles a column held when those numbers were chosen (110s and 134s
+   * until 2026-09-25, when the wall was sped up by a fifth on request).
    *
    * A loop's duration is this times the column's length, not a constant. The
    * strip loops by translating -50% of itself, so a fixed duration makes the
@@ -46,10 +47,10 @@
    * would have doubled it, and the whole case for the wall rests on it moving
    * slowly enough that peripheral vision stops tracking it. Per tile, the speed
    * is the same for any batch, a long batch just takes longer to come round,
-   * and the two rates keep the 110:134 ratio that stops the columns falling
+   * and the two rates keep the 88:107 ratio that stops the columns falling
    * into step.
    */
-  const SECONDS_PER_TILE = { up: 110 / 8, down: 134 / 8 }
+  const SECONDS_PER_TILE = { up: 88 / 8, down: 107 / 8 }
 
   let columns = $state<{ left: string[]; right: string[] } | null>(null)
   const left = $derived(columns ? strip(columns.left) : [])
@@ -226,7 +227,7 @@
   }
 
   /*
-    110s and 134s for eight tiles: slow enough that peripheral vision stops
+    88s and 107s for eight tiles: slow enough that peripheral vision stops
     tracking the motion, and coprime so the two columns never fall into step and
     start reading as one moving object. The inline animation-duration scales
     these with the column's length (SECONDS_PER_TILE); the values here are the
@@ -235,11 +236,11 @@
     fast machine.
   */
   .strip.up {
-    animation: wall-up 110s linear infinite;
+    animation: wall-up 88s linear infinite;
   }
 
   .strip.down {
-    animation: wall-down 134s linear infinite;
+    animation: wall-down 107s linear infinite;
   }
 
   @keyframes wall-up {

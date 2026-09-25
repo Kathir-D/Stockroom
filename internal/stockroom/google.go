@@ -75,23 +75,24 @@ func (db *DB) startGoogleSignIn(ctx context.Context) (DriveConnectResult, error)
 }
 
 // finishGoogleSignIn writes the one remote with the token Google sent back
-// and returns its name. remote may be blank, meaning the one already
-// configured. The caller has checked the actor and saves the name.
-func (db *DB) finishGoogleSignIn(ctx context.Context, id, code, remote string) (string, error) {
+// and returns its name, and the token for the one lookup FinishGoogle makes
+// with it. remote may be blank, meaning the one already configured. The
+// caller has checked the actor and saves the name.
+func (db *DB) finishGoogleSignIn(ctx context.Context, id, code, remote string) (string, string, error) {
 	s, err := db.loadSettings(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	remote = strings.TrimSuffix(strings.TrimSpace(remote), ":")
 	if remote == "" {
 		remote = s.googleRemote()
 	}
 	if strings.ContainsAny(remote, ` :/\`) {
-		return "", fmt.Errorf("%w: a remote name cannot contain spaces, colons or slashes", ErrInvalid)
+		return "", "", fmt.Errorf("%w: a remote name cannot contain spaces, colons or slashes", ErrInvalid)
 	}
 	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// The client is written explicitly even when it is rclone's shared one:
 	// a reconnect replaces the remote, and a client id left over from an
@@ -108,17 +109,16 @@ func (db *DB) finishGoogleSignIn(ctx context.Context, id, code, remote string) (
 		if c.secret != "" {
 			msg = strings.ReplaceAll(msg, c.secret, "<client secret>")
 		}
-		return "", fmt.Errorf("save the Google sign-in: %s", msg)
+		return "", "", fmt.Errorf("save the Google sign-in: %s", msg)
 	}
-	return remote, nil
+	return remote, token, nil
 }
 
-// googleSignedIn is what either screen's Connect does last: start the photo
-// wall if this server has one and it is not running yet, or point a running
-// one at the remote that was just written. Best-effort from the backup's
-// side -- a backup connection must not fail because the decorative wall could
-// not start -- so FinishDriveConnect logs the error and FinishPhotoWallGoogle
-// returns it.
+// googleSignedIn is what a sign-in does last: start the photo wall if this
+// server has one and it is not running yet, or point a running one at the
+// remote that was just written. Best-effort -- a Google connection must not
+// fail because the decorative wall could not start -- so FinishGoogle logs the
+// error rather than returning it.
 func (db *DB) googleSignedIn(ctx context.Context) error {
 	db.photoWallStart.Lock()
 	wall, source := db.photoWallParts()
@@ -142,7 +142,7 @@ func (s Settings) sharedClientWarning() string {
 	if s.GoogleClientID != "" || !s.DriveEnabled {
 		return ""
 	}
-	return "Google Drive is signed in with rclone's shared Google client, which rclone is retiring during 2026; once it stops, backups to Drive and the sign-in photo wall stop with it. Add your own Google client under Settings → Google sign-in, then press Reconnect."
+	return "Google Drive is signed in with rclone's shared Google client, which rclone is retiring during 2026; once it stops, backups to Drive and the sign-in photo wall stop with it. Add your own under Settings → Google account → Your own Google client, then sign in again."
 }
 
 func logGoogleWallError(err error) {
