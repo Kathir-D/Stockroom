@@ -177,8 +177,8 @@ func (d deps) handlePhotoWallPreview(w http.ResponseWriter, r *http.Request, act
 }
 
 // POST /admin/photo-wall/google/connect
-// Starts `rclone authorize` for a read-only Drive token and returns the link
-// to open. The token never passes through here: Google sends it to rclone.
+// Starts `rclone authorize` for the one Google connection the backup and the
+// wall share (google.go), and returns the link to open. The token never passes through here: Google sends it to rclone.
 func (d deps) handlePhotoWallGoogleConnect(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	res, err := d.db.ConnectPhotoWallGoogle(r.Context(), actor)
 	if err != nil {

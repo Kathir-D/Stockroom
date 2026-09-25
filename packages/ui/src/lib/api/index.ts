@@ -716,10 +716,9 @@ export function photoWallPreview() {
 }
 
 /**
- * Sign in to Google for the photo wall: starts `rclone authorize` for a
- * **read-only** Drive token and returns the link to open. The same flow as
- * `connectDrive()`, with a narrower grant — the wall can read the folder and
- * nothing else.
+ * Sign in to Google from the Photo wall screen: the same sign-in as
+ * `connectDrive()`, which writes the one Google connection the backup and the
+ * wall share, started from here. Returns the link to open.
  */
 export function connectPhotoWallGoogle() {
   return request<DriveConnectResult>("/admin/photo-wall/google/connect", {

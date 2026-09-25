@@ -130,7 +130,6 @@ func main() {
 	// sign-in, and a server that refuses to start over a decorative wall
 	// breaks it hardest.
 	db.StartPhotoWall(ctx, stockroom.PhotoWallConfig{
-		Remote:           cfg.SignInPhotosRemote,
 		Dir:              cfg.SignInPhotosDir,
 		Count:            cfg.SignInPhotosCount,
 		Batch:            cfg.SignInPhotosBatch,

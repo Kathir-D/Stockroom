@@ -283,15 +283,17 @@ func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallS
 	// of two thousand photographs and was resting after 25 failed downloads
 	// reported no error while showing nothing. Newer wins, because the older
 	// of the two has usually been overtaken by the newer.
-	if cfg := db.photoWallConfig(); cfg != nil {
-		st.Remote = cfg.Remote
+	if db.photoWallConfig() == nil {
+		// This server has no wall; nothing to connect.
+	} else if remote, err := db.googleRemoteName(ctx); err == nil {
+		st.Remote = remote
 		st.CanConnectGoogle = st.RcloneInstalled
 		if st.RcloneInstalled {
 			// Asked of rclone per read, like RcloneInstalled: an admin who
 			// signs in on this screen should see the answer change on the
 			// response to that press, not after a restart. A failure reads as
 			// not connected, which is what the button then offers to fix.
-			st.GoogleConnected, _ = rcloneHasRemote(ctx, cfg.Remote)
+			st.GoogleConnected, _ = rcloneHasRemote(ctx, remote)
 		}
 	}
 	if err, at := wall.fillFailure(); err != nil && (st.LastErrorAt == nil || at.After(*st.LastErrorAt)) {

@@ -345,6 +345,9 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 	if !out.FailsafeAdminConfigured {
 		out.Warnings = append(out.Warnings, failsafeWarning)
 	}
+	if w := settings.sharedClientWarning(); w != "" {
+		out.Warnings = append(out.Warnings, w)
+	}
 
 	if photos, err := db.PhotoMirrorStatus(ctx, settings); err == nil && photos != nil {
 		out.PhotoMirror = photos

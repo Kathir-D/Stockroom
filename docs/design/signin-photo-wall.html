@@ -1092,6 +1092,11 @@ has to come from Drive again.</p>
 <hr />
 
 <h2 id="config"><span class="num">8</span>Configuration</h2>
+<p><em>Superseded again 2026-09-25:</em> there is no separate photo wall remote and no read-only scope any more.
+The wall reads through the one Google connection the Drive backup uses (<code>app_settings.drive_remote</code>,
+<code>internal/stockroom/google.go</code>), and signing in on either screen connects both. The read-only sign-in never
+worked: <code>rclone authorize</code> answers an options blob with a base64 config blob rather than the token JSON, so every
+sign-in reached Google and was then reported as not having completed. <code>SIGNIN_PHOTOS_REMOTE</code> is gone.</p>
 <p><em>Superseded 2026-09-24:</em> <code>SIGNIN_PHOTOS_REMOTE</code> is no longer the switch. The wall is off until an
 admin presses <strong>Sign in with Google</strong> on the Photo wall screen, which runs <code>rclone authorize</code>
 for a <code>drive.readonly</code> token, writes the remote and starts the wall on the running server

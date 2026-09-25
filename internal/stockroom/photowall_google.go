@@ -8,37 +8,27 @@ import (
 	"time"
 )
 
-// Turning the sign-in photo wall on from the admin panel: a "Sign in with
-// Google" button on Admin → Photo wall that creates the read-only rclone
-// remote and starts the wall on the spot, with no terminal, no .env edit and
-// no restart.
+// Turning the sign-in photo wall on from the admin panel. The wall reads
+// Drive through the one Google remote the whole application shares
+// (google.go), so it runs exactly when that remote exists: an admin pressing
+// Sign in with Google here, or Connect under Settings → Google Drive, turns it
+// on with no terminal, no .env edit and no restart.
 //
-// **The sign-in is the switch.** Until 2026-09-24 the switch was
-// SIGNIN_PHOTOS_REMOTE in .env, read once at boot, and the screen could only
-// say "edit a file and restart the server" -- the one instruction the Phase 7
-// rule (no admin ever edits a file) exists to rule out. Now the wall runs
-// exactly when rclone has a remote for it, and the only thing that creates one
-// is an admin signing in to Google. So "is it on?" and "has anybody connected
-// a Google account?" are one question, answered by the credential itself
-// rather than by a flag that could disagree with it: restore this database
-// onto a new machine and the wall is off there, with the button asking for a
-// sign-in, instead of on and failing against a remote that does not exist.
+// **The sign-in is the switch** (2026-09-24), and it is asked of the
+// credential itself rather than of a flag that could disagree with it:
+// restore this database onto a new machine and the wall is off there, with
+// the button asking for a sign-in, instead of on and failing against a remote
+// that does not exist.
 //
 // The token goes where it always went -- rclone's own config file, outside
 // the repository -- and nowhere else: not into app_settings, so it is never in
 // a backup; not into any response; not into the log. What the screen learns
 // is `rclone listremotes`, which prints names only.
 
-// DefaultPhotoWallRemote is the rclone remote the sign-in button creates.
-// SIGNIN_PHOTOS_REMOTE renames it, for a machine whose remote was made by hand
-// under another name before the button existed.
-const DefaultPhotoWallRemote = "gdrive-photos"
-
 // PhotoWallConfig is the install-time half of the wall: where the tiles are
-// cached, how many, and which rclone remote to read through. Everything an
-// admin changes -- the folder -- lives in app_settings instead.
+// cached and how many. The remote is the shared Google one, from
+// app_settings; the folder lives there too.
 type PhotoWallConfig struct {
-	Remote           string
 	Dir              string
 	Count            int
 	Batch            int
@@ -84,8 +74,6 @@ func (db *DB) SetPhotoWall(wall *PhotoWall, source *DrivePhotoSource) {
 // failure in this subsystem may delay, block or visibly break sign-in; every
 // reason the wall is off is logged once and shown on the admin screen.
 func (db *DB) StartPhotoWall(ctx context.Context, cfg PhotoWallConfig) {
-	cfg.Remote = photoWallRemoteName(cfg.Remote)
-
 	db.photoWallStart.Lock()
 	defer db.photoWallStart.Unlock()
 	db.photoWallCfg = &cfg
@@ -95,13 +83,18 @@ func (db *DB) StartPhotoWall(ctx context.Context, cfg PhotoWallConfig) {
 		log.Printf("sign-in photo wall: off, rclone is not installed")
 		return
 	}
-	connected, err := rcloneHasRemote(ctx, cfg.Remote)
+	remote, err := db.googleRemoteName(ctx)
+	if err != nil {
+		log.Printf("warning: sign-in photo wall: %v", err)
+		return
+	}
+	connected, err := rcloneHasRemote(ctx, remote)
 	if err != nil {
 		log.Printf("warning: sign-in photo wall: could not read rclone's remotes: %v", err)
 		return
 	}
 	if !connected {
-		log.Printf("sign-in photo wall: off until an admin signs in to Google for it in Admin → Photo wall")
+		log.Printf("sign-in photo wall: off until an admin signs in to Google (Admin → Photo wall, or Settings → Google Drive)")
 		return
 	}
 	if err := db.startPhotoWallLocked(ctx); err != nil {
@@ -109,16 +102,33 @@ func (db *DB) StartPhotoWall(ctx context.Context, cfg PhotoWallConfig) {
 	}
 }
 
+// googleRemoteName is the one Google remote's name, from app_settings.
+func (db *DB) googleRemoteName(ctx context.Context) (string, error) {
+	s, err := db.loadSettings(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read the Google remote's name: %w", err)
+	}
+	return s.googleRemote(), nil
+}
+
 // startPhotoWallLocked builds and starts the reel and its source, once. The
-// caller holds photoWallStart. A wall already running is left alone: rclone
-// reads its config on every call, so a reconnected token is picked up by the
-// next listing or download with nothing here restarting.
+// caller holds photoWallStart. A wall already running is pointed at the
+// current remote and otherwise left alone: rclone reads its config on every
+// call, so a reconnected token is picked up by the next listing or download
+// with nothing here restarting.
 func (db *DB) startPhotoWallLocked(ctx context.Context) error {
 	cfg, runCtx := db.photoWallCfg, db.photoWallCtx
 	if cfg == nil || runCtx == nil {
 		return fmt.Errorf("%w: this server was started without the sign-in photo wall", ErrNotConfigured)
 	}
-	if wall, _ := db.photoWallParts(); wall != nil {
+	remote, err := db.googleRemoteName(ctx)
+	if err != nil {
+		return err
+	}
+	if wall, source := db.photoWallParts(); wall != nil {
+		if source.SetRemote(remote) {
+			source.Rebuild()
+		}
 		return nil
 	}
 
@@ -130,7 +140,7 @@ func (db *DB) startPhotoWallLocked(ctx context.Context) error {
 		return err
 	}
 	source, err := NewDrivePhotoSource(DrivePhotoSourceOptions{
-		Remote:          cfg.Remote,
+		Remote:          remote,
 		FolderID:        folderID,
 		Dir:             cfg.Dir,
 		RefreshInterval: cfg.ManifestInterval,
@@ -155,7 +165,7 @@ func (db *DB) startPhotoWallLocked(ctx context.Context) error {
 	// source reads its manifest back out of it.
 	go source.Run(runCtx)
 
-	log.Printf("sign-in photo wall: on, reading Google Drive through rclone remote %q, caching in %s", cfg.Remote, cfg.Dir)
+	log.Printf("sign-in photo wall: on, reading Google Drive through rclone remote %q, caching in %s", remote, cfg.Dir)
 	if folderID == "" {
 		log.Printf("sign-in photo wall: no Drive folder set, so the wall stays empty until one is chosen in Admin → Photo wall")
 	} else {
@@ -169,17 +179,6 @@ func (db *DB) photoWallConfig() *PhotoWallConfig {
 	db.photoWallStart.Lock()
 	defer db.photoWallStart.Unlock()
 	return db.photoWallCfg
-}
-
-// photoWallRemoteName normalises the configured remote name. A trailing
-// colon is how rclone *prints* a remote, so it is a natural thing to type
-// into .env; `rclone config create` wants the bare name.
-func photoWallRemoteName(remote string) string {
-	remote = strings.TrimSuffix(strings.TrimSpace(remote), ":")
-	if remote == "" {
-		return DefaultPhotoWallRemote
-	}
-	return remote
 }
 
 // rcloneHasRemote reports whether rclone has a remote by this name.
@@ -200,14 +199,9 @@ func rcloneHasRemote(ctx context.Context, remote string) (bool, error) {
 
 /* ------------------------------------------------------------ sign-in ---- */
 
-// ConnectPhotoWallGoogle is POST /admin/photo-wall/google/connect: start
-// `rclone authorize` for a read-only token and return the link to open.
-//
-// The same flow the backup's Connect button uses (drive_authorize.go), with
-// one difference that matters: it asks Google for drive.readonly. The
-// backup's token can write to the whole of Drive; this one can read and do
-// nothing else, so a machine left open on the photo wall can never be used to
-// change or delete a photograph.
+// ConnectPhotoWallGoogle is POST /admin/photo-wall/google/connect: the same
+// sign-in as Settings → Google Drive's Connect (google.go), started from this
+// screen.
 func (db *DB) ConnectPhotoWallGoogle(ctx context.Context, actor Actor) (DriveConnectResult, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return DriveConnectResult{}, err
@@ -215,56 +209,36 @@ func (db *DB) ConnectPhotoWallGoogle(ctx context.Context, actor Actor) (DriveCon
 	if db.photoWallConfig() == nil {
 		return DriveConnectResult{}, fmt.Errorf("%w: this server was started without the sign-in photo wall", ErrNotConfigured)
 	}
-	if !rcloneInstalled() {
-		return DriveConnectResult{}, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then reload this page", ErrNotConfigured)
-	}
-	return startDriveAuthorize(ctx, driveScopeReadOnly)
+	return db.startGoogleSignIn(ctx)
 }
 
 // FinishPhotoWallGoogle is POST /admin/photo-wall/google/finish: write the
-// rclone remote with the token Google sent back, log who did it, and start
-// the wall.
+// shared Google remote with the token Google sent back, log who did it, and
+// start the wall. It does not turn on Drive backups -- that is the Settings
+// screen's switch -- but a backup already pointed at this remote picks up the
+// fresh token too.
 //
 // `rclone config create` on an existing name replaces it, so Reconnect is the
-// same call -- and it is the fix for an expired sign-in that until now needed
-// `rclone config reconnect` typed into a terminal (§9).
+// same call, and it is the fix for an expired sign-in (§9).
 func (db *DB) FinishPhotoWallGoogle(ctx context.Context, actor Actor, id, code string) (PhotoWallStatus, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return PhotoWallStatus{}, err
 	}
-	cfg := db.photoWallConfig()
-	if cfg == nil {
+	if db.photoWallConfig() == nil {
 		return PhotoWallStatus{}, fmt.Errorf("%w: this server was started without the sign-in photo wall", ErrNotConfigured)
 	}
-	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code), driveScopeReadOnly)
+	remote, err := db.finishGoogleSignIn(ctx, id, code, "")
 	if err != nil {
 		return PhotoWallStatus{}, err
 	}
-	// root_folder_id is left blank on purpose (§3): the folder is supplied per
-	// command, so the remote can read whichever folder is pasted next.
-	if _, err := runRclone(ctx, time.Minute, "config", "create", cfg.Remote, "drive",
-		"config_is_local=false", "token="+token, "scope="+driveScopeReadOnly); err != nil {
-		// rclone quotes what it could not parse, and what it was given is the
-		// token. The message is going to a screen and a log.
-		msg := strings.ReplaceAll(err.Error(), token, "<token>")
-		return PhotoWallStatus{}, fmt.Errorf("save the Google sign-in: %s", msg)
-	}
-	if err := db.logPhotoWallGoogle(ctx, actor, cfg.Remote); err != nil {
+	if _, err := db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote}); err != nil {
 		return PhotoWallStatus{}, err
 	}
-
-	db.photoWallStart.Lock()
-	_, running := db.photoWallParts()
-	startErr := db.startPhotoWallLocked(ctx)
-	db.photoWallStart.Unlock()
-	if startErr != nil {
-		return PhotoWallStatus{}, fmt.Errorf("signed in to Google, but the photo wall could not start: %w", startErr)
+	if err := db.logPhotoWallGoogle(ctx, actor, remote); err != nil {
+		return PhotoWallStatus{}, err
 	}
-	// A reconnect is usually the answer to a listing that failed on an
-	// expired token. Without this the source would wait out its five-minute
-	// retry while the admin stares at the error they just fixed.
-	if running != nil && running.Status().LastError != "" {
-		running.Rebuild()
+	if err := db.googleSignedIn(ctx); err != nil {
+		return PhotoWallStatus{}, fmt.Errorf("signed in to Google, but the photo wall could not start: %w", err)
 	}
 
 	f, err := db.loadPhotoWallFolder(ctx)

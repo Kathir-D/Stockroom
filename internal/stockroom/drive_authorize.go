@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -51,47 +52,49 @@ const driveAuthRetention = 10 * time.Minute
 // releases, so the pattern matches the URL rather than the sentence around it.
 var driveAuthURL = regexp.MustCompile(`https?://(127\.0\.0\.1|localhost):\d+/auth\S*`)
 
-// The two Google scopes Stockroom asks for, one per rclone remote. The backup
-// writes to Drive and needs the whole of it; the sign-in photo wall only ever
-// reads, so its remote is configured drive.readonly and the token Google issues
-// for it cannot modify or delete anything (docs/design/signin-photo-wall.html
-// §3). The scope is decided when the token is *issued*, not by the `scope =`
-// line in rclone.conf, which is why it has to reach `rclone authorize`.
-const (
-	driveScopeFull     = "drive"
-	driveScopeReadOnly = "drive.readonly"
-)
+// googleClient is the OAuth client a sign-in uses: the school's own from
+// Admin → Settings, or blank for rclone's shared one, which rclone is retiring
+// during 2026 (https://rclone.org/drive/#making-your-own-client-id).
+type googleClient struct {
+	id, secret string
+}
 
-// driveAuthorizeArgs is the command line for one scope. rclone takes a
-// backend's options as a base64 JSON blob -- the same blob its own remote
-// setup prints for `rclone authorize` -- and it wants the unpadded URL
-// alphabet: a padded one is refused with "illegal base64 data". Verified
-// against rclone v1.75: with the blob, Google's consent URL carries
-// .../auth/drive.readonly; without it, .../auth/drive.
-func driveAuthorizeArgs(scope string) []string {
-	args := []string{"authorize", "drive"}
-	if scope != driveScopeFull {
-		blob := fmt.Sprintf(`{"scope":%q}`, scope)
-		args = append(args, base64.RawURLEncoding.EncodeToString([]byte(blob)))
+func (c googleClient) shared() bool { return c.id == "" }
+
+// driveAuthorizeArgs is the command line for one sign-in. It asks for the
+// full `drive` scope, which is rclone's default and what the one remote both
+// Drive features share needs: the backup writes, the photo wall reads.
+//
+// The client travels in the environment (driveAuthorizeEnv), not here, so the
+// secret is never on a process list. rclone reads RCLONE_DRIVE_CLIENT_ID and
+// _SECRET for the temporary remote `authorize` builds -- verified against
+// v1.75: the consent URL carries the id from the environment.
+func driveAuthorizeArgs() []string {
+	return []string{"authorize", "drive", "--auth-no-open-browser"}
+}
+
+func driveAuthorizeEnv(c googleClient) []string {
+	env := os.Environ()
+	if !c.shared() {
+		env = append(env, "RCLONE_DRIVE_CLIENT_ID="+c.id, "RCLONE_DRIVE_CLIENT_SECRET="+c.secret)
 	}
-	return append(args, "--auth-no-open-browser")
+	return env
 }
 
 // drivePasteCommand is the same authorize, as a person would type it on a
-// machine whose browser can reach Google: the arguments above without the
-// flag that only matters to a process with nobody watching its output.
-func drivePasteCommand(scope string) string {
-	args := driveAuthorizeArgs(scope)
-	return "rclone " + strings.Join(args[:len(args)-1], " ")
+// machine whose browser can reach Google. With the school's own client it has
+// to carry that client, since the token is bound to the client that asked for
+// it; the secret is a placeholder because no response carries a secret.
+func drivePasteCommand(c googleClient) string {
+	if c.shared() {
+		return "rclone authorize drive"
+	}
+	return "rclone authorize drive " + c.id + " YOUR-CLIENT-SECRET"
 }
 
 type driveAuth struct {
-	id  string
-	url string
-	// scope is what this attempt asked Google for. finishDriveAuthorize checks
-	// it, so a sign-in the backup screen started -- a full-access token --
-	// cannot be finished into the photo wall's read-only remote.
-	scope  string
+	id     string
+	url    string
 	cancel context.CancelFunc
 	// exited is closed once rclone has exited, which is when its callback
 	// port is free again.
@@ -111,13 +114,13 @@ var pendingDriveAuth = struct {
 // startDriveAuthorize launches rclone and returns as soon as it has printed a
 // URL to open. The process keeps running in the background waiting for
 // Google's callback.
-func startDriveAuthorize(parent context.Context, scope string) (DriveConnectResult, error) {
+func startDriveAuthorize(parent context.Context, client googleClient) (DriveConnectResult, error) {
 	// Every `rclone authorize` listens on the same port, 127.0.0.1:53682, so a
 	// second one cannot start while an earlier one is still waiting -- it fails
 	// to bind and never prints a link, which surfaced as a 30-second timeout
 	// naming `rclone version`. The earlier attempt is one the admin walked
-	// away from (pressed Connect twice, or went from the backup screen to the
-	// photo wall's), so it is the one to stop.
+	// away from (pressed Connect twice, or on Settings and then on Photo
+	// wall), so it is the one to stop.
 	stopUnfinishedDriveAuthorize()
 
 	// Deliberately not derived from the request's context: the request that
@@ -125,8 +128,8 @@ func startDriveAuthorize(parent context.Context, scope string) (DriveConnectResu
 	// outlive it by as long as it takes somebody to sign in to Google.
 	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
 
-	cmd := exec.CommandContext(ctx, rcloneBinary, driveAuthorizeArgs(scope)...)
-	cmd.Env = os.Environ()
+	cmd := exec.CommandContext(ctx, rcloneBinary, driveAuthorizeArgs()...)
+	cmd.Env = driveAuthorizeEnv(client)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -149,7 +152,7 @@ func startDriveAuthorize(parent context.Context, scope string) (DriveConnectResu
 		cancel()
 		return DriveConnectResult{}, err
 	}
-	auth := &driveAuth{id: id, scope: scope, cancel: cancel, exited: make(chan struct{})}
+	auth := &driveAuth{id: id, cancel: cancel, exited: make(chan struct{})}
 
 	urlFound := make(chan string, 2)
 	var wg sync.WaitGroup
@@ -182,7 +185,7 @@ func startDriveAuthorize(parent context.Context, scope string) (DriveConnectResu
 	pendingDriveAuth.m[id] = auth
 	pendingDriveAuth.mu.Unlock()
 
-	return DriveConnectResult{URL: auth.url, ID: id, PasteCommand: drivePasteCommand(scope)}, nil
+	return DriveConnectResult{URL: auth.url, ID: id, PasteCommand: drivePasteCommand(client)}, nil
 }
 
 // scan reads one of rclone's streams, publishing the sign-in URL when it
@@ -201,9 +204,9 @@ func (a *driveAuth) scan(r io.Reader, urlFound chan<- string) {
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "{") && strings.Contains(line, "access_token") {
+		if token, ok := authorizeToken(line); ok {
 			a.mu.Lock()
-			a.token = line
+			a.token = token
 			a.mu.Unlock()
 		}
 	}
@@ -215,7 +218,11 @@ func (a *driveAuth) finish(err error) {
 	a.done = true
 	if a.token == "" && a.err == nil {
 		if err != nil {
-			a.err = fmt.Errorf("the Google connection did not complete: %w", err)
+			// Usually this attempt was stopped: a newer Connect frees the
+			// callback port by stopping it, and so does the 15-minute limit.
+			// Either way the fix is the same button, so it is a conflict the
+			// admin can read, not a 500 with the reason hidden in the log.
+			a.err = fmt.Errorf("%w: the Google sign-in stopped before it finished (%v). Press Connect again", ErrConflict, err)
 		} else {
 			a.err = fmt.Errorf("%w: the Google connection did not complete. Open the link again, or paste the code rclone printed", ErrConflict)
 		}
@@ -224,31 +231,21 @@ func (a *driveAuth) finish(err error) {
 
 // finishDriveAuthorize returns the token for a pending authorization: the one
 // the callback produced, or the blob the admin pasted.
-//
-// scope is what the caller is about to configure a remote for, and an attempt
-// started for a different one is refused. The backup's attempt asked for all
-// of Drive; finishing it into the photo wall's read-only remote would put a
-// write-capable token under a `scope = drive.readonly` line, which reads as
-// safe and is not. A pasted blob cannot be checked the same way -- rclone's
-// token JSON does not carry its scope -- so the photo wall's dialog names the
-// exact read-only command to paste the output of.
-func finishDriveAuthorize(ctx context.Context, id, pasted, scope string) (string, error) {
+func finishDriveAuthorize(ctx context.Context, id, pasted string) (string, error) {
 	pendingDriveAuth.mu.Lock()
 	auth := pendingDriveAuth.m[id]
 	pendingDriveAuth.mu.Unlock()
-	if auth != nil && auth.scope != scope {
-		return "", fmt.Errorf("%w: that Google sign-in was started from a different screen. Press Connect again here", ErrConflict)
-	}
 
 	if pasted != "" {
 		// The admin pasted rclone's blob. It is the token itself, so nothing
 		// is waiting on: this is the path that works when the callback did
 		// not.
-		if !strings.HasPrefix(pasted, "{") {
-			return "", fmt.Errorf("%w: paste the whole block rclone printed, starting with {", ErrInvalid)
+		token, ok := authorizeToken(pasted)
+		if !ok {
+			return "", fmt.Errorf("%w: paste the whole block rclone printed between the two arrows, and nothing else", ErrInvalid)
 		}
 		stopDriveAuthorize(id)
-		return pasted, nil
+		return token, nil
 	}
 
 	if auth == nil {
@@ -305,6 +302,52 @@ func stopUnfinishedDriveAuthorize() {
 			}
 		}
 	}
+}
+
+// authorizeToken finds the token in one line of what `rclone authorize`
+// printed, or in the block an admin pasted from it, and returns it as the
+// JSON `rclone config create ... token=` takes.
+//
+// It comes in two shapes, and which one depends on the command line, not on
+// the rclone version. Called with no options blob, as Stockroom calls it,
+// rclone prints the token JSON itself. Called with one -- as rclone's own
+// remote setup does, and as the photo wall's read-only sign-in did until
+// 2026-09-25 -- it answers in kind: the whole resulting config, JSON-encoded
+// then base64'd, with the token JSON as its "token" value
+// (fs/config/authorize.go, "If received a config blob, then return one").
+// Only the first shape used to be recognised, so every photo wall sign-in
+// reached Google, succeeded, and was reported as not having completed. Both
+// are read, because a block pasted from another machine may be either.
+func authorizeToken(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "{") {
+		return s, strings.Contains(s, "access_token")
+	}
+	// A pasted block may carry rclone's "--->" and "<---End paste" lines too.
+	if strings.Contains(s, "\n") {
+		for _, line := range strings.Split(s, "\n") {
+			if token, ok := authorizeToken(line); ok {
+				return token, true
+			}
+		}
+		return "", false
+	}
+	if s == "" || strings.ContainsAny(s, " \t") {
+		return "", false
+	}
+	for _, enc := range []*base64.Encoding{base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding} {
+		b, err := enc.DecodeString(s)
+		if err != nil {
+			continue
+		}
+		var blob map[string]string
+		if json.Unmarshal(b, &blob) != nil {
+			return "", false
+		}
+		token := strings.TrimSpace(blob["token"])
+		return token, strings.HasPrefix(token, "{") && strings.Contains(token, "access_token")
+	}
+	return "", false
 }
 
 func stopDriveAuthorize(id string) {

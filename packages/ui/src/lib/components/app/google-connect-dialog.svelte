@@ -10,11 +10,11 @@
    * than a copy per screen, because the two would otherwise drift on the one
    * flow an admin is least likely to have seen before.
    *
-   * What differs between the two callers is passed in: the wording, any extra
-   * fields (the backup names its connection; the photo wall's is fixed), and
-   * the command to run elsewhere for the pasted block — which for the photo
-   * wall has to carry its read-only scope, since a pasted token's scope
-   * cannot be checked.
+   * Both open the same sign-in and write the same rclone remote: there is one
+   * Google connection (google.go). What differs between the two callers is
+   * the wording and any extra fields (Settings names the connection), and the
+   * server supplies the command to run elsewhere for the pasted block, since
+   * it has to carry the school's own Google client when there is one.
    */
   import type { Snippet } from "svelte"
   import ExternalLinkIcon from "@lucide/svelte/icons/external-link"
@@ -99,7 +99,7 @@
         <Input
           id="connect-code"
           bind:value={code}
-          placeholder="{'{'}&quot;access_token&quot;: …{'}'}"
+          placeholder="The block rclone printed between the arrows"
           spellcheck={false}
           autocomplete="off"
           class="font-mono text-xs"

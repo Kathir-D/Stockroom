@@ -35,6 +35,7 @@
   import ClockIcon from "@lucide/svelte/icons/clock"
   import ImageIcon from "@lucide/svelte/icons/image"
   import LockIcon from "@lucide/svelte/icons/lock"
+  import KeyIcon from "@lucide/svelte/icons/key-round"
   import RefreshIcon from "@lucide/svelte/icons/refresh-cw"
   import { toast } from "svelte-sonner"
   import { Button } from "@stockroom/ui/components/ui/button"
@@ -54,7 +55,15 @@
   import { router } from "../../stores/router.svelte"
 
   /** Which card is mid-save, so only that card's button says "Saving…". */
-  type Card = "signin" | "folders" | "schedule" | "photos" | "drive" | "github" | "encryption"
+  type Card =
+    | "signin"
+    | "folders"
+    | "schedule"
+    | "photos"
+    | "google"
+    | "drive"
+    | "github"
+    | "encryption"
 
   let settings = $state<Settings | null>(null)
   let loading = $state(true)
@@ -95,6 +104,7 @@
     drive_enabled: false,
     drive_remote: "",
     drive_path: "",
+    google_client_id: "",
     github_enabled: false,
     github_repo: "",
     student_number_format: "digits" as Format,
@@ -103,6 +113,7 @@
 
   /** Secrets live outside `draft`: blank means unchanged, not blank-it-out. */
   let githubToken = $state("")
+  let googleClientSecret = $state("")
   let passphrase = $state("")
   let passphraseConfirm = $state("")
 
@@ -121,6 +132,7 @@
       drive_enabled: next.drive_enabled,
       drive_remote: next.drive_remote,
       drive_path: next.drive_path,
+      google_client_id: next.google_client_id,
       github_enabled: next.github_enabled,
       github_repo: next.github_repo,
       student_number_format: next.student_number_format,
@@ -130,6 +142,7 @@
     // just stored one. Leaving a token sitting in a text box on a shared closet
     // machine is the thing the blank-not-masked rule is about.
     githubToken = ""
+    googleClientSecret = ""
     passphrase = ""
     passphraseConfirm = ""
   }
@@ -219,6 +232,18 @@
       drive_remote: draft.drive_remote.trim(),
       drive_path: draft.drive_path.trim(),
     }))
+
+  const saveGoogleClient = () =>
+    save("google", () => {
+      const input: SettingsInput = { google_client_id: draft.google_client_id.trim() }
+      // Blank means "keep the saved secret", as for the GitHub token.
+      if (googleClientSecret.trim()) input.google_client_secret = googleClientSecret.trim()
+      return input
+    })
+
+  /** Back to rclone's shared client; the next Connect signs in with it. */
+  const removeGoogleClient = () =>
+    save("google", () => ({ google_client_id: "", google_client_secret: "" }))
 
   const saveGithub = () =>
     save("github", () => {
@@ -544,6 +569,74 @@
       </div>
     </section>
 
+    <!-- ------------------------------------------------ google sign-in ---- -->
+    <!-- One Google connection serves both the Drive backup and the sign-in
+         photo wall (google.go), so the client it signs in with is its own card,
+         above both. rclone's shared client is being retired during 2026
+         (https://rclone.org/drive/#making-your-own-client-id); a school's own
+         keeps both working after that. -->
+    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+        <KeyIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        Google sign-in
+      </h2>
+      <p class="text-xs text-fg-muted">
+        One Google connection serves both the Drive backup and the sign-in photo wall. It signs in
+        through a Google "OAuth client".
+        {#if settings.google_client_id}
+          This machine uses its own.
+        {:else}
+          <strong class="text-fg">This machine uses rclone's shared client, which rclone is
+          retiring during 2026</strong> — when it stops, Drive backups and the photo wall stop with
+          it. Create your own (docs/BACKUP-SETUP.md, step 3c — about fifteen minutes), paste it
+          here, then press Reconnect under Google Drive.
+        {/if}
+      </p>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="flex flex-col gap-1">
+          <Label for="google-client-id">Client ID</Label>
+          <Input
+            id="google-client-id"
+            bind:value={draft.google_client_id}
+            placeholder="1234…apps.googleusercontent.com"
+            spellcheck={false}
+            autocomplete="off"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <Label for="google-client-secret">Client secret</Label>
+          <PasswordInput
+            id="google-client-secret"
+            bind:value={googleClientSecret}
+            autocomplete="off"
+            placeholder={settings.google_client_secret_set
+              ? "Leave blank to keep the saved secret"
+              : "GOCSPX-…"}
+          />
+        </div>
+      </div>
+      <p class="text-xs text-fg-faint">
+        A new client only takes effect when you sign in again: press Reconnect under Google Drive,
+        or Sign in again on the Photo wall screen. Either one reconnects both.
+      </p>
+
+      {#if cardError.google}
+        <p class="text-sm text-status-overdue" role="alert">{cardError.google}</p>
+      {/if}
+
+      <div class="flex flex-wrap gap-2">
+        <Button disabled={saving === "google"} onclick={saveGoogleClient}>
+          {saving === "google" ? "Saving…" : "Save Google client"}
+        </Button>
+        {#if settings.google_client_id}
+          <Button variant="ghost" disabled={saving === "google"} onclick={removeGoogleClient}>
+            Use rclone's shared client
+          </Button>
+        {/if}
+      </div>
+    </section>
+
     <!-- -------------------------------------------------- google drive ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
@@ -553,7 +646,8 @@
       <p class="text-xs text-fg-muted">
         Needs <code class="font-mono">rclone</code> installed on this machine. Press Connect and
         sign in to the Google account the backups should live in — you'll see a
-        "Google hasn't verified this app" screen, which is expected.
+        "Google hasn't verified this app" screen, which is expected. The sign-in photo wall reads
+        through this same connection, so connecting here turns it on too.
       </p>
 
       <label class="flex items-center gap-2 text-sm text-fg">

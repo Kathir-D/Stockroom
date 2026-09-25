@@ -103,7 +103,7 @@ const (
 // for github_token. The folder's typed *label* is not redacted, because a
 // label is what it is for: something a person can read that opens nothing.
 var exportRedactions = map[string][]string{
-	"app_settings": {"github_token", "archive_passphrase", "signin_photos_folder_id"},
+	"app_settings": {"github_token", "archive_passphrase", "signin_photos_folder_id", "google_client_secret"},
 }
 
 // backupLockKey is the advisory-lock key the whole backup run holds. Any

@@ -246,33 +246,25 @@ func (db *DB) ConnectDrive(ctx context.Context, actor Actor) (DriveConnectResult
 	if err := RequireAdmin(actor); err != nil {
 		return DriveConnectResult{}, err
 	}
-	if _, err := exec.LookPath(rcloneBinary); err != nil {
-		return DriveConnectResult{}, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then reload this page", ErrNotConfigured)
-	}
-	return startDriveAuthorize(ctx, driveScopeFull)
+	return db.startGoogleSignIn(ctx)
 }
 
-// FinishDriveConnect takes the code Google showed the admin, writes the rclone
-// remote, and enables the target.
+// FinishDriveConnect takes the code Google showed the admin, writes the one
+// Google remote (google.go), and enables the target. The photo wall reads
+// through the same remote, so it starts too if it was waiting on a sign-in.
 func (db *DB) FinishDriveConnect(ctx context.Context, actor Actor, id, code, remote string) (Settings, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return Settings{}, err
 	}
-	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code), driveScopeFull)
+	remote, err := db.finishGoogleSignIn(ctx, id, code, remote)
 	if err != nil {
 		return Settings{}, err
 	}
-	remote = strings.TrimSpace(remote)
-	if remote == "" {
-		remote = "stockroom-drive"
-	}
-	if strings.ContainsAny(remote, ` :/\`) {
-		return Settings{}, fmt.Errorf("%w: a remote name cannot contain spaces, colons or slashes", ErrInvalid)
-	}
-	if _, err := runRclone(ctx, time.Minute, "config", "create", remote, "drive",
-		"config_is_local=false", "token="+token, "scope=drive"); err != nil {
-		return Settings{}, fmt.Errorf("save the Google Drive connection: %w", err)
-	}
 	enabled := true
-	return db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote, DriveEnabled: &enabled})
+	s, err := db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote, DriveEnabled: &enabled})
+	if err != nil {
+		return Settings{}, err
+	}
+	logGoogleWallError(db.googleSignedIn(ctx))
+	return s, nil
 }

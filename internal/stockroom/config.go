@@ -28,12 +28,11 @@ type Config struct {
 	PhotoBackupDir string
 	RcloneRemote   string
 
-	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). The
-	// remote is only a *name* now, defaulting to DefaultPhotoWallRemote. It
-	// used to be the switch, blank meaning off; since 2026-09-24 the switch
-	// is an admin signing in to Google on the Photo wall screen, which is
-	// what creates the remote (photowall_google.go). Until somebody has, no
-	// reel is built and no goroutine starts, exactly as blank used to mean.
+	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). It
+	// reads Drive through the one Google remote the application shares
+	// (google.go), so nothing here names a remote any more; the switch is an
+	// admin signing in to Google. Until somebody has, no reel is built and no
+	// goroutine starts.
 	//
 	// SignInPhotosFolderID is a first-boot seed rather than a setting, the
 	// same shape as the three backup values above: §7 makes the live folder
@@ -43,7 +42,6 @@ type Config struct {
 	// here. It is a capability, not a label -- see §7 on why it is never sent
 	// back to a client and must be redacted from the backup export the moment
 	// it reaches app_settings.
-	SignInPhotosRemote        string
 	SignInPhotosFolderID      string
 	SignInPhotosDir           string
 	SignInPhotosCount         int
@@ -83,7 +81,6 @@ func LoadConfig() (Config, error) {
 		PhotoBackupDir:     os.Getenv("PHOTO_BACKUP_DIR"),
 		RcloneRemote:       os.Getenv("RCLONE_REMOTE"),
 
-		SignInPhotosRemote:   getenv("SIGNIN_PHOTOS_REMOTE", DefaultPhotoWallRemote),
 		SignInPhotosFolderID: os.Getenv("SIGNIN_PHOTOS_FOLDER_ID"),
 		SignInPhotosDir:      getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
 	}

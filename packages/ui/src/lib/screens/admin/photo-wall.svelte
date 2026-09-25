@@ -27,10 +27,10 @@
    * folder is a message here rather than a wall that silently empties ten
    * minutes later with nothing on any screen connecting the two events.
    *
-   * **Signing in to Google is the switch.** The wall is off until an admin
-   * presses Sign in with Google here, which creates the read-only rclone
-   * remote and starts the wall on the running server — no `.env` line, no
-   * restart. Until then the button is marked Required and the folder form
+   * **Signing in to Google is the switch.** The wall reads Drive through the
+   * one Google connection the backup uses too (google.go), so it is off until
+   * an admin signs in — here, or with Connect under Settings → Google Drive —
+   * and then starts on the running server, no `.env` line, no restart. Until then the button is marked Required and the folder form
    * waits on it. The token goes into rclone's own config file; this screen
    * only ever learns `google_connected`.
    */
@@ -248,16 +248,17 @@
         <p class="flex items-start gap-2 text-xs text-fg-muted">
           <CheckIcon class="mt-0.5 size-4 shrink-0 text-fg" aria-hidden="true" />
           <span>
-            Signed in. The wall reads Google Drive through the rclone connection
-            <code class="font-mono">{status.remote}</code>, read-only — this machine can open the
-            folder's photographs and can never change or delete anything in that Drive.
+            Signed in. The wall reads Google Drive through
+            <code class="font-mono">{status.remote}</code>, the same connection the Drive backup
+            uses; it only ever reads from the photo folder.
           </span>
         </p>
       {:else}
         <p class="text-xs text-fg-muted">
           The wall's photographs come from Google Drive, so it stays off until somebody signs in.
-          Use a Google account that can open the photo folder. The access is read-only: this machine
-          can never change or delete anything in that Drive.
+          This is the same Google connection the Drive backup uses — signing in here, or pressing
+          Connect under Settings → Google Drive, connects both. Use a Google account that can open
+          the photo folder.
         </p>
       {/if}
 
@@ -537,7 +538,7 @@
   url={googleUrl}
   pasteCommand={googlePasteCommand}
   title="Sign in with Google"
-  description="Open the link, sign in to a Google account that can open the photo folder, and allow access. Google will say it hasn't verified this app — press Advanced, then continue. Access is read-only."
+  description="Open the link, sign in to a Google account that can open the photo folder, and allow access. Google will say it hasn't verified this app — press Advanced, then continue. The Drive backup uses this same connection."
   busy={googleFinishing}
   error={googleError}
   onfinish={finishGoogle}

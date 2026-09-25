@@ -403,6 +403,13 @@ export interface Settings {
   drive_enabled: boolean;
   drive_remote: string;
   drive_path: string;
+  /**
+   * The school's own Google OAuth client, for the one Google connection the
+   * backup and the photo wall share. Blank is rclone's shared client, which
+   * rclone is retiring during 2026. The secret comes back blank, like the token.
+   */
+  google_client_id: string;
+  google_client_secret: string;
   github_enabled: boolean;
   github_repo: string;
   github_token: string;
@@ -416,11 +423,15 @@ export interface Settings {
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;
+  google_client_secret_set: boolean;
 }
 
 /** A partial update: an omitted field is left alone. */
 export type SettingsInput = Partial<
-  Omit<Settings, "updated_at" | "github_token_set" | "archive_passphrase_set">
+  Omit<
+    Settings,
+    "updated_at" | "github_token_set" | "archive_passphrase_set" | "google_client_secret_set"
+  >
 >;
 
 export interface BackupTargetStatus {

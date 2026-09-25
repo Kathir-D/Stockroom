@@ -76,7 +76,8 @@ missing and repeat the command for your machine.
    rclone. Click **Advanced**, then **Go to rclone (unsafe)**, then **Continue**.
 5. Go back to Stockroom and press **Finish**. The sign-in normally completes on
    its own, so the paste box on that window is usually left empty; fill it in
-   only if Google showed you a block of text starting with `{`.
+   only if you ran rclone on another machine and it printed a block of text
+   between two arrows.
 6. Tick **Back up to Google Drive every night**, set **Folder in Drive** to
    something like `stockroom-backups`, and press **Save Drive settings**.
 7. Press **Test connection**. It should say Google Drive is reachable.
@@ -85,12 +86,49 @@ missing and repeat the command for your machine.
 > administrator can block third-party apps for the whole domain, which revokes
 > the connection without notice.
 
-> **rclone client ID notice.** rclone warns that its shared Google client ID is
-> being retired during 2026. It still works, and Stockroom has no setting for a
-> custom client ID yet, so no action is needed. When the shared ID stops
-> working, **Test connection** will fail and each Drive remote will need
-> reconnecting once Stockroom supports a custom client ID. See the open item in
-> `CLAUDE.md` §13 before creating your own client ID.
+> **One connection, two features.** The sign-in photo wall reads its folder
+> through this same Google connection, so connecting here turns the wall on as
+> well, and **Sign in with Google** on the Photo wall screen connects backups
+> too. There is only ever one Google sign-in to keep working.
+
+### 3c. Your own Google client *(strongly recommended, about fifteen minutes)*
+
+Out of the box, rclone signs in to Google with a "client" it shares with every
+rclone user in the world. **rclone is retiring that shared client during 2026**
+(<https://rclone.org/drive/#making-your-own-client-id>). When it stops, Drive
+backups and the photo wall stop with it, and the backup screen says so. Until
+you have your own, the backup screen shows a warning saying exactly that.
+
+Any Google account can own the client; it does not have to be the one the
+backups live in.
+
+1. Open <https://console.cloud.google.com/>, and create a project (the name
+   does not matter, "Stockroom" is fine).
+2. **APIs & Services → Library**, search for **Google Drive API**, and press
+   **Enable**.
+3. **Google Auth Platform** (or **OAuth consent screen**) → **Get started**.
+   App name `Stockroom`, your own email for both email fields, audience
+   **External**, then **Create**.
+4. **Data access → Add or remove scopes**, and under "Manually add scopes"
+   paste `https://www.googleapis.com/auth/drive`, press **Add to table**, then
+   **Update** and **Save**.
+5. **Audience → Publish app**, and confirm. **This step matters.** An app left
+   in *Testing* has its sign-ins expire after seven days, which on an unattended
+   closet PC is a backup that dies a week after setup. Published but
+   unverified is fine: you will see the "Google hasn't verified this app"
+   screen when you sign in, exactly as before. (If **Publish app** is greyed
+   out, Google wants a home page and privacy policy link under **Branding**
+   first; any page you control will do.)
+6. **Clients → Create client**, type **Desktop app**, then **Create**. Google
+   shows a **Client ID** (ending in `.apps.googleusercontent.com`) and a
+   **Client secret** (starting `GOCSPX-`).
+7. In Stockroom: **Admin → Settings → Google sign-in**, paste both, press
+   **Save Google client**.
+8. **Google Drive → Reconnect**, and sign in again. That one sign-in moves both
+   the backup and the photo wall onto your client; the warning goes away.
+
+The secret is kept like the GitHub token: never shown again, never written into
+a backup.
 
 ---
 

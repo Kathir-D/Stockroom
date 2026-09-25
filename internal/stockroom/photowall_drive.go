@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,11 +27,11 @@ import (
 // the rclone binary (docs/design/signin-photo-wall.html §3).
 //
 // rclone is already the decided Drive mechanism for the nightly backup
-// (CLAUDE.md §11), so this reuses one token store and one consent flow rather
-// than adding a second. There is no Google API client here and no OAuth
-// handling in Go; the credential lives in rclone's own config file and is
-// configured drive.readonly, so the machine can read this Drive and can never
-// modify or delete anything in it.
+// (CLAUDE.md §11), so this reads through the very same remote (google.go):
+// one token store, one consent flow, one Reconnect. There is no Google API
+// client here and no OAuth handling in Go; the credential lives in rclone's
+// own config file. Nothing in this file writes to Drive -- lsjson and cat
+// are the only commands it runs.
 //
 // The one structural idea is that **listing is separated from fetching**. The
 // source folder is assumed to hold tens of thousands of files, and listing it
@@ -120,9 +121,8 @@ var photoExtensions = map[string]bool{
 
 // DrivePhotoSourceOptions is what NewDrivePhotoSource needs.
 type DrivePhotoSourceOptions struct {
-	// Remote is the rclone remote name holding the photographs: the one the
-	// Photo wall screen's Google sign-in creates, DefaultPhotoWallRemote unless
-	// SIGNIN_PHOTOS_REMOTE renames it. Required.
+	// Remote is the rclone remote name to read through: the one Google
+	// connection the whole application shares (google.go). Required.
 	Remote string
 	// FolderID is the Drive folder to read. It may be empty: §7 makes this an
 	// admin-panel value, so "configured but no folder chosen yet" is a normal
@@ -141,7 +141,9 @@ type DrivePhotoSourceOptions struct {
 // goroutine rebuilds the manifest, and §7 will call SetFolder from an HTTP
 // handler.
 type DrivePhotoSource struct {
-	remote   string
+	// remote is the shared Google remote's name. Atomic because Settings can
+	// rename it (SetRemote) while a listing or a download is using it.
+	remote   atomic.Pointer[string]
 	dir      string
 	interval time.Duration
 
@@ -225,11 +227,6 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 		return nil, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then restart the server", ErrNotConfigured)
 	}
 	s := &DrivePhotoSource{
-		// A trailing colon is how rclone *prints* a remote ("gdrive:"), so it
-		// is a natural thing to type into .env -- and left on, driveRoot would
-		// build "gdrive:,root_folder_id=...:", which rclone reads as a path
-		// inside the remote rather than as a connection string.
-		remote:   strings.TrimSuffix(strings.TrimSpace(opts.Remote), ":"),
 		dir:      opts.Dir,
 		interval: opts.RefreshInterval,
 		list:     streamRcloneList,
@@ -239,10 +236,35 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 		folderID: strings.TrimSpace(opts.FolderID),
 		now:      time.Now,
 	}
+	s.SetRemote(opts.Remote)
 	if s.interval <= 0 {
 		s.interval = DefaultPhotoWallManifestHours * time.Hour
 	}
 	return s, nil
+}
+
+// SetRemote points the source at a differently named rclone remote, and
+// reports whether that changed anything. A trailing colon is how rclone
+// *prints* a remote ("gdrive:"), and left on, driveRoot would build
+// "gdrive:,root_folder_id=...:", which rclone reads as a path inside the
+// remote rather than as a connection string.
+func (s *DrivePhotoSource) SetRemote(remote string) bool {
+	if s == nil {
+		return false
+	}
+	remote = strings.TrimSuffix(strings.TrimSpace(remote), ":")
+	if old := s.remote.Load(); old != nil && *old == remote {
+		return false
+	}
+	s.remote.Store(&remote)
+	return true
+}
+
+func (s *DrivePhotoSource) remoteName() string {
+	if r := s.remote.Load(); r != nil {
+		return *r
+	}
+	return ""
 }
 
 // driveRoot is the rclone connection string naming one folder for one command.
@@ -252,7 +274,7 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 // which is the whole of §7. Supplying the folder per invocation instead means
 // no command can act on a folder its caller did not name.
 func (s *DrivePhotoSource) driveRoot(folderID string, file ...string) string {
-	root := fmt.Sprintf("%s,root_folder_id=%s:", s.remote, folderID)
+	root := fmt.Sprintf("%s,root_folder_id=%s:", s.remoteName(), folderID)
 	if len(file) > 0 && file[0] != "" {
 		return root + file[0]
 	}
@@ -776,7 +798,7 @@ func (s *DrivePhotoSource) explain(folderID string, err error) error {
 		// something anybody can type -- so the command given is the remote
 		// as configured.
 		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. Press Sign in again under Google account in Admin → Photo wall (or on this machine run `rclone config reconnect %s:`); nothing needs restarting",
-			errPhotoDriveAuth, s.remote)
+			errPhotoDriveAuth, s.remoteName())
 		s.mu.Lock()
 		first := !s.authWarned
 		s.authWarned = true
