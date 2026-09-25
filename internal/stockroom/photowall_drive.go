@@ -763,6 +763,23 @@ var (
 	rcloneRequestURL = regexp.MustCompile(`"https?://[^"]*"`)
 )
 
+// scrubDriveError is an rclone error with what must not reach a screen taken
+// out: the folder id in all three encodings rclone may quote it in, the
+// request URL (whose query carries the id), and rclone's timestamps and
+// client-id notice. The photo wall and the Drive picker both word their
+// errors from it.
+func scrubDriveError(err error, folderID string) string {
+	msg := rcloneClientIDNotice.ReplaceAllString(err.Error(), "")
+	msg = rcloneTimestamp.ReplaceAllString(msg, "")
+	msg = rcloneRequestURL.ReplaceAllString(msg, "Drive")
+	if folderID != "" {
+		for _, form := range []string{folderID, url.QueryEscape(folderID), url.PathEscape(folderID)} {
+			msg = strings.ReplaceAll(msg, form, "<folder>")
+		}
+	}
+	return oneLine(msg)
+}
+
 // explain turns an rclone failure into something fit to store, show and log.
 //
 // Stored is the important one. Every error kept here reaches GET
@@ -779,15 +796,7 @@ func (s *DrivePhotoSource) explain(folderID string, err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := rcloneClientIDNotice.ReplaceAllString(err.Error(), "")
-	msg = rcloneTimestamp.ReplaceAllString(msg, "")
-	msg = rcloneRequestURL.ReplaceAllString(msg, "Drive")
-	if folderID != "" {
-		for _, form := range []string{folderID, url.QueryEscape(folderID), url.PathEscape(folderID)} {
-			msg = strings.ReplaceAll(msg, form, "<folder>")
-		}
-	}
-	msg = oneLine(msg)
+	msg := scrubDriveError(err, folderID)
 
 	lower := strings.ToLower(msg)
 	if strings.Contains(lower, "invalid_grant") || strings.Contains(lower, "couldn't fetch token") ||
@@ -797,7 +806,7 @@ func (s *DrivePhotoSource) explain(folderID string, err error) error {
 		// `gdrive{AbCdE}:`, its internal name for a connection string -- not
 		// something anybody can type -- so the command given is the remote
 		// as configured.
-		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. Press Sign in again under Google account in Admin → Photo wall (or on this machine run `rclone config reconnect %s:`); nothing needs restarting",
+		authErr := fmt.Errorf("%w: Google refused its saved sign-in, so it has expired or been revoked. Press Use a different account under Google account in Admin → Photo wall and sign in again (or on this machine run `rclone config reconnect %s:`); nothing needs restarting",
 			errPhotoDriveAuth, s.remoteName())
 		s.mu.Lock()
 		first := !s.authWarned

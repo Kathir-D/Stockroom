@@ -66,7 +66,8 @@ func (c googleClient) shared() bool { return c.id == "" }
 // Drive features share needs: the backup writes, the photo wall reads.
 //
 // The client travels in the environment (driveAuthorizeEnv), not here, so the
-// secret is never on a process list. rclone reads RCLONE_DRIVE_CLIENT_ID and
+// secret is off the process list for as long as authorize waits (config
+// create is another matter, google.go). rclone reads RCLONE_DRIVE_CLIENT_ID and
 // _SECRET for the temporary remote `authorize` builds -- verified against
 // v1.75: the consent URL carries the id from the environment.
 func driveAuthorizeArgs() []string {
@@ -109,6 +110,10 @@ type driveAuth struct {
 var pendingDriveAuth = struct {
 	mu sync.Mutex
 	m  map[string]*driveAuth
+	// superseded holds the attempts the latest Connect stopped, so finishing
+	// one says a newer sign-in replaced it rather than that it never existed.
+	// Replaced wholesale on every Connect, so it stays a handful of ids.
+	superseded map[string]bool
 }{m: map[string]*driveAuth{}}
 
 // startDriveAuthorize launches rclone and returns as soon as it has printed a
@@ -222,7 +227,7 @@ func (a *driveAuth) finish(err error) {
 			// callback port by stopping it, and so does the 15-minute limit.
 			// Either way the fix is the same button, so it is a conflict the
 			// admin can read, not a 500 with the reason hidden in the log.
-			a.err = fmt.Errorf("%w: the Google sign-in stopped before it finished (%v). Press Connect again", ErrConflict, err)
+			a.err = fmt.Errorf("%w: the Google sign-in stopped before it finished (%v). Press Sign in with Google again", ErrConflict, err)
 		} else {
 			a.err = fmt.Errorf("%w: the Google connection did not complete. Open the link again, or paste the code rclone printed", ErrConflict)
 		}
@@ -239,6 +244,7 @@ var errGoogleWaiting = fmt.Errorf("%w: Google has not sent the sign-in back yet.
 func finishDriveAuthorize(ctx context.Context, id, pasted string) (string, error) {
 	pendingDriveAuth.mu.Lock()
 	auth := pendingDriveAuth.m[id]
+	superseded := pendingDriveAuth.superseded[id]
 	pendingDriveAuth.mu.Unlock()
 
 	if pasted != "" {
@@ -253,8 +259,11 @@ func finishDriveAuthorize(ctx context.Context, id, pasted string) (string, error
 		return token, nil
 	}
 
+	if superseded {
+		return "", fmt.Errorf("%w: a newer Google sign-in replaced this one. Finish that one, or press Sign in with Google again", ErrConflict)
+	}
 	if auth == nil {
-		return "", fmt.Errorf("%w: that connection attempt has expired. Press Connect again", ErrNotFound)
+		return "", fmt.Errorf("%w: that sign-in has expired. Press Sign in with Google again", ErrNotFound)
 	}
 
 	// Poll rather than block on a channel: the token arrives on a background
@@ -294,6 +303,11 @@ func stopUnfinishedDriveAuthorize() {
 		}
 		auth.mu.Unlock()
 	}
+	superseded := make(map[string]bool, len(waiting))
+	for _, auth := range waiting {
+		superseded[auth.id] = true
+	}
+	pendingDriveAuth.superseded = superseded
 	pendingDriveAuth.mu.Unlock()
 	for _, auth := range waiting {
 		stopDriveAuthorize(auth.id)

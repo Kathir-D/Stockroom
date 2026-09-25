@@ -76,19 +76,15 @@ func (db *DB) startGoogleSignIn(ctx context.Context) (DriveConnectResult, error)
 
 // finishGoogleSignIn writes the one remote with the token Google sent back
 // and returns its name, and the token for the one lookup FinishGoogle makes
-// with it. remote may be blank, meaning the one already configured. The
-// caller has checked the actor and saves the name.
-func (db *DB) finishGoogleSignIn(ctx context.Context, id, code, remote string) (string, string, error) {
+// with it. The caller has checked the actor and saves the name.
+func (db *DB) finishGoogleSignIn(ctx context.Context, id, code string) (string, string, error) {
 	s, err := db.loadSettings(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	remote = strings.TrimSuffix(strings.TrimSpace(remote), ":")
-	if remote == "" {
-		remote = s.googleRemote()
-	}
+	remote := s.googleRemote()
 	if strings.ContainsAny(remote, ` :/\`) {
-		return "", "", fmt.Errorf("%w: a remote name cannot contain spaces, colons or slashes", ErrInvalid)
+		return "", "", fmt.Errorf("%w: the Drive remote name %q cannot contain spaces, colons or slashes", ErrInvalid, remote)
 	}
 	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code))
 	if err != nil {
@@ -99,6 +95,14 @@ func (db *DB) finishGoogleSignIn(ctx context.Context, id, code, remote string) (
 	// earlier sign-in would sit beside a token issued to a different client,
 	// which Google refuses at the first refresh. root_folder_id stays blank so
 	// the photo wall can name its folder per command (photowall_drive.go).
+	//
+	// These arguments are on rclone's command line for the second this runs,
+	// the token included. `config create` has no other input: it does not
+	// write options it finds in the environment (checked against v1.75.1), so
+	// unlike `rclone authorize` it cannot be kept off the process list. The
+	// window is one short-lived process on a single-user machine, and Google
+	// treats a Desktop client's secret as non-confidential; the token was on
+	// this command line before the client was.
 	c := s.googleClient()
 	if _, err := runRclone(ctx, time.Minute, "config", "create", remote, "drive",
 		"config_is_local=false", "scope=drive", "token="+token,
@@ -142,7 +146,7 @@ func (s Settings) sharedClientWarning() string {
 	if s.GoogleClientID != "" || !s.DriveEnabled {
 		return ""
 	}
-	return "Google Drive is signed in with rclone's shared Google client, which rclone is retiring during 2026; once it stops, backups to Drive and the sign-in photo wall stop with it. Add your own under Settings → Google account → Your own Google client, then sign in again."
+	return "Google Drive is signed in with rclone's shared Google client, which rclone is retiring during 2026; once it stops, backups to Drive and the sign-in photo wall stop with it. Add your own under Admin → Settings → Google account → Advanced: your own Google client, then sign in with Google again."
 }
 
 func logGoogleWallError(err error) {

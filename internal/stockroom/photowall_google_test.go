@@ -438,7 +438,7 @@ func TestLocalFolderPicker(t *testing.T) {
 // waiting -- Connect pressed twice, or pressed on Settings and then on Photo
 // wall -- made the next one fail to bind and time out after thirty seconds.
 // Starting a new one stops the old, and finishing the old one then says to
-// press Connect again rather than answering a 500.
+// a newer sign-in replaced it (409) rather than answering a 500 or a 404.
 func TestStartingASignInStopsTheOneWaiting(t *testing.T) {
 	fakeRclone(t)
 	t.Setenv("FAKE_RCLONE_HANG", "1")
@@ -462,7 +462,7 @@ func TestStartingASignInStopsTheOneWaiting(t *testing.T) {
 	if stillThere {
 		t.Error("the first sign-in is still pending, holding rclone's callback port")
 	}
-	if _, err := finishDriveAuthorize(ctx, first.ID, ""); !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrConflict) {
-		t.Errorf("finishing the stopped sign-in = %v, want a 404 or 409 that says to press Connect again", err)
+	if _, err := finishDriveAuthorize(ctx, first.ID, ""); !errors.Is(err, ErrConflict) {
+		t.Errorf("finishing the stopped sign-in = %v, want a 409 saying a newer sign-in replaced it", err)
 	}
 }

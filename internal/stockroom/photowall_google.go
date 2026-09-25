@@ -95,7 +95,7 @@ func (db *DB) StartPhotoWall(ctx context.Context, cfg PhotoWallConfig) {
 		return
 	}
 	if !connected {
-		log.Printf("sign-in photo wall: off until an admin signs in to Google (Admin → Photo wall, or Settings → Google Drive)")
+		log.Printf("sign-in photo wall: off until an admin signs in to Google (Admin → Photo wall, or Admin → Settings → Google account)")
 		return
 	}
 	if err := db.startPhotoWallLocked(ctx); err != nil {

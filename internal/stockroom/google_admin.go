@@ -119,7 +119,7 @@ func (db *DB) FinishGoogle(ctx context.Context, actor Actor, id, code string) (G
 	if err := RequireAdmin(actor); err != nil {
 		return GoogleSignInResult{}, err
 	}
-	remote, token, err := db.finishGoogleSignIn(ctx, id, code, "")
+	remote, token, err := db.finishGoogleSignIn(ctx, id, code)
 	if errors.Is(err, errGoogleWaiting) {
 		return GoogleSignInResult{Done: false}, nil
 	}
@@ -129,12 +129,16 @@ func (db *DB) FinishGoogle(ctx context.Context, actor Actor, id, code string) (G
 	if _, err := db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote}); err != nil {
 		return GoogleSignInResult{}, err
 	}
+	// From here the sign-in has worked: rclone holds the token and the
+	// setting names the remote. The account label and the audit line are
+	// logged on failure rather than returned, or the screen would report a
+	// failed sign-in for one that is already live.
 	account := googleAccountEmail(ctx, token)
 	if _, err := db.Pool.Exec(ctx, `update app_settings set google_account = $1 where id = true`, nullable(account)); err != nil {
-		return GoogleSignInResult{}, mapPgError("save the Google account", err)
+		log.Printf("warning: signed in to Google, but could not record which account: %v", err)
 	}
 	if err := db.logGoogleSignIn(ctx, actor, remote); err != nil {
-		return GoogleSignInResult{}, err
+		log.Printf("warning: signed in to Google, but could not write the activity log: %v", err)
 	}
 	if err := db.googleSignedIn(ctx); err != nil && !errors.Is(err, ErrNotConfigured) {
 		logGoogleWallError(err)
@@ -207,7 +211,7 @@ func (db *DB) logGoogleSignIn(ctx context.Context, actor Actor, remote string) e
 
 // The picker's two starting points. Neither is a folder id.
 const (
-	GoogleMyDrive     = "my-drive"
+	GoogleMyDrive      = "my-drive"
 	GoogleSharedWithMe = "shared"
 )
 
@@ -355,12 +359,10 @@ func (db *DB) googleFolderArgs(ctx context.Context, verb, in, name string) ([]st
 }
 
 // googleFolderError words a failed Drive call for the picker. rclone quotes
-// its request, whose query carries the folder id, so the id is taken out.
+// its request, whose query carries the folder id, so it goes through the same
+// scrubbing as the photo wall's errors.
 func googleFolderError(err error, id string) error {
-	msg := err.Error()
-	if id != "" {
-		msg = strings.ReplaceAll(msg, id, "…")
-	}
+	msg := scrubDriveError(err, id)
 	if strings.Contains(msg, "invalid_grant") || strings.Contains(msg, "token expired") {
 		return fmt.Errorf("%w: the Google sign-in has expired. Press Sign in with Google again", ErrConflict)
 	}

@@ -192,7 +192,10 @@ back to system sans and the two apps stop matching.
 ## 3. Tokens
 
 `packages/ui/src/lib/styles/tokens.css` is the only file allowed to define a colour, radius, shadow or
-duration. Nothing else in the codebase writes a raw hex value.
+duration. Nothing else in the codebase writes a raw hex value. One exception: a third party's logo drawn in its own brand
+colours, which are the logo rather than the palette. The four colours of the Google "G" in
+`components/app/google-account.svelte` are that exception, because Google's sign-in branding rules require
+the mark in those colours and a token named after them would invite reuse.
 
 ### 3.1 Why hex and not `oklch()`
 

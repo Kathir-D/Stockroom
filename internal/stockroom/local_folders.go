@@ -19,8 +19,9 @@ import (
 // 2026-09-21 backup went into `<repo>/Users/...` instead of the Desktop: a
 // path pasted without its leading slash. The server and the admin's browser
 // are on the same machine, so the server can simply show its folders and let
-// the admin click. Names only, and only to an admin -- somebody who can
-// already point the backup at any folder they like.
+// the admin click. Folder names and paths only, never file names or contents,
+// and only to an admin -- somebody who can already point the backup at any
+// folder they like, so it is deliberately not confined to one root.
 
 // LocalFolder is one folder in the picker.
 type LocalFolder struct {

@@ -144,6 +144,12 @@
     attempt++
     open = false
   }
+
+  // Leaving the screen mid-sign-in stops the polling; without this the loop
+  // would keep asking the server every 1.5 s until rclone gave up.
+  $effect(() => () => {
+    attempt++
+  })
 </script>
 
 <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
