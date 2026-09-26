@@ -43,6 +43,12 @@ type Settings struct {
 	DriveRemote  string `json:"drive_remote"`
 	DrivePath    string `json:"drive_path"`
 
+	// The Google OAuth client rclone signs in with, for the backup and the
+	// photo wall alike (google.go). Blank is rclone's shared id, which rclone
+	// is retiring during 2026. The secret is redacted like the GitHub token.
+	GoogleClientID     string `json:"google_client_id"`
+	GoogleClientSecret string `json:"google_client_secret"`
+
 	GitHubEnabled bool   `json:"github_enabled"`
 	GitHubRepo    string `json:"github_repo"`
 	GitHubToken   string `json:"github_token"`
@@ -64,8 +70,9 @@ type Settings struct {
 	// GitHubTokenSet and ArchivePassphraseSet are the only thing the API says
 	// about a secret: whether there is one. They are derived by Redacted and
 	// are not columns.
-	GitHubTokenSet       bool `json:"github_token_set"`
-	ArchivePassphraseSet bool `json:"archive_passphrase_set"`
+	GitHubTokenSet        bool `json:"github_token_set"`
+	ArchivePassphraseSet  bool `json:"archive_passphrase_set"`
+	GoogleClientSecretSet bool `json:"google_client_secret_set"`
 }
 
 // Encrypted reports whether archives leave this machine encrypted (§C.5).
@@ -82,8 +89,10 @@ func (s Settings) Encrypted() bool { return s.ArchivePassphrase != "" }
 func (s Settings) Redacted() Settings {
 	s.GitHubTokenSet = s.GitHubToken != ""
 	s.ArchivePassphraseSet = s.ArchivePassphrase != ""
+	s.GoogleClientSecretSet = s.GoogleClientSecret != ""
 	s.GitHubToken = ""
 	s.ArchivePassphrase = ""
+	s.GoogleClientSecret = ""
 	return s
 }
 
@@ -107,6 +116,9 @@ type SettingsInput struct {
 	DriveRemote  *string `json:"drive_remote"`
 	DrivePath    *string `json:"drive_path"`
 
+	GoogleClientID     *string `json:"google_client_id"`
+	GoogleClientSecret *string `json:"google_client_secret"`
+
 	GitHubEnabled *bool   `json:"github_enabled"`
 	GitHubRepo    *string `json:"github_repo"`
 	GitHubToken   *string `json:"github_token"`
@@ -121,7 +133,7 @@ type SettingsInput struct {
 }
 
 const settingsColumns = `backup_dir, photo_backup_dir, keep_days, stale_hours, schedule_hour,
-	drive_enabled, drive_remote, drive_path,
+	drive_enabled, drive_remote, drive_path, google_client_id, google_client_secret,
 	github_enabled, github_repo, github_token, archive_passphrase,
 	photo_min_free_gb, photo_max_generations,
 	student_number_format, student_number_pattern, updated_at`
@@ -132,9 +144,9 @@ func scanSettings(row pgx.Row) (Settings, error) {
 	// "" rather than making every caller test for nil. Nothing downstream
 	// distinguishes an unset path from a blank one.
 	var backupDir, photoDir, driveRemote, drivePath, repo, token, passphrase *string
-	var snPattern *string
+	var snPattern, clientID, clientSecret *string
 	err := row.Scan(&backupDir, &photoDir, &s.KeepDays, &s.StaleHours, &s.ScheduleHour,
-		&s.DriveEnabled, &driveRemote, &drivePath,
+		&s.DriveEnabled, &driveRemote, &drivePath, &clientID, &clientSecret,
 		&s.GitHubEnabled, &repo, &token, &passphrase,
 		&s.PhotoMinFreeGB, &s.PhotoMaxGenerations,
 		&s.StudentNumberFormat, &snPattern, &s.UpdatedAt)
@@ -149,6 +161,8 @@ func scanSettings(row pgx.Row) (Settings, error) {
 	s.PhotoBackupDir = deref(photoDir)
 	s.DriveRemote = deref(driveRemote)
 	s.DrivePath = deref(drivePath)
+	s.GoogleClientID = deref(clientID)
+	s.GoogleClientSecret = deref(clientSecret)
 	s.GitHubRepo = deref(repo)
 	s.GitHubToken = deref(token)
 	s.ArchivePassphrase = deref(passphrase)
@@ -258,6 +272,12 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	if in.DrivePath != nil {
 		next.DrivePath = strings.TrimSpace(*in.DrivePath)
 	}
+	if in.GoogleClientID != nil {
+		next.GoogleClientID = strings.TrimSpace(*in.GoogleClientID)
+	}
+	if in.GoogleClientSecret != nil {
+		next.GoogleClientSecret = strings.TrimSpace(*in.GoogleClientSecret)
+	}
 	if in.GitHubEnabled != nil {
 		next.GitHubEnabled = *in.GitHubEnabled
 	}
@@ -337,6 +357,9 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			return Settings{}, fmt.Errorf("%w: a GitHub token is required to enable GitHub backups", ErrInvalid)
 		}
 	}
+	if err := validateGoogleClient(next.GoogleClientID, next.GoogleClientSecret); err != nil {
+		return Settings{}, err
+	}
 	if next.GitHubRepo != "" {
 		if err := validateRepo(next.GitHubRepo); err != nil {
 			return Settings{}, err
@@ -352,6 +375,7 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			archive_passphrase = $12,
 			photo_min_free_gb = $13, photo_max_generations = $14,
 			student_number_format = $15, student_number_pattern = $16,
+			google_client_id = $17, google_client_secret = $18,
 			updated_at = now()
 		where id = true`,
 		nullable(next.BackupDir), nullable(next.PhotoBackupDir),
@@ -360,7 +384,8 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		next.GitHubEnabled, nullable(next.GitHubRepo), nullable(next.GitHubToken),
 		nullable(next.ArchivePassphrase),
 		next.PhotoMinFreeGB, next.PhotoMaxGenerations,
-		next.StudentNumberFormat, nullable(next.StudentNumberPattern))
+		next.StudentNumberFormat, nullable(next.StudentNumberPattern),
+		nullable(next.GoogleClientID), nullable(next.GoogleClientSecret))
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}

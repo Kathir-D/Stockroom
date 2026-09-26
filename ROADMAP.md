@@ -56,7 +56,7 @@ At the measured rate of one photo every 20 to 25 seconds, filling 150 takes abou
 - [ ] Go tests for folder-balanced selection, the per-folder cap, gradual refresh, removal of deleted photos, folder switching, and the memory limit.
 - [ ] Update the frontend smoke tests for the new endpoint.
 - [ ] Manual checks: unplug the network and confirm sign-in is unaffected, and watch a full cycle in the Wails window on the slowest machine available.
-- [ ] On the closet PC, press **Sign in with Google** in Admin → Photo wall and connect the student media photos folder (after the PC is available, see section 4). The button creates the read-only rclone remote; no terminal needed.
+- [ ] On the closet PC, press **Sign in with Google** in Admin → Photo wall, then **Choose from Google Drive** and pick the student media photos folder (after the PC is available, see section 4). It uses the same Google connection as the Drive backup; no terminal needed.
 - [ ] Update the design doc, `CLAUDE.md` §8.1 and §13, and `.env.example`.
 
 ## 2. Closet camera and activity log
@@ -198,7 +198,7 @@ Blocked: waiting on the school to provide the closet PC and the barcode scanner.
 ## 5. Backups
 
 - [ ] Test the GitHub target against a real private repository, then run it alongside Google Drive.
-- [ ] Support a custom Google OAuth client ID for Drive: rclone's shared client ID is being retired during 2026. The consent screen must be published, not left in Testing, or tokens expire after seven days (see `CLAUDE.md` §13, "Still open").
+- [ ] Create the school's own Google OAuth client (docs/BACKUP-SETUP.md, step 3c), paste it into Admin → Settings → Google account → Advanced, and sign in again. Stockroom supports it since 2026-09-25; rclone's shared client stops working during 2026.
 - [ ] Configure everything from a fresh install without opening a text editor.
 
 ## 6. Repository

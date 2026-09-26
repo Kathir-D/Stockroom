@@ -221,8 +221,9 @@ func runRclone(ctx context.Context, timeout time.Duration, args ...string) ([]by
 
 /* ------------------------------------------------------------- connect ---- */
 
-// DriveConnectResult is the first half of connecting a Google account from the
-// admin panel: the URL to open and the handle that identifies this attempt.
+// DriveConnectResult is the first half of signing in to Google from the admin
+// panel (ConnectGoogle, google_admin.go): the URL to open and the handle that
+// identifies this attempt.
 type DriveConnectResult struct {
 	URL string `json:"url"`
 	// ID is the pending authorization this token will be handed back to.
@@ -232,47 +233,4 @@ type DriveConnectResult struct {
 	// It carries the scope, which is why the server supplies it rather than
 	// the screen spelling it out.
 	PasteCommand string `json:"paste_command"`
-}
-
-// ConnectDrive starts `rclone authorize "drive"` and returns the URL it
-// prints.
-//
-// This exists so the single most likely failure -- a revoked Google token --
-// can be fixed from the admin panel rather than from a terminal. A recovery
-// procedure that begins "open a terminal on the closet PC" is a procedure that
-// will not be followed, and the "no admin edits a file" rule in §B means the
-// same thing about shells.
-func (db *DB) ConnectDrive(ctx context.Context, actor Actor) (DriveConnectResult, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return DriveConnectResult{}, err
-	}
-	if _, err := exec.LookPath(rcloneBinary); err != nil {
-		return DriveConnectResult{}, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then reload this page", ErrNotConfigured)
-	}
-	return startDriveAuthorize(ctx, driveScopeFull)
-}
-
-// FinishDriveConnect takes the code Google showed the admin, writes the rclone
-// remote, and enables the target.
-func (db *DB) FinishDriveConnect(ctx context.Context, actor Actor, id, code, remote string) (Settings, error) {
-	if err := RequireAdmin(actor); err != nil {
-		return Settings{}, err
-	}
-	token, err := finishDriveAuthorize(ctx, id, strings.TrimSpace(code), driveScopeFull)
-	if err != nil {
-		return Settings{}, err
-	}
-	remote = strings.TrimSpace(remote)
-	if remote == "" {
-		remote = "stockroom-drive"
-	}
-	if strings.ContainsAny(remote, ` :/\`) {
-		return Settings{}, fmt.Errorf("%w: a remote name cannot contain spaces, colons or slashes", ErrInvalid)
-	}
-	if _, err := runRclone(ctx, time.Minute, "config", "create", remote, "drive",
-		"config_is_local=false", "token="+token, "scope=drive"); err != nil {
-		return Settings{}, fmt.Errorf("save the Google Drive connection: %w", err)
-	}
-	enabled := true
-	return db.SaveSettings(ctx, actor, SettingsInput{DriveRemote: &remote, DriveEnabled: &enabled})
 }

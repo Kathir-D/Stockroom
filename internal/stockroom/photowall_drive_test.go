@@ -24,8 +24,7 @@ import (
 // rclone binary on PATH, which a CI runner has no reason to have.
 func newTestSource(t *testing.T, folderID string) *DrivePhotoSource {
 	t.Helper()
-	return &DrivePhotoSource{
-		remote:   "gdrive",
+	s := &DrivePhotoSource{
 		dir:      t.TempDir(),
 		interval: DefaultPhotoWallManifestHours * time.Hour,
 		rebuild:  make(chan struct{}, 1),
@@ -38,6 +37,8 @@ func newTestSource(t *testing.T, folderID string) *DrivePhotoSource {
 			return nil, errors.New("no download stubbed for this test")
 		},
 	}
+	s.SetRemote("gdrive")
+	return s
 }
 
 // stubListing turns rclone lsjson output into the pair of values the real

@@ -100,7 +100,6 @@ Most settings live in the admin panel. The server reads a few values from `.env`
 | `UPLOADS_DIR` | Photo storage | `./uploads` |
 | `SESSION_IDLE_MINUTES` | Idle sign-out timeout, from the last interaction | `10` |
 | `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE` | Initial backup settings, read on first start only | none |
-| `SIGNIN_PHOTOS_REMOTE` | Name of the sign-in photo wall's rclone remote. The wall itself is turned on by **Sign in with Google** in Admin → Photo wall | `gdrive-photos` |
 
 Values read on first start only are managed in **Admin → Settings** afterwards. See [`.env.example`](.env.example) for the full list.
 

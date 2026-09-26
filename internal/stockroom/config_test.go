@@ -19,7 +19,6 @@ var configVars = []string{
 	"UPLOADS_DIR",
 	"BACKUP_DIR",
 	"SESSION_IDLE_MINUTES",
-	"SIGNIN_PHOTOS_REMOTE",
 	"SIGNIN_PHOTOS_DIR",
 	"SIGNIN_PHOTOS_COUNT",
 	"SIGNIN_PHOTOS_BATCH",
@@ -87,10 +86,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 }
 
 // TestLoadConfigPhotoWallDefaults pins the sign-in photo wall's defaults
-// (docs/design/signin-photo-wall.html §8). The remote is a name with a
-// default, not the switch: the wall stays off until an admin signs in to
-// Google for it, which is what creates a remote by that name
-// (photowall_google.go).
+// (docs/design/signin-photo-wall.html §8). No remote is named here: the wall
+// reads through the one shared Google remote (google.go).
 func TestLoadConfigPhotoWallDefaults(t *testing.T) {
 	isolateEnv(t)
 	chdirNoDotEnv(t)
@@ -98,9 +95,6 @@ func TestLoadConfigPhotoWallDefaults(t *testing.T) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
-	}
-	if cfg.SignInPhotosRemote != DefaultPhotoWallRemote {
-		t.Errorf("SignInPhotosRemote = %q, want %q", cfg.SignInPhotosRemote, DefaultPhotoWallRemote)
 	}
 	if cfg.SignInPhotosDir != DefaultPhotoWallDir {
 		t.Errorf("SignInPhotosDir = %q, want %q", cfg.SignInPhotosDir, DefaultPhotoWallDir)

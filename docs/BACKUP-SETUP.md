@@ -15,16 +15,17 @@ copy off the machine, in case the machine itself is lost or damaged.
 ## Step 1: choose a backup folder
 
 1. **Admin → Settings → Folders**
-2. **Backup folder**: a full path on this machine, somewhere with room to grow.
-   - Windows: `C:\stockroom-backups`
-   - macOS: `/Users/<you>/stockroom-backups`
-3. **Photo mirror folder** (optional): the same idea, for item and profile
-   photos. Leave it empty to skip photos entirely.
-4. **Save folders**
+2. Beside **Backup folder**, press **Choose…**, click through to a folder
+   somewhere with room to grow — an external drive is a good home — and press
+   **Use this folder**. **New folder here** makes one. It is saved straight
+   away.
+3. **Photo mirror folder** (optional): the same, for item and profile photos.
+   Leave it empty to skip photos entirely.
 
-> **The path must be absolute**, starting with `/` on macOS and Linux or a drive
-> letter such as `C:\` on Windows. Copying a path out of Finder or Explorer can
-> drop the leading separator. Stockroom refuses relative paths.
+> Typing a path still works, but it must be a full one, starting with `/` on
+> macOS and Linux or a drive letter such as `C:\` on Windows. Stockroom refuses
+> anything else, because a path copied out of Finder without its leading `/`
+> once put a term of backups somewhere nobody looked.
 
 Then **Admin → Backup → Back up now**. It should say how many rows it wrote and
 where. If it does not, the message on screen says what is wrong.
@@ -63,34 +64,74 @@ scheduled hour, the next start runs one straight away.
 - **macOS**: `brew install rclone`
 - Check it worked: `rclone version` should print a version number.
 
-If you skip this, Stockroom's **Connect** button will tell you rclone is
-missing and repeat the command for your machine.
+If you skip this, the **Google account** card says rclone is missing and gives
+the command for your machine.
 
-### 3b. Connect the Google account
+### 3b. Sign in and choose a folder
 
-1. **Admin → Settings → Google Drive → Connect**
-2. A window appears with a sign-in link. **Open it** (or press **Copy** and
-   paste it into a browser on this machine).
-3. Sign in to the Google account the backups should live in.
-4. Google will say **"Google hasn't verified this app."** This is expected for
-   rclone. Click **Advanced**, then **Go to rclone (unsafe)**, then **Continue**.
-5. Go back to Stockroom and press **Finish**. The sign-in normally completes on
-   its own, so the paste box on that window is usually left empty; fill it in
-   only if Google showed you a block of text starting with `{`.
-6. Tick **Back up to Google Drive every night**, set **Folder in Drive** to
-   something like `stockroom-backups`, and press **Save Drive settings**.
-7. Press **Test connection**. It should say Google Drive is reachable.
+1. **Admin → Settings → Google account → Sign in with Google**
+2. Google's sign-in page opens by itself. Pick the Google account the backups
+   should live in and press **Continue** / **Allow**. (With your own client from
+   3c, Google first says **"Google hasn't verified this app"** — expected: press
+   **Advanced**, then **Go to … (unsafe)**.)
+3. Stockroom's window closes on its own and says **Signed in as** that account.
+   There is nothing to copy or paste.
+4. Under **Backups to Google Drive**, press **Choose a folder**, click into a
+   folder in My Drive (or **New folder here**), and press **Use this folder**.
+   Drive backups are now on, starting tonight.
+5. **Test connection** should say Google Drive is reachable.
+
+If the sign-in page will not open on this machine, the sign-in window has a
+**Signing in on a different computer?** section for doing it elsewhere.
 
 > **Use a personal Google account, not the school one.** A Workspace
 > administrator can block third-party apps for the whole domain, which revokes
 > the connection without notice.
 
-> **rclone client ID notice.** rclone warns that its shared Google client ID is
-> being retired during 2026. It still works, and Stockroom has no setting for a
-> custom client ID yet, so no action is needed. When the shared ID stops
-> working, **Test connection** will fail and each Drive remote will need
-> reconnecting once Stockroom supports a custom client ID. See the open item in
-> `CLAUDE.md` §13 before creating your own client ID.
+> **One connection, two features.** The sign-in photo wall reads its folder
+> through this same Google account, so signing in here turns the wall on as
+> well, and signing in on the Photo wall screen is the same sign-in. There is
+> only ever one Google sign-in to keep working.
+
+### 3c. Your own Google client *(strongly recommended, about fifteen minutes)*
+
+Out of the box, rclone signs in to Google with a "client" it shares with every
+rclone user in the world. **rclone is retiring that shared client during 2026**
+(<https://rclone.org/drive/#making-your-own-client-id>). When it stops, Drive
+backups and the photo wall stop with it, and the backup screen says so. Until
+you have your own, the backup screen shows a warning saying exactly that.
+
+Any Google account can own the client; it does not have to be the one the
+backups live in.
+
+1. Open <https://console.cloud.google.com/>, and create a project (the name
+   does not matter, "Stockroom" is fine).
+2. **APIs & Services → Library**, search for **Google Drive API**, and press
+   **Enable**.
+3. **Google Auth Platform** (or **OAuth consent screen**) → **Get started**.
+   App name `Stockroom`, your own email for both email fields, audience
+   **External**, then **Create**.
+4. **Data access → Add or remove scopes**, and under "Manually add scopes"
+   paste `https://www.googleapis.com/auth/drive`, press **Add to table**, then
+   **Update** and **Save**.
+5. **Audience → Publish app**, and confirm. **This step matters.** An app left
+   in *Testing* has its sign-ins expire after seven days, which on an unattended
+   closet PC is a backup that dies a week after setup. Published but
+   unverified is fine: you will see the "Google hasn't verified this app"
+   screen when you sign in, exactly as before. (If **Publish app** is greyed
+   out, Google wants a home page and privacy policy link under **Branding**
+   first; any page you control will do.)
+6. **Clients → Create client**, type **Desktop app**, then **Create**. Google
+   shows a **Client ID** (ending in `.apps.googleusercontent.com`) and a
+   **Client secret** (starting `GOCSPX-`).
+7. In Stockroom: **Admin → Settings → Google account → Advanced: your own
+   Google client**, paste both, press **Save Google client**.
+8. Press **Use a different account** on the same card and sign in again. That
+   one sign-in moves both the backup and the photo wall onto your client; the
+   warning goes away.
+
+The secret is kept like the GitHub token: never shown again, never written into
+a backup.
 
 ---
 

@@ -349,9 +349,8 @@ RCLONE_REMOTE=
 SESSION_IDLE_MINUTES=10
 
 # The sign-in photo wall is optional decoration and off until an admin signs in
-# to Google for it in Admin -> Photo wall; this is only the remote's name, blank
-# meaning gdrive-photos (CLAUDE.md §9).
-SIGNIN_PHOTOS_REMOTE=
+# to Google in the admin panel (CLAUDE.md §9); it shares the backup's Google
+# connection, so nothing here names a remote.
 SIGNIN_PHOTOS_FOLDER_ID=
 SIGNIN_PHOTOS_DIR=${STOCKROOM_HOME}/.cache/signin-photos
 SIGNIN_PHOTOS_COUNT=48

@@ -192,7 +192,10 @@ back to system sans and the two apps stop matching.
 ## 3. Tokens
 
 `packages/ui/src/lib/styles/tokens.css` is the only file allowed to define a colour, radius, shadow or
-duration. Nothing else in the codebase writes a raw hex value.
+duration. Nothing else in the codebase writes a raw hex value. One exception: a third party's logo drawn in its own brand
+colours, which are the logo rather than the palette. The four colours of the Google "G" in
+`components/app/google-account.svelte` are that exception, because Google's sign-in branding rules require
+the mark in those colours and a token named after them would invite reuse.
 
 ### 3.1 Why hex and not `oklch()`
 
@@ -804,8 +807,10 @@ theme. It is the same shell, `data-density="compact"`.
 - **Overdue.** The highest-value admin screen. `ListOverdueCustody` sorted by days-late descending:
   custodian, student number, item, serial, due date, days late. Row action: **Check in**.
 - **Backup.** One **Backup Now** button, the destination path, and the result of the last run.
-- **Photo wall.** Which Google Drive folder the sign-in wall reads from. One paste field for the share
-  link, one for a name, and **Replace folder** — which checks the folder against Drive before writing, so
+- **Photo wall.** Which Google Drive folder the sign-in wall reads from. **Choose from Google Drive**
+  opens a click-through picker (My Drive and Shared with me, folders named by server-side handles, never
+  ids), and **Paste a link instead** keeps the share-link field with an optional name (2026-09-25). Either
+  way the server checks the folder against Drive before writing, so
   a typo is a message here rather than a wall that silently empties ten minutes later. The link is
   **write-only**: never rendered, never pre-filled, blank again the instant a folder is set, because a
   folder link is a key to the folder and this machine is shared. What identifies the live folder instead

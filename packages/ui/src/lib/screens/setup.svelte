@@ -26,9 +26,12 @@
   import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
   import PrintLabelsDialog, { type LabelItem } from "@stockroom/ui/components/app/print-labels-dialog.svelte"
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
+  import GoogleAccount from "@stockroom/ui/components/app/google-account.svelte"
+  import FolderPicker, { type FolderChoice } from "@stockroom/ui/components/app/folder-picker.svelte"
   import { cn } from "@stockroom/ui/utils"
   import * as api from "../api/index"
   import type {
+    GoogleStatus,
     AssetDetail,
     AssetImportResult,
     BackupResult,
@@ -217,6 +220,22 @@
       () => {},
     )
   })
+
+  let localPickerOpen = $state(false)
+  let drivePickerOpen = $state(false)
+  let google = $state<GoogleStatus | null>(null)
+
+  function pickBackupDir(choice: FolderChoice) {
+    backupDir = choice.path
+    backupDirConfirmed = true
+    backupResult = null
+  }
+
+  async function pickDriveFolder(choice: FolderChoice) {
+    await api.saveSettings({ drive_path: choice.path, drive_enabled: true })
+    google = await api.googleStatus()
+    toast.success(`Backups will also go to ${choice.path} in Google Drive`)
+  }
 
   async function backUpNow() {
     backupBusy = true
@@ -457,20 +476,23 @@
       </p>
       <div class="flex flex-col gap-1.5">
         <Label for="setup-backup-dir">Backup folder</Label>
-        <Input
-          id="setup-backup-dir"
-          bind:value={backupDir}
-          oninput={() => {
-            backupDirConfirmed = false
-            backupResult = null
-          }}
-          class="font-mono"
-          spellcheck={false}
-          placeholder={backupDirExample}
-        />
+        <div class="flex gap-2">
+          <Input
+            id="setup-backup-dir"
+            bind:value={backupDir}
+            oninput={() => {
+              backupDirConfirmed = false
+              backupResult = null
+            }}
+            class="font-mono"
+            spellcheck={false}
+            placeholder={backupDirExample}
+          />
+          <Button variant="secondary" onclick={() => (localPickerOpen = true)}>Choose…</Button>
+        </div>
         <p class="text-xs text-fg-faint">
-          The full path, starting from the top of the disk. Open it on this computer afterwards and
-          check the backup is really there.
+          Press Choose and click through to a folder, or make a new one. Open it on this computer
+          afterwards and check the backup is really there.
         </p>
       </div>
       <label class="flex items-center gap-2 text-sm">
@@ -493,9 +515,27 @@
         </div>
       {/if}
       <p class="text-sm text-fg-muted">
-        A copy somewhere else as well — Google Drive or GitHub — means a failed hard drive doesn't
-        take your records with it. Set that up in Admin → Settings whenever you're ready.
+        A copy in Google Drive as well means a failed hard drive doesn't take your records with it.
+        Sign in, choose a folder, done — or do it later in Admin → Settings.
       </p>
+      <GoogleAccount
+        bind:status={google}
+        purpose="Nightly backups also go to Google Drive. The sign-in photo wall can use the same account later."
+      >
+        {#if google?.connected}
+          <div class="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            {#if google.backup_enabled}
+              <p class="text-sm text-fg">
+                Backing up to <strong class="font-medium">My Drive › {google.backup_folder.split("/").join(" › ")}</strong>
+              </p>
+              <span class="flex-1"></span>
+              <Button variant="ghost" size="sm" onclick={() => (drivePickerOpen = true)}>Change folder</Button>
+            {:else}
+              <Button onclick={() => (drivePickerOpen = true)}>Choose a Drive folder</Button>
+            {/if}
+          </div>
+        {/if}
+      </GoogleAccount>
       {#if !backupResult}
         <p class="text-sm text-fg-faint">
           If you skip this, Stockroom will remind everybody who signs in until it's set up.
@@ -609,3 +649,19 @@
 
 <BulkAddDialog bind:open={bulkOpen} categories={categoryOptions} onCreated={afterBulk} />
 <PrintLabelsDialog bind:open={printOpen} items={printItems} />
+
+<FolderPicker
+  bind:open={localPickerOpen}
+  source="local"
+  title="Choose the backup folder"
+  description="A folder on this computer. An external drive is a good choice; you can make a new folder here too."
+  onpick={pickBackupDir}
+/>
+
+<FolderPicker
+  bind:open={drivePickerOpen}
+  source="drive"
+  title="Choose where backups go in Google Drive"
+  description="Click into a folder in My Drive, or make a new one, then choose it."
+  onpick={pickDriveFolder}
+/>

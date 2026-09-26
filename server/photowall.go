@@ -124,19 +124,27 @@ func (d deps) handlePhotoWallStatus(w http.ResponseWriter, r *http.Request, acto
 	writeJSON(w, http.StatusOK, status)
 }
 
-// PUT /admin/photo-wall  {"link": "...", "label": "..."}
-// Parse the link, probe Drive, write the row, tear the reel down. A failed
-// probe writes nothing and leaves the previous folder live.
+// PUT /admin/photo-wall  {"link": "...", "label"?} or {"folder": handle, "label"?}
+// A pasted link, or a folder chosen in the picker (GET /admin/google/folders).
+// Either way: probe Drive, write the row, tear the reel down. A failed probe
+// writes nothing and leaves the previous folder live.
 func (d deps) handleSetPhotoWallFolder(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in struct {
-		Link  string `json:"link"`
-		Label string `json:"label"`
+		Link   string `json:"link"`
+		Folder string `json:"folder"`
+		Label  string `json:"label"`
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeError(w, err)
 		return
 	}
-	status, err := d.db.SetPhotoWallFolder(r.Context(), actor, in.Link, in.Label)
+	var status stockroom.PhotoWallStatus
+	var err error
+	if in.Folder != "" {
+		status, err = d.db.ChoosePhotoWallFolder(r.Context(), actor, in.Folder, in.Label)
+	} else {
+		status, err = d.db.SetPhotoWallFolder(r.Context(), actor, in.Link, in.Label)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -174,37 +182,4 @@ func (d deps) handlePhotoWallPreview(w http.ResponseWriter, r *http.Request, act
 	// screen at files that are gone.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"photos": urls})
-}
-
-// POST /admin/photo-wall/google/connect
-// Starts `rclone authorize` for a read-only Drive token and returns the link
-// to open. The token never passes through here: Google sends it to rclone.
-func (d deps) handlePhotoWallGoogleConnect(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	res, err := d.db.ConnectPhotoWallGoogle(r.Context(), actor)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-// POST /admin/photo-wall/google/finish  {"id", "code"?}
-// Writes the rclone remote and starts the wall. `code` is the block rclone
-// printed, for when the browser's callback did not reach it. The response is
-// the status, which carries whether Google is connected and never the token.
-func (d deps) handlePhotoWallGoogleFinish(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	var in struct {
-		ID   string `json:"id"`
-		Code string `json:"code"`
-	}
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeError(w, err)
-		return
-	}
-	status, err := d.db.FinishPhotoWallGoogle(r.Context(), actor, in.ID, in.Code)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, status)
 }

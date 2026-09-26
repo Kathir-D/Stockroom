@@ -669,8 +669,8 @@ use it, and both of those are silent until the day they matter:
 |---|---|---|
 | `GET/PUT /admin/settings` | admin | the settings screen; `github_token` returns masked |
 | `POST /admin/settings/test` | admin | `{target}` → runs `Test()`, returns a readable pass/fail |
-| `POST /admin/drive/connect` | admin | starts `rclone authorize`, returns the URL |
-| `POST /admin/drive/finish` | admin | accepts the pasted token, writes the remote |
+| `POST /admin/google/connect` | admin | starts `rclone authorize`, returns the URL (was `/admin/drive/connect` until 2026-09-25) |
+| `POST /admin/google/finish` | admin | `done: false` until Google calls back, then writes the remote; a pasted token also works |
 | `POST /admin/backup` | admin | existing; now also mirrors photos and pushes to every enabled target |
 | `GET /admin/backup/status` | admin | E.7 |
 | `GET /admin/backup/versions?target=` | admin | the dated list from Drive or GitHub |

@@ -30,6 +30,7 @@
    */
   import CheckIcon from "@lucide/svelte/icons/check"
   import CloudIcon from "@lucide/svelte/icons/cloud"
+  import FolderOpenIcon from "@lucide/svelte/icons/folder-open"
   import GithubIcon from "@lucide/svelte/icons/git-branch"
   import FolderIcon from "@lucide/svelte/icons/folder"
   import ClockIcon from "@lucide/svelte/icons/clock"
@@ -43,18 +44,27 @@
   import { Label } from "@stockroom/ui/components/ui/label"
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
-  import GoogleConnectDialog from "@stockroom/ui/components/app/google-connect-dialog.svelte"
+  import GoogleAccount from "@stockroom/ui/components/app/google-account.svelte"
+  import FolderPicker, { type FolderChoice } from "@stockroom/ui/components/app/folder-picker.svelte"
   import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
   import IdCardIcon from "@lucide/svelte/icons/id-card"
   import type { StudentNumberFormat as Format } from "../../student-number"
   import * as api from "../../api/index"
-  import type { Settings, SettingsInput } from "../../api/types"
+  import type { GoogleStatus, Settings, SettingsInput } from "../../api/types"
   import { dateTime } from "../../status"
   import { router } from "../../stores/router.svelte"
 
   /** Which card is mid-save, so only that card's button says "Saving…". */
-  type Card = "signin" | "folders" | "schedule" | "photos" | "drive" | "github" | "encryption"
+  type Card =
+    | "signin"
+    | "folders"
+    | "schedule"
+    | "photos"
+    | "google"
+    | "drive"
+    | "github"
+    | "encryption"
 
   let settings = $state<Settings | null>(null)
   let loading = $state(true)
@@ -92,9 +102,7 @@
     schedule_hour: "",
     photo_min_free_gb: "",
     photo_max_generations: "",
-    drive_enabled: false,
-    drive_remote: "",
-    drive_path: "",
+    google_client_id: "",
     github_enabled: false,
     github_repo: "",
     student_number_format: "digits" as Format,
@@ -103,6 +111,7 @@
 
   /** Secrets live outside `draft`: blank means unchanged, not blank-it-out. */
   let githubToken = $state("")
+  let googleClientSecret = $state("")
   let passphrase = $state("")
   let passphraseConfirm = $state("")
 
@@ -118,9 +127,7 @@
       schedule_hour: String(next.schedule_hour),
       photo_min_free_gb: String(next.photo_min_free_gb),
       photo_max_generations: String(next.photo_max_generations),
-      drive_enabled: next.drive_enabled,
-      drive_remote: next.drive_remote,
-      drive_path: next.drive_path,
+      google_client_id: next.google_client_id,
       github_enabled: next.github_enabled,
       github_repo: next.github_repo,
       student_number_format: next.student_number_format,
@@ -130,6 +137,7 @@
     // just stored one. Leaving a token sitting in a text box on a shared closet
     // machine is the thing the blank-not-masked rule is about.
     githubToken = ""
+    googleClientSecret = ""
     passphrase = ""
     passphraseConfirm = ""
   }
@@ -213,12 +221,17 @@
       photo_max_generations: whole(draft.photo_max_generations, "Keep at most", 1, 1000),
     }))
 
-  const saveDrive = () =>
-    save("drive", () => ({
-      drive_enabled: draft.drive_enabled,
-      drive_remote: draft.drive_remote.trim(),
-      drive_path: draft.drive_path.trim(),
-    }))
+  const saveGoogleClient = () =>
+    save("google", () => {
+      const input: SettingsInput = { google_client_id: draft.google_client_id.trim() }
+      // Blank means "keep the saved secret", as for the GitHub token.
+      if (googleClientSecret.trim()) input.google_client_secret = googleClientSecret.trim()
+      return input
+    })
+
+  /** Back to rclone's shared client; the next Connect signs in with it. */
+  const removeGoogleClient = () =>
+    save("google", () => ({ google_client_id: "", google_client_secret: "" }))
 
   const saveGithub = () =>
     save("github", () => {
@@ -266,51 +279,38 @@
     }
   }
 
-  /* --------------------------------------------------- connecting drive ---- */
+  /* ------------------------------------------------ google and folders ---- */
 
-  let connectOpen = $state(false)
-  let connectUrl = $state("")
-  let connectPasteCommand = $state("")
-  let connectId = $state("")
-  let connectCode = $state("")
-  let connectRemote = $state("stockroom-drive")
-  let connectError = $state<string | null>(null)
-  let connecting = $state(false)
+  let google = $state<GoogleStatus | null>(null)
 
-  async function startConnect() {
-    connecting = true
-    connectError = null
-    try {
-      const result = await api.connectDrive()
-      connectUrl = result.url
-      connectPasteCommand = result.paste_command
-      connectId = result.id
-      connectCode = ""
-      connectRemote = draft.drive_remote.trim() || "stockroom-drive"
-      connectOpen = true
-    } catch (err) {
-      // 503 when rclone is not installed, with the install command in the
-      // message. It belongs beside the button, not in a toast.
-      cardError = { ...cardError, drive: err instanceof Error ? err.message : String(err) }
-    } finally {
-      connecting = false
-    }
+  /** Which folder the local picker is choosing, or null when it is closed. */
+  let localFor = $state<"backup_dir" | "photo_backup_dir" | null>(null)
+  let localOpen = $state(false)
+  let driveOpen = $state(false)
+
+  function browseLocal(field: "backup_dir" | "photo_backup_dir") {
+    localFor = field
+    localOpen = true
   }
 
-  async function finishConnect() {
-    connecting = true
-    connectError = null
-    try {
-      adopt(await api.finishDriveConnect(connectId, connectCode.trim(), connectRemote.trim()))
-      connectOpen = false
-      toast.success("Google Drive connected")
-    } catch (err) {
-      // "Google has not sent the code back yet" is the common one and is a
-      // retry, not a failure — so the dialog stays open with the message in it.
-      connectError = err instanceof Error ? err.message : String(err)
-    } finally {
-      connecting = false
-    }
+  /** A picked folder is saved straight away: choosing it is the decision. */
+  async function pickLocal(choice: FolderChoice) {
+    const field = localFor
+    if (!field) return
+    adopt(await api.saveSettings({ [field]: choice.path }))
+    toast.success(field === "backup_dir" ? "Backup folder saved" : "Photo mirror folder saved")
+  }
+
+  /** Choosing a Drive folder is what turns Drive backups on. */
+  async function pickDrive(choice: FolderChoice) {
+    adopt(await api.saveSettings({ drive_path: choice.path, drive_enabled: true }))
+    google = await api.googleStatus()
+    toast.success(`Backups will go to ${choice.path} in Google Drive`)
+  }
+
+  async function setDriveEnabled(enabled: boolean) {
+    await save("drive", () => ({ drive_enabled: enabled }))
+    google = await api.googleStatus()
   }
 
   /** `02:00`, matching the sentence `BackupStatus` builds for the schedule. */
@@ -396,20 +396,26 @@
         Folders
       </h2>
       <p class="text-xs text-fg-muted">
-        Absolute paths on this machine. The backup folder is also what
-        <code class="font-mono">rclone</code> copies to Google Drive, so it should be somewhere
-        with room to grow.
+        Folders on this machine. Press <strong>Choose…</strong> and click through to one — an
+        external drive is a good home. The backup folder is also what gets copied to Google Drive,
+        so it should be somewhere with room to grow.
       </p>
 
       <div class="flex flex-col gap-1">
         <Label for="backup-dir">Backup folder</Label>
-        <Input
-          id="backup-dir"
-          bind:value={draft.backup_dir}
-          placeholder="/Users/media/stockroom-backups"
-          spellcheck={false}
-          autocomplete="off"
-        />
+        <div class="flex gap-2">
+          <Input
+            id="backup-dir"
+            bind:value={draft.backup_dir}
+            placeholder="Press Choose to pick one"
+            spellcheck={false}
+            autocomplete="off"
+          />
+          <Button variant="secondary" onclick={() => browseLocal("backup_dir")}>
+            <FolderOpenIcon aria-hidden="true" />
+            Choose…
+          </Button>
+        </div>
         <p class="text-xs text-fg-faint">
           Empty means backups are switched off entirely and nothing is being kept.
         </p>
@@ -417,13 +423,19 @@
 
       <div class="flex flex-col gap-1">
         <Label for="photo-dir">Photo mirror folder</Label>
-        <Input
-          id="photo-dir"
-          bind:value={draft.photo_backup_dir}
-          placeholder="/Users/media/stockroom-photos"
-          spellcheck={false}
-          autocomplete="off"
-        />
+        <div class="flex gap-2">
+          <Input
+            id="photo-dir"
+            bind:value={draft.photo_backup_dir}
+            placeholder="Press Choose to pick one"
+            spellcheck={false}
+            autocomplete="off"
+          />
+          <Button variant="secondary" onclick={() => browseLocal("photo_backup_dir")}>
+            <FolderOpenIcon aria-hidden="true" />
+            Choose…
+          </Button>
+        </div>
         <p class="text-xs text-fg-faint">
           Photos are mirrored on this machine only — they are never pushed off-site. Leave it empty
           to skip the mirror.
@@ -544,71 +556,133 @@
       </div>
     </section>
 
-    <!-- -------------------------------------------------- google drive ---- -->
-    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
-        <CloudIcon class="size-4 text-fg-muted" aria-hidden="true" />
-        Google Drive
-      </h2>
-      <p class="text-xs text-fg-muted">
-        Needs <code class="font-mono">rclone</code> installed on this machine. Press Connect and
-        sign in to the Google account the backups should live in — you'll see a
-        "Google hasn't verified this app" screen, which is expected.
-      </p>
+    <!-- ------------------------------------------------------- google ---- -->
+    <!-- One Google connection serves the Drive backup and the sign-in photo
+         wall (google.go). Sign in, choose a folder: rclone, its remote and its
+         callback port stay out of sight (google_admin.go). -->
+    <GoogleAccount
+      bind:status={google}
+      purpose="Back up to Google Drive every night. The sign-in photo wall uses the same account, so signing in here turns that on too."
+    >
+      {#if google?.connected}
+        <div class="flex flex-col gap-2 border-t border-line pt-3">
+          <h3 class="flex items-center gap-2 text-sm font-medium text-fg">
+            <CloudIcon class="size-4 text-fg-muted" aria-hidden="true" />
+            Backups to Google Drive
+          </h3>
+          {#if google.backup_enabled}
+            <p class="text-sm text-fg">
+              Every night to <strong class="font-medium">My Drive › {google.backup_folder.split("/").join(" › ")}</strong>
+            </p>
+          {:else if settings.drive_path}
+            <p class="text-sm text-fg-muted">
+              Paused. The folder is still <strong class="font-medium text-fg">My Drive › {settings.drive_path.split("/").join(" › ")}</strong>.
+            </p>
+          {:else}
+            <p class="text-sm text-fg-muted">
+              Choose the folder in your Google Drive the backups go into, and they start tonight.
+            </p>
+          {/if}
 
-      <label class="flex items-center gap-2 text-sm text-fg">
-        <Checkbox
-          checked={draft.drive_enabled}
-          onCheckedChange={(v) => (draft.drive_enabled = v === true)}
-        />
-        Back up to Google Drive every night
-      </label>
+          {#if cardError.drive}
+            <p class="text-sm text-status-overdue" role="alert">{cardError.drive}</p>
+          {/if}
 
-      <div class="grid gap-3 sm:grid-cols-2">
-        <div class="flex flex-col gap-1">
-          <Label for="drive-remote">rclone remote name</Label>
-          <Input
-            id="drive-remote"
-            bind:value={draft.drive_remote}
-            placeholder="stockroom-drive"
-            spellcheck={false}
-            autocomplete="off"
-          />
-          <p class="text-xs text-fg-faint">Connect fills this in for you.</p>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              variant={google.backup_enabled ? "secondary" : "primary"}
+              onclick={() => (driveOpen = true)}
+            >
+              <FolderOpenIcon aria-hidden="true" />
+              {google.backup_enabled || settings.drive_path ? "Change folder" : "Choose a folder"}
+            </Button>
+            {#if google.backup_enabled}
+              <Button
+                variant="ghost"
+                disabled={testing === "drive"}
+                onclick={() => test("drive")}
+              >
+                {testing === "drive" ? "Testing…" : "Test connection"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={saving === "drive"}
+                onclick={() => setDriveEnabled(false)}
+              >
+                Pause Drive backups
+              </Button>
+            {:else if settings.drive_path}
+              <Button disabled={saving === "drive"} onclick={() => setDriveEnabled(true)}>
+                Resume
+              </Button>
+            {/if}
+          </div>
         </div>
-        <div class="flex flex-col gap-1">
-          <Label for="drive-path">Folder in Drive</Label>
-          <Input
-            id="drive-path"
-            bind:value={draft.drive_path}
-            placeholder="stockroom-backups"
-            spellcheck={false}
-            autocomplete="off"
-          />
-          <p class="text-xs text-fg-faint">Created if it isn't there.</p>
-        </div>
-      </div>
-
-      {#if cardError.drive}
-        <p class="text-sm text-status-overdue" role="alert">{cardError.drive}</p>
       {/if}
 
-      <div class="flex flex-wrap gap-2">
-        <Button disabled={saving === "drive"} onclick={saveDrive}>
-          {saving === "drive" ? "Saving…" : "Save Drive settings"}
-        </Button>
-        <Button variant="secondary" disabled={connecting} onclick={startConnect}>
-          {connecting ? "Starting…" : settings.drive_remote ? "Reconnect" : "Connect"}
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={testing === "drive" || !settings.drive_remote}
-          onclick={() => test("drive")}
-        >
-          {testing === "drive" ? "Testing…" : "Test connection"}
-        </Button>
-      </div>
-    </section>
+      <!-- rclone's shared Google client is being retired during 2026
+           (https://rclone.org/drive/#making-your-own-client-id); a school's
+           own keeps sign-in working after that. Tucked away, because the
+           button above works without it today. -->
+      <details class="border-t border-line pt-3" open={!!cardError.google}>
+        <summary class="cursor-pointer text-xs text-fg-muted select-none hover:text-fg">
+          Advanced: your own Google client
+          {#if settings.google_client_id}
+            <span class="text-fg-faint">— in use</span>
+          {:else if google?.connected}
+            <span class="text-status-due-soon">— recommended before the end of 2026</span>
+          {/if}
+        </summary>
+        <div class="mt-3 flex flex-col gap-3">
+          <p class="text-xs text-fg-muted">
+            {#if settings.google_client_id}
+              Sign-ins use this machine's own Google client.
+            {:else}
+              Sign-ins currently go through rclone's shared Google client, which rclone is retiring
+              during 2026 — when it stops, Drive backups and the photo wall stop with it. Create
+              your own (docs/BACKUP-SETUP.md, step 3c — about fifteen minutes), paste it here, then
+              press <strong>Use a different account</strong> above and sign in again.
+            {/if}
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="flex flex-col gap-1">
+              <Label for="google-client-id">Client ID</Label>
+              <Input
+                id="google-client-id"
+                bind:value={draft.google_client_id}
+                placeholder="1234…apps.googleusercontent.com"
+                spellcheck={false}
+                autocomplete="off"
+              />
+            </div>
+            <div class="flex flex-col gap-1">
+              <Label for="google-client-secret">Client secret</Label>
+              <PasswordInput
+                id="google-client-secret"
+                bind:value={googleClientSecret}
+                autocomplete="off"
+                placeholder={settings.google_client_secret_set
+                  ? "Leave blank to keep the saved secret"
+                  : "GOCSPX-…"}
+              />
+            </div>
+          </div>
+          {#if cardError.google}
+            <p class="text-sm text-status-overdue" role="alert">{cardError.google}</p>
+          {/if}
+          <div class="flex flex-wrap gap-2">
+            <Button variant="secondary" disabled={saving === "google"} onclick={saveGoogleClient}>
+              {saving === "google" ? "Saving…" : "Save Google client"}
+            </Button>
+            {#if settings.google_client_id}
+              <Button variant="ghost" disabled={saving === "google"} onclick={removeGoogleClient}>
+                Use rclone's shared client
+              </Button>
+            {/if}
+          </div>
+        </div>
+      </details>
+    </GoogleAccount>
 
     <!-- -------------------------------------------------------- github ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
@@ -773,25 +847,18 @@
   {/if}
 </div>
 
-<!-- The Drive connect flow. rclone is already running and waiting for Google's
-     callback by the time this opens; the dialog is the link plus the fallback
-     for when the callback doesn't arrive. -->
-<GoogleConnectDialog
-  bind:open={connectOpen}
-  bind:code={connectCode}
-  url={connectUrl}
-  pasteCommand={connectPasteCommand}
-  title="Connect Google Drive"
-  description="Open the link, sign in to the Google account the backups should live in, and allow access. Google will say it hasn't verified this app — press Advanced, then continue."
-  busy={connecting}
-  error={connectError}
-  onfinish={finishConnect}
->
-  {#snippet fields()}
-    <div class="flex flex-col gap-1">
-      <Label for="connect-remote">Name this connection</Label>
-      <Input id="connect-remote" bind:value={connectRemote} spellcheck={false} autocomplete="off" />
-      <p class="text-xs text-fg-faint">No spaces, colons or slashes.</p>
-    </div>
-  {/snippet}
-</GoogleConnectDialog>
+<FolderPicker
+  bind:open={localOpen}
+  source="local"
+  title={localFor === "photo_backup_dir" ? "Choose the photo mirror folder" : "Choose the backup folder"}
+  description="A folder on this machine. An external drive is a good choice; you can make a new folder here too."
+  onpick={pickLocal}
+/>
+
+<FolderPicker
+  bind:open={driveOpen}
+  source="drive"
+  title="Choose where backups go in Google Drive"
+  description="Click into a folder in My Drive, or make a new one, then choose it."
+  onpick={pickDrive}
+/>

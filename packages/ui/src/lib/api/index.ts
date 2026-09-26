@@ -23,7 +23,12 @@ import type {
   CheckoutResult,
   CustodyRecord,
   DriveConnectResult,
+  GoogleFolder,
+  GoogleSignInResult,
+  GoogleStatus,
   HealthResult,
+  LocalFolder,
+  LocalFolderList,
   KitCheckInResult,
   KitDetail,
   KitInput,
@@ -581,21 +586,58 @@ export function testBackupTarget(target: "drive" | "github") {
   });
 }
 
-/** Starts `rclone authorize drive` and returns the link for the admin to open. */
-export function connectDrive() {
-  return request<DriveConnectResult>("/admin/drive/connect", {
+/* -------------------------------------------------------------- google ---- */
+
+/** The one Google connection the Drive backup and the photo wall share. */
+export function googleStatus() {
+  return request<GoogleStatus>("/admin/google");
+}
+
+/** Starts a Google sign-in and returns the page to open. */
+export function connectGoogle() {
+  return request<DriveConnectResult>("/admin/google/connect", {
     method: "POST",
   });
 }
 
 /**
- * Finishes the connection. `code` is the block rclone printed, needed only
- * when the browser callback did not reach it.
+ * Asks whether the sign-in has finished. `done: false` means Google has not
+ * called back yet, so the screen asks again. `code` is the block rclone
+ * printed, only for a sign-in done on another machine.
  */
-export function finishDriveConnect(id: string, code: string, remote: string) {
-  return request<Settings>("/admin/drive/finish", {
+export function finishGoogle(id: string, code = "") {
+  return request<GoogleSignInResult>("/admin/google/finish", {
     method: "POST",
-    body: { id, code, remote },
+    body: { id, code },
+  });
+}
+
+/** Folders inside `in`: "my-drive", "shared", or a handle from an earlier list. */
+export async function googleFolders(within: string) {
+  const res = await request<{ folders: GoogleFolder[] }>(
+    `/admin/google/folders?in=${encodeURIComponent(within)}`,
+  );
+  return res.folders;
+}
+
+export function createGoogleFolder(within: string, name: string) {
+  return request<GoogleFolder>("/admin/google/folders", {
+    method: "POST",
+    body: { in: within, name },
+  });
+}
+
+/** Folders on this machine, for the backup folders. Blank means home. */
+export function localFolders(path = "") {
+  return request<LocalFolderList>(
+    `/admin/local-folders?path=${encodeURIComponent(path)}`,
+  );
+}
+
+export function createLocalFolder(parent: string, name: string) {
+  return request<LocalFolder>("/admin/local-folders", {
+    method: "POST",
+    body: { parent, name },
   });
 }
 
@@ -693,6 +735,14 @@ export function setPhotoWallFolder(link: string, label: string) {
   });
 }
 
+/** The same switch, for a folder chosen in the Drive picker; named after it. */
+export function choosePhotoWallFolder(handle: string) {
+  return request<PhotoWallStatus>("/admin/photo-wall", {
+    method: "PUT",
+    body: { folder: handle },
+  });
+}
+
 /**
  * Re-list the folder now instead of waiting out the weekly refresh. The
  * listing runs in the background, so the useful thing to do with the response
@@ -713,29 +763,4 @@ export function rebuildPhotoWall() {
  */
 export function photoWallPreview() {
   return request<{ photos: string[] }>("/admin/photo-wall/preview");
-}
-
-/**
- * Sign in to Google for the photo wall: starts `rclone authorize` for a
- * **read-only** Drive token and returns the link to open. The same flow as
- * `connectDrive()`, with a narrower grant — the wall can read the folder and
- * nothing else.
- */
-export function connectPhotoWallGoogle() {
-  return request<DriveConnectResult>("/admin/photo-wall/google/connect", {
-    method: "POST",
-  });
-}
-
-/**
- * Finishes the sign-in: the server writes the rclone remote and starts the
- * wall, with no restart. `code` is the block rclone printed, needed only when
- * the browser callback did not reach it. The token never comes back; the
- * status says `google_connected`.
- */
-export function finishPhotoWallGoogle(id: string, code: string) {
-  return request<PhotoWallStatus>("/admin/photo-wall/google/finish", {
-    method: "POST",
-    body: { id, code },
-  });
 }
