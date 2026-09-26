@@ -451,7 +451,9 @@ func (w *cameraWatcher) fetchMedia(ctx context.Context, det Detector, s CameraSe
 		    -- who is in there now, not only after they leave
 		    or (v.ended_at is null and v.snapshot_path is null and v.started_at < now() - interval '5 seconds')
 		  )
-		order by v.started_at
+		-- newest first: after downtime, whoever is in the closet now gets a
+		-- snapshot before the backlog does, and the backlog drains behind them
+		order by v.started_at desc
 		limit $3`, time.Now().Add(-cameraMediaDelay), time.Now().Add(-cameraDetectorKeeps), cameraMediaPerPoll,
 		s.CameraName, gaveUp)
 	if err != nil {
