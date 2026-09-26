@@ -29,6 +29,36 @@ type SessionStore struct {
 
 	mu       sync.Mutex
 	sessions map[string]*Session
+
+	// onExpire, when set, is told about every session that ran out of idle
+	// time, with the moment it did, so the activity log can record an idle
+	// timeout (ROADMAP §2.4). Called on its own goroutine, never under mu.
+	onExpire func(Session, time.Time)
+}
+
+// OnExpire installs the idle-timeout hook.
+func (s *SessionStore) OnExpire(fn func(Session, time.Time)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onExpire = fn
+}
+
+// expire removes a timed-out session and reports it. Caller holds mu.
+func (s *SessionStore) expireLocked(token string, sess *Session) {
+	delete(s.sessions, token)
+	if s.onExpire != nil {
+		copied, at := *sess, sess.LastSeen.Add(s.idle)
+		go s.onExpire(copied, at)
+	}
+}
+
+// Sweep drops every expired session now. The server calls it on a timer, so
+// an idle timeout is noticed -- and logged -- when it happens rather than at
+// the next sign-in.
+func (s *SessionStore) Sweep() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sweepLocked()
 }
 
 // NewSessionStore returns an empty store. idle is SESSION_IDLE_MINUTES as a
@@ -70,7 +100,7 @@ func (s *SessionStore) Get(token string) (Session, bool) {
 	}
 	now := s.now()
 	if s.expired(sess, now) {
-		delete(s.sessions, token)
+		s.expireLocked(token, sess)
 		return Session{}, false
 	}
 	sess.LastSeen = now
@@ -122,7 +152,7 @@ func (s *SessionStore) sweepLocked() {
 	now := s.now()
 	for token, sess := range s.sessions {
 		if s.expired(sess, now) {
-			delete(s.sessions, token)
+			s.expireLocked(token, sess)
 		}
 	}
 }

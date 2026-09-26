@@ -85,6 +85,9 @@ type RestoreResult struct {
 	Sequences     int           `json:"sequences"`
 	// Warnings names what could not be checked rather than pretending it was.
 	Warnings []string `json:"warnings"`
+	// KeptNewer is the activity log and closet visits written after the
+	// backup was taken, which a restore keeps rather than erases.
+	KeptNewer []TableExport `json:"kept_newer"`
 }
 
 // RestoreFromReader reads an archive with a cap and restores it.
@@ -279,6 +282,22 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 		return res, fmt.Errorf("restore: %w", err)
 	}
 
+	// The activity log and the closet's visits survive a restore (ROADMAP
+	// §2.4): whatever the live database holds that the archive does not --
+	// every row written since the backup was taken -- is set aside here and
+	// put back after the load. Otherwise restoring last night's backup would
+	// be a way to erase today's log, which is exactly the log somebody would
+	// want erased.
+	for _, t := range survivingTables {
+		if !archiveSet[t] {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `create temp table `+pgx.Identifier{"keep_" + t}.Sanitize()+
+			` on commit drop as select * from `+pgx.Identifier{"public", t}.Sanitize()); err != nil {
+			return res, fmt.Errorf("restore: set aside %s: %w", t, err)
+		}
+	}
+
 	// One truncate for every table, so the FK graph never has to be ordered.
 	names := make([]string, 0, len(archiveTables))
 	for _, t := range archiveTables {
@@ -302,6 +321,32 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 	}
 
 	if err := db.restoreSecrets(ctx, tx, secrets); err != nil {
+		return res, err
+	}
+
+	for _, t := range survivingTables {
+		if !archiveSet[t] {
+			continue
+		}
+		live := pgx.Identifier{"public", t}.Sanitize()
+		tag, err := tx.Exec(ctx, `insert into `+live+` select k.* from `+pgx.Identifier{"keep_" + t}.Sanitize()+
+			` k where not exists (select 1 from `+live+` l where l.id = k.id)`)
+		if err != nil {
+			return res, fmt.Errorf("restore: put back the newer rows of %s: %w", t, err)
+		}
+		if n := tag.RowsAffected(); n > 0 {
+			res.KeptNewer = append(res.KeptNewer, TableExport{Table: t, Rows: n})
+		}
+	}
+	summary := fmt.Sprintf("Restored the database from the backup taken %s", archive.manifest.RanAt.Local().Format("Mon Jan 2 15:04"))
+	if opts.Source != "" {
+		summary += " (" + opts.Source + ")"
+	}
+	if err := writeLog(ctx, tx, LogEntry{
+		Category: LogAdmin, Action: "restore", ActorID: actorLogID(actor), Summary: summary,
+		Details: map[string]any{"source": opts.Source, "archive_ran_at": archive.manifest.RanAt,
+			"force": opts.Force, "by": res.ByName},
+	}); err != nil {
 		return res, err
 	}
 
@@ -347,6 +392,11 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 	invalidateBackupWarning()
 	return res, nil
 }
+
+// survivingTables are the tables a restore adds to rather than replaces: the
+// append-only log and the visits its closet rows point at. Both are keyed by
+// a uuid id, which is what the put-back matches on.
+var survivingTables = []string{"activity_log", "closet_visits"}
 
 /* ------------------------------------------------------------- loading ---- */
 

@@ -63,6 +63,8 @@ At the measured rate of one photo every 20 to 25 seconds, filling 150 takes abou
 
 **Goal:** a USB webcam watches the equipment closet. Stockroom records when someone walks in and walks out, saves the video of each visit locally, and logs every account, scanner and equipment action with a timestamp. If an item goes missing without being checked out, admins can read one timeline, see who signed in, what was scanned and checked in and out, and watch the video of who was in the room.
 
+**Status (2026-09-26):** built for macOS and Linux and proven with Frigate against sample footage; see [`docs/design/closet-camera.md`](docs/design/closet-camera.md). What is still open below needs the school, the closet PC or the QuickCam.
+
 **Approach:** use an existing open-source detector. Stockroom does not implement person detection itself; it only reads the detector's events.
 
 ### 2.1 Person detection
@@ -117,58 +119,58 @@ Storage estimate: 960×720 at 15 fps is about 1 Mbps, roughly 0.5 GB per hour of
 Tasks:
 
 - [ ] Confirm the closet PC's operating system with the school, and pick the detector from the table above.
-- [ ] Prototype the chosen detector with the QuickCam Pro 9000 on the development machine: detect a person entering and leaving, and measure CPU and RAM use at idle and with a person in view.
+- [x] Prototype the chosen detector with the QuickCam Pro 9000 on the development machine: detect a person entering and leaving, and measure CPU and RAM use at idle and with a person in view. Done with Frigate on sample footage (EPFL lab sequence) instead of the QuickCam, which has not arrived: 31 to 35 ms per detection, about 26% of one core idle and 90% with people in view, 1.3 GB RAM on an M3 Pro. Repeat with the QuickCam when it arrives.
 - [ ] Check the closet PC against the minimum hardware table once it arrives (CPU model and AVX2 support, RAM, free disk, operating system).
 - [ ] Tune for low-end hardware: detect at about 5 fps at 640×360, use the Small model (Agent DVR) or the OpenVINO detector (Frigate), capture MJPEG at 960×720, and encode recordings at 10 to 15 fps, with hardware encoding where available. Measure the CPU cost of encoding separately from detection.
-- [ ] **Frigate on Windows or macOS only:** Docker Desktop cannot pass a USB webcam into a container, so run go2rtc on the host to serve the webcam as a local RTSP stream. On Linux the device is mapped directly.
-- [ ] Add the detector to the install (`deploy/docker-compose.yml` for Frigate, or install steps for Agent DVR in `docs/INSTALL.md`), listening on `127.0.0.1` only. Make the camera optional: no camera configured means none of this runs.
-- [ ] Record a fallback if the closet PC cannot run person detection: motion-only detection logged as "activity in the closet".
+- [x] **Frigate on Windows or macOS only:** Docker Desktop cannot pass a USB webcam into a container, so run go2rtc on the host to serve the webcam as a local RTSP stream. On Linux the device is mapped directly. macOS done (`deploy/camera/camera.sh`, a go2rtc launchd agent on install); Windows not.
+- [x] Add the detector to the install (`deploy/docker-compose.yml` for Frigate, or install steps for Agent DVR in `docs/INSTALL.md`), listening on `127.0.0.1` only. Make the camera optional: no camera configured means none of this runs. `install.sh --with-camera`, Frigate on `127.0.0.1:5055` (5000 is macOS AirPlay). Off until an admin turns it on.
+- [x] Record a fallback if the closet PC cannot run person detection: motion-only detection logged as "activity in the closet". Recorded, not built: Frigate's `objects.track` can be emptied and `review.alerts` set to motion, and the connector would read motion review items instead of person events. Decide on the closet PC.
 
 ### 2.2 Entry and exit events in Stockroom
 
-- [ ] A Go goroutine in the server reads new person events from the detector: Frigate's HTTP API (polled, so no MQTT broker is needed) or Agent DVR's API and webhooks. Keep this behind one small connector interface.
-- [ ] Record **walked in** when a person event starts and **walked out** when it ends, using a doorway zone to tell arrivals from people already in the room.
-- [ ] Store a snapshot per event.
-- [ ] If the detector or the camera is down, sign-in and checkout keep working, and the admin panel shows the camera as offline, with the gap recorded in the log.
+- [x] A Go goroutine in the server reads new person events from the detector: Frigate's HTTP API (polled, so no MQTT broker is needed) or Agent DVR's API and webhooks. Keep this behind one small connector interface.
+- [x] Record **walked in** when a person event starts and **walked out** when it ends, using a doorway zone to tell arrivals from people already in the room. (No zone needed: the camera faces into the closet from over the door, so the frame is the room.)
+- [x] Store a snapshot per event.
+- [x] If the detector or the camera is down, sign-in and checkout keep working, and the admin panel shows the camera as offline, with the gap recorded in the log.
 
 ### 2.3 Visit recordings
 
-- [ ] **Save video from when a person walks in until they walk out**, plus a few seconds before and after, using the detector's event-based recording. No video is kept while the closet is empty.
-- [ ] Store recordings **locally only**, in a folder set in Admin → Settings. They are never pushed to Google Drive or GitHub and are left out of backups.
-- [ ] Link each recording to its walked-in and walked-out log entries, and play it from the admin timeline.
-- [ ] Delete recordings automatically after a retention period set in the admin panel (for example 30 days), and warn on the backup-style warning surfaces when free disk space runs low.
-- [ ] Let an admin mark a recording **keep**, so evidence for an open investigation is not deleted by retention.
-- [ ] Estimate disk use from the prototype: minutes of video per school day multiplied by the camera's bitrate.
+- [x] **Save video from when a person walks in until they walk out**, plus a few seconds before and after, using the detector's event-based recording. No video is kept while the closet is empty.
+- [x] Store recordings **locally only**, in a folder set in Admin → Settings. They are never pushed to Google Drive or GitHub and are left out of backups.
+- [x] Link each recording to its walked-in and walked-out log entries, and play it from the admin timeline.
+- [x] Delete recordings automatically after a retention period set in the admin panel (for example 30 days), and warn on the backup-style warning surfaces when free disk space runs low.
+- [x] Let an admin mark a recording **keep**, so evidence for an open investigation is not deleted by retention.
+- [x] Estimate disk use from the prototype: minutes of video per school day multiplied by the camera's bitrate. About 0.16 MB per second of visit at 640×512 and 15 fps, so an hour of visits a day for 30 days is roughly 17 GB.
 
 ### 2.4 Complete activity log
 
 Every event goes into one append-only log. **Every entry has a timestamp** (taken from the server clock, stored with time zone), the account when there is one, and the details. Today, only asset status changes are logged (`activity_log` via a trigger).
 
-- [ ] Closet: walked in, walked out (with the linked recording), camera offline and online.
-- [ ] Accounts: sign-in by scan, sign-in by password, failed sign-in, first password set, sign-out, idle timeout.
-- [ ] **Barcode scanner: every scan**, with its timestamp, the code read, the screen it was scanned on, who was signed in, and the result (signed in, checked in, opened item, unknown code, refused). This includes scans with nobody signed in and scans that did nothing.
-- [ ] Equipment: checkout (with custodian and due date, and whether an admin override was used), check-in, damage note, kit check-in, item status changes.
-- [ ] Admin: user, asset, category and kit changes, password resets, imports, settings changes, backup, restore, export.
-- [ ] Log rows cannot be edited or deleted through the app, and a restore does not erase log entries written after the backup was taken.
-- [ ] Record log entries inside the same transaction as the action, so an action cannot happen without its log entry.
+- [x] Closet: walked in, walked out (with the linked recording), camera offline and online.
+- [x] Accounts: sign-in by scan, sign-in by password, failed sign-in, first password set, sign-out, idle timeout.
+- [x] **Barcode scanner: every scan**, with its timestamp, the code read, the screen it was scanned on, who was signed in, and the result (signed in, checked in, opened item, unknown code, refused). This includes scans with nobody signed in and scans that did nothing.
+- [x] Equipment: checkout (with custodian and due date, and whether an admin override was used), check-in, damage note, kit check-in, item status changes.
+- [x] Admin: user, asset, category and kit changes, password resets, imports, settings changes, backup, restore, export.
+- [x] Log rows cannot be edited or deleted through the app, and a restore does not erase log entries written after the backup was taken.
+- [x] Record log entries inside the same transaction as the action, so an action cannot happen without its log entry.
 
 ### 2.5 Admin timeline
 
-- [ ] **Admin → Activity**: one timeline of all events in time order, filterable by date and time range, person, item and event type. **Admins only**; the API refuses everyone else, and viewing a recording is itself logged.
-- [ ] Show each visit (walked in to walked out) with its snapshot and a play button for the recording, next to the sign-ins, scans and checkouts that happened during it.
-- [ ] Item view: from an item's history, jump to closet activity between its last check-in and when it was reported missing.
-- [ ] Export a time range as CSV.
+- [x] **Admin → Activity**: one timeline of all events in time order, filterable by date and time range, person, item and event type. **Admins only**; the API refuses everyone else, and viewing a recording is itself logged.
+- [x] Show each visit (walked in to walked out) with its snapshot and a play button for the recording, next to the sign-ins, scans and checkouts that happened during it.
+- [x] Item view: from an item's history, jump to closet activity between its last check-in and when it was reported missing.
+- [x] Export a time range as CSV.
 
 ### 2.6 Decisions to record
 
-- [ ] **Privacy and consent.** Recording students on video needs school approval. Decide on signage, and how long recordings, snapshots and log entries are kept.
-- [ ] Log rows are included in backups; recordings and snapshots are not.
-- [ ] Linking a person event to an account is out of scope. The timeline places sign-ins and camera events side by side, and an admin draws the conclusion.
+- [ ] **Privacy and consent.** Recording students on video needs school approval and signage. Defaults set with the owner on 2026-09-26: the camera ships off, recordings are kept 30 days unless marked keep, the log is kept forever, and the log holds full student numbers because it is admin-only.
+- [x] Log rows are included in backups; recordings and snapshots are not.
+- [x] Linking a person event to an account is out of scope. The timeline places sign-ins and camera events side by side, and an admin draws the conclusion.
 
 ### 2.7 Tests and rollout
 
-- [ ] Go tests with a fake detector API: event polling, enter/exit mapping, recording links, retention and the keep flag, camera outage handling.
-- [ ] Tests that each logged action, including every scan, writes exactly one timestamped log row, that the log is not editable, and that non-admins cannot read it.
+- [x] Go tests with a fake detector API: event polling, enter/exit mapping, recording links, retention and the keep flag, camera outage handling.
+- [x] Tests that each logged action, including every scan, writes exactly one timestamped log row, that the log is not editable, and that non-admins cannot read it.
 - [ ] On the closet PC: mount the camera with a clear view of the door, draw the doorway zone, and measure CPU use over a full school day.
 
 # Other work

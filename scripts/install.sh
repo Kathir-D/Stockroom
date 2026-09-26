@@ -14,6 +14,7 @@
 #     ./scripts/install.sh                 # install or upgrade in ~/Stockroom
 #     ./scripts/install.sh --home /opt/stockroom
 #     ./scripts/install.sh --no-service    # set it up but don't register it
+#     ./scripts/install.sh --with-camera   # also the closet camera's detector (Frigate)
 #     ./scripts/install.sh --admin-number 123456 --admin-password-file pw.txt
 #
 # The failsafe password is read from a file (or `-` for stdin), never from an
@@ -41,6 +42,7 @@ SERVER_ADDR="${SERVER_ADDR:-127.0.0.1:8080}"
 ADDR_GIVEN=0
 INSTALL_SERVICE=1
 OPEN_BROWSER=1
+WITH_CAMERA=0
 ADMIN_NUMBER="${ADMIN_STUDENT_NUMBER:-}"
 # The password is never taken from the environment (see the header): unset
 # first, because assigning to a variable that arrived exported keeps it
@@ -76,6 +78,7 @@ while [ $# -gt 0 ]; do
       die "--admin-password is not accepted: an argument is visible to every user on this machine. Use --admin-password-file FILE (or - for stdin)." ;;
     --no-service)     INSTALL_SERVICE=0; shift ;;
     --no-open)        OPEN_BROWSER=0; shift ;;
+    --with-camera)    WITH_CAMERA=1; shift ;;
     -h|--help)        usage ;;
     *)                die "unknown option: $1 (try --help)" ;;
   esac
@@ -442,6 +445,40 @@ else
   SERVICE_STOPPED=0
   warn "skipping service registration (--no-service)"
   say "  Start it by hand with: cd $STOCKROOM_HOME && ./stockroom-run.sh"
+fi
+
+# ---------------------------------------------------------------------------
+# 7b. The closet camera (optional, ROADMAP §2)
+# ---------------------------------------------------------------------------
+# Frigate beside the database, reading the webcam -- directly on Linux, via
+# go2rtc on the host on macOS. Installing it records nothing: the camera stays
+# off until an admin chooses a recordings folder and turns it on in Admin ->
+# Settings -> Closet camera. Re-running the installer keeps the rendered
+# Frigate config, so a hand-tuned one survives an upgrade.
+if [ "$WITH_CAMERA" = 1 ]; then
+  say ""
+  say "Setting up the closet camera's detector..."
+  CAMERA_HOME="$STOCKROOM_HOME/camera"
+  mkdir -p "$CAMERA_HOME/empty" "$STOCKROOM_HOME/recordings"
+  cp "$REPO/deploy/camera/camera.sh" "$REPO/deploy/camera/docker-compose.yml" \
+     "$REPO/deploy/camera/compose.linux-webcam.yml" "$CAMERA_HOME/"
+  chmod +x "$CAMERA_HOME/camera.sh"
+  if [ "$OS" = macos ]; then
+    command -v ffmpeg >/dev/null 2>&1 || die "the camera needs ffmpeg on macOS: brew install ffmpeg"
+    G2R="$(command -v go2rtc || true)"
+    [ -z "$G2R" ] && [ -x "$HOME/.local/bin/go2rtc" ] && G2R="$HOME/.local/bin/go2rtc"
+    [ -n "$G2R" ] || die "the camera needs go2rtc on macOS: download go2rtc_mac_arm64.zip (or _amd64) from https://github.com/AlexxIT/go2rtc/releases into ~/.local/bin"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    G2R_PLIST="$HOME/Library/LaunchAgents/com.stockroom.go2rtc.plist"
+    launchctl bootout "gui/$(id -u)" "$G2R_PLIST" 2>/dev/null || true
+    sed -e "s|__GO2RTC__|$G2R|g" -e "s|__CAMERA_DIR__|$CAMERA_HOME|g" \
+      "$REPO/deploy/camera/com.stockroom.go2rtc.plist.template" > "$G2R_PLIST"
+  fi
+  CAMERA_DIR="$CAMERA_HOME" "$CAMERA_HOME/camera.sh" up --source webcam || die "the camera's detector did not start"
+  ok "Frigate is running on 127.0.0.1:5055"
+  say "  Turn it on in Admin -> Settings -> Closet camera, with the recordings"
+  say "  folder $STOCKROOM_HOME/recordings (or one on a bigger disk)."
+  [ "$OS" = macos ] && say "  macOS will ask once for camera access for go2rtc: allow it."
 fi
 
 # ---------------------------------------------------------------------------

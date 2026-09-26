@@ -117,7 +117,7 @@ func (db *DB) BackupNow(ctx context.Context, actor Actor) (BackupResult, error) 
 	if err := RequireAdmin(actor); err != nil {
 		return BackupResult{}, err
 	}
-	return db.RunBackup(ctx, BackupSourceManual)
+	return db.runBackup(ctx, BackupSourceManual, actorLogID(actor))
 }
 
 // RunBackup is the whole night's work. It is unexported from the API's point
@@ -126,6 +126,36 @@ func (db *DB) BackupNow(ctx context.Context, actor Actor) (BackupResult, error) 
 // 2 a.m., and inventing a fake admin session to satisfy a check nobody is
 // making would be theatre.
 func (db *DB) RunBackup(ctx context.Context, source string) (BackupResult, error) {
+	return db.runBackup(ctx, source, "")
+}
+
+func (db *DB) runBackup(ctx context.Context, source, actorID string) (res BackupResult, err error) {
+	// Every run is in the activity log, the scheduled ones included: a
+	// restore later reads "backup at 02:00" and knows what it is getting.
+	defer func() {
+		if res.Skipped {
+			return
+		}
+		e := LogEntry{Category: LogAdmin, Action: "backup", ActorID: actorID,
+			Details: map[string]any{"source": source}}
+		if err != nil {
+			e.Summary = "Backup failed: " + err.Error()
+			e.Details["error"] = err.Error()
+		} else {
+			e.Summary = fmt.Sprintf("Backup (%s): %d rows", source, res.Rows)
+			failed := []string{}
+			for _, t := range res.Targets {
+				if t.Error != "" {
+					failed = append(failed, t.Target)
+				}
+			}
+			if len(failed) > 0 {
+				e.Summary += ", could not push to " + strings.Join(failed, ", ")
+				e.Details["failed_targets"] = failed
+			}
+		}
+		db.logBestEffort(context.WithoutCancel(ctx), e)
+	}()
 	baseDir, settings, err := db.backupDir(ctx)
 	if err != nil {
 		return BackupResult{}, err
@@ -146,7 +176,7 @@ func (db *DB) RunBackup(ctx context.Context, source string) (BackupResult, error
 	}
 	defer release()
 
-	res, err := db.runBackupLocked(ctx, baseDir, settings, source)
+	res, err = db.runBackupLocked(ctx, baseDir, settings, source)
 	db.recordBackupRun(baseDir, res, err)
 	return res, err
 }

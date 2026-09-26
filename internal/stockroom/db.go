@@ -80,6 +80,12 @@ type DB struct {
 	// one cache directory. photoWallCfg and photoWallCtx are what StartPhotoWall
 	// recorded at boot, kept so a later sign-in can start the wall with the
 	// same settings and the server's lifetime rather than a request's.
+	// The closet camera's watcher (camera_watch.go), built on first use, and
+	// the detector connector a test may replace (nil means Frigate).
+	cameraOnce      sync.Once
+	cameraW         *cameraWatcher
+	detectorFactory func(baseURL string) Detector
+
 	photoWallStart sync.Mutex
 	photoWallCfg   *PhotoWallConfig
 	photoWallCtx   context.Context
@@ -118,6 +124,7 @@ func Open(ctx context.Context, databaseURL string, opts Options) (*DB, error) {
 		pool.Close()
 		return nil, err
 	}
+	db.Sessions.OnExpire(db.logIdleTimeout)
 	return db, nil
 }
 
@@ -131,6 +138,23 @@ func (db *DB) Ping(ctx context.Context) error {
 		return fmt.Errorf("ping database: %w", err)
 	}
 	return nil
+}
+
+// StartSessionSweeper expires idle sessions every 30 seconds until ctx ends,
+// so each idle timeout is logged close to when it happened.
+func (db *DB) StartSessionSweeper(ctx context.Context) {
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				db.Sessions.Sweep()
+			}
+		}
+	}()
 }
 
 // Close releases the pool.

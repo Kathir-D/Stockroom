@@ -45,6 +45,7 @@
   import { Skeleton } from "@stockroom/ui/components/ui/skeleton"
   import EmptyState from "@stockroom/ui/components/app/empty-state.svelte"
   import GoogleAccount from "@stockroom/ui/components/app/google-account.svelte"
+  import CameraSettingsCard from "@stockroom/ui/components/app/camera-settings-card.svelte"
   import FolderPicker, { type FolderChoice } from "@stockroom/ui/components/app/folder-picker.svelte"
   import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
@@ -833,6 +834,9 @@
         {/if}
       </div>
     </section>
+
+    <!-- ------------------------------------------------ closet camera ---- -->
+    <CameraSettingsCard />
 
     <p class="text-xs text-fg-faint">
       Last changed {dateTime(settings.updated_at) || "—"}. See what these are doing on the

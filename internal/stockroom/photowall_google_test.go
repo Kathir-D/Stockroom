@@ -219,10 +219,6 @@ func TestGoogleSignInStartsTheWall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
-	t.Cleanup(func() {
-		db.Pool.Exec(context.Background(),
-			`delete from activity_log where action = 'google_sign_in' and actor_id = $1`, admin.ID)
-	})
 
 	db.StartPhotoWall(ctx, PhotoWallConfig{Dir: t.TempDir()})
 	if db.SignInPhotoWall() != nil {

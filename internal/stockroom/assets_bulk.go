@@ -185,6 +185,9 @@ func (db *DB) BulkAddAssets(ctx context.Context, actor Actor, in BulkAddInput) (
 	if err := tx.Commit(ctx); err != nil {
 		return nil, mapPgError("bulk add", err)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "assets_bulk_added", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Added %d numbered units of %s", len(out), in.Name),
+		Details: map[string]any{"count": len(out), "prefix": in.Prefix}})
 	return out, nil
 }
 

@@ -495,6 +495,8 @@ func (db *DB) RestorePhotos(ctx context.Context, actor Actor, generation string)
 	if err != nil {
 		return restored, fmt.Errorf("restore photos: %w", err)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "photos_restored", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Restored %d photos from generation %s", restored, generation)})
 	return restored, nil
 }
 
@@ -528,6 +530,8 @@ func (db *DB) DeletePhotoGeneration(ctx context.Context, actor Actor, generation
 	if err := os.RemoveAll(target); err != nil {
 		return fmt.Errorf("delete %s: %w", generation, err)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "photo_generation_deleted", ActorID: actorLogID(actor),
+		Summary: "Deleted photo mirror generation " + generation})
 	return nil
 }
 

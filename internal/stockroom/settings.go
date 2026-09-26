@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
@@ -389,6 +390,13 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}
+	// The field names only, never the values: two of them are secrets.
+	if fields := in.fieldsSet(); len(fields) > 0 {
+		if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "settings_changed", ActorID: actorLogID(actor),
+			Summary: "Changed settings: " + strings.Join(fields, ", "), Details: map[string]any{"fields": fields}}); err != nil {
+			return Settings{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Settings{}, fmt.Errorf("save settings: %w", err)
 	}
@@ -642,4 +650,17 @@ func (db *DB) photoBackupDir(s Settings) string {
 		return ""
 	}
 	return dir
+}
+
+// fieldsSet names the fields a partial update carries, by their JSON names.
+func (in SettingsInput) fieldsSet() []string {
+	v := reflect.ValueOf(in)
+	t := v.Type()
+	out := []string{}
+	for i := 0; i < t.NumField(); i++ {
+		if f := v.Field(i); f.Kind() == reflect.Pointer && !f.IsNil() {
+			out = append(out, strings.Split(t.Field(i).Tag.Get("json"), ",")[0])
+		}
+	}
+	return out
 }

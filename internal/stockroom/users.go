@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // UserInput is the admin-panel payload for creating or updating an account.
@@ -103,15 +105,22 @@ func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profil
 	if err := in.normalize(); err != nil {
 		return Profile{}, err
 	}
-	row := db.Pool.QueryRow(ctx, `
-		insert into profiles (student_number, first_name, last_name, full_name, email, is_admin)
-		values ($1, $2, $3, $4, $5, $6)
-		returning `+profileColumns,
-		in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-		in.Email, in.IsAdmin)
-	p, err := scanProfile(row)
+	var p Profile
+	err := db.withLoggedTx(ctx, actorLogID(actor), "create user", func(tx pgx.Tx) error {
+		var err error
+		p, err = scanProfile(tx.QueryRow(ctx, `
+			insert into profiles (student_number, first_name, last_name, full_name, email, is_admin)
+			values ($1, $2, $3, $4, $5, $6)
+			returning `+profileColumns,
+			in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
+			in.Email, in.IsAdmin))
+		if err != nil {
+			return mapPgError("create user", err)
+		}
+		return writeLog(ctx, tx, userLogEntry(actor, "user_created", "Created account for", p))
+	})
 	if err != nil {
-		return Profile{}, mapPgError("create user", err)
+		return Profile{}, err
 	}
 	return p, nil
 }
@@ -129,17 +138,37 @@ func (db *DB) UpdateUser(ctx context.Context, actor Actor, id string, in UserInp
 	if id == actor.ID && !in.IsAdmin {
 		return Profile{}, fmt.Errorf("%w: cannot remove your own admin access", ErrConflict)
 	}
-	row := db.Pool.QueryRow(ctx, `
-		update profiles
-		set student_number = $2, first_name = $3, last_name = $4, full_name = $5,
-		    email = $6, is_admin = $7
-		where id = $1
-		returning `+profileColumns,
-		id, in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-		in.Email, in.IsAdmin)
-	p, err := scanProfile(row)
+	var p Profile
+	err := db.withLoggedTx(ctx, actorLogID(actor), "update user", func(tx pgx.Tx) error {
+		var wasAdmin bool
+		if err := tx.QueryRow(ctx, `select is_admin from profiles where id = $1 for update`, id).Scan(&wasAdmin); err != nil {
+			return mapPgError("update user", err)
+		}
+		var err error
+		p, err = scanProfile(tx.QueryRow(ctx, `
+			update profiles
+			set student_number = $2, first_name = $3, last_name = $4, full_name = $5,
+			    email = $6, is_admin = $7
+			where id = $1
+			returning `+profileColumns,
+			id, in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
+			in.Email, in.IsAdmin))
+		if err != nil {
+			return mapPgError("update user", err)
+		}
+		e := userLogEntry(actor, "user_updated", "Edited account for", p)
+		if wasAdmin != p.IsAdmin {
+			e.Details["admin_changed"] = p.IsAdmin
+			if p.IsAdmin {
+				e.Summary += " (made an admin)"
+			} else {
+				e.Summary += " (admin access removed)"
+			}
+		}
+		return writeLog(ctx, tx, e)
+	})
 	if err != nil {
-		return Profile{}, mapPgError("update user", err)
+		return Profile{}, err
 	}
 	return p, nil
 }
@@ -166,12 +195,15 @@ func (db *DB) DeleteUser(ctx context.Context, actor Actor, id string) error {
 	if open {
 		return fmt.Errorf("%w: user has items checked out", ErrConflict)
 	}
-	tag, err := db.Pool.Exec(ctx, `delete from profiles where id = $1`, id)
+	err = db.withLoggedTx(ctx, actorLogID(actor), "delete user", func(tx pgx.Tx) error {
+		p, err := scanProfile(tx.QueryRow(ctx, `delete from profiles where id = $1 returning `+profileColumns, id))
+		if err != nil {
+			return mapPgError("delete user", err)
+		}
+		return writeLog(ctx, tx, userLogEntry(actor, "user_deleted", "Deleted account for", p))
+	})
 	if err != nil {
-		return mapPgError("delete user", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return err
 	}
 	db.Sessions.DeleteForProfile(id)
 	return nil
@@ -188,13 +220,27 @@ func (db *DB) SetUserPassword(ctx context.Context, actor Actor, id, password str
 	if err != nil {
 		return err
 	}
-	tag, err := db.Pool.Exec(ctx, `update profiles set password_hash = $2 where id = $1`, id, hash)
+	err = db.withLoggedTx(ctx, actorLogID(actor), "set user password", func(tx pgx.Tx) error {
+		p, err := scanProfile(tx.QueryRow(ctx,
+			`update profiles set password_hash = $2 where id = $1 returning `+profileColumns, id, hash))
+		if err != nil {
+			return mapPgError("set user password", err)
+		}
+		return writeLog(ctx, tx, userLogEntry(actor, "password_reset", "Reset the password for", p))
+	})
 	if err != nil {
-		return mapPgError("set user password", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return err
 	}
 	db.Sessions.DeleteForProfile(id)
 	return nil
+}
+
+// userLogEntry is an admin's change to an account. The account changed is in
+// the details; the actor is the admin who changed it.
+func userLogEntry(actor Actor, action, verb string, p Profile) LogEntry {
+	return LogEntry{
+		Category: LogAdmin, Action: action, ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("%s %s", verb, profileLabel(p)),
+		Details: map[string]any{"user_id": p.ID, "user": profileLabel(p), "student_number": deref(p.StudentNumber)},
+	}
 }

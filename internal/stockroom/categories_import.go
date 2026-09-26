@@ -143,6 +143,9 @@ func (db *DB) ImportCategories(ctx context.Context, actor Actor, r io.Reader) (C
 	if err := tx.Commit(ctx); err != nil {
 		return res, mapPgError("import categories", err)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "categories_imported", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Imported categories: %d added, %d already there", res.Created, res.Existing),
+		Details: map[string]any{"created": res.Created, "existing": res.Existing}})
 	return res, nil
 }
 

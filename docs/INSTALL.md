@@ -51,6 +51,7 @@ The installer:
 | `--no-open` | Do not open a browser when finished |
 | `--admin-number <n>` | Failsafe admin student number, for unattended installs |
 | `--admin-password-file <file>` | File containing the failsafe admin password. Use `-` to read from stdin |
+| `--with-camera` | Also install the closet camera's detector (Frigate). See [Closet camera](#closet-camera) |
 
 There is no `--admin-password` flag, because command-line arguments are visible to other users and saved in shell history.
 
@@ -65,6 +66,14 @@ On macOS the service is a LaunchAgent, which starts when the user logs in. Docke
 Enable **System Settings → Users & Groups → Automatic login**. Without it, the machine stays at the login window after a restart and Stockroom does not run.
 
 On Linux the service is a systemd unit that starts at boot.
+
+### Closet camera
+
+Optional. `--with-camera` starts Frigate, an open-source person detector, in a second container on `127.0.0.1:5055`, reading a USB webcam. On Linux the camera (`/dev/video0`) goes straight into the container. On macOS Docker cannot reach a USB camera, so go2rtc runs on the Mac as a second LaunchAgent and passes the video to Frigate. The Mac needs `ffmpeg` (`brew install ffmpeg`) and the `go2rtc` binary from its [releases page](https://github.com/AlexxIT/go2rtc/releases) in `~/.local/bin`. The first time go2rtc starts, macOS asks for camera access. Allow it, or the camera stays dark without an error.
+
+Installing it records nothing. Turn it on in **Admin → Settings → Closet camera**: choose a recordings folder (the installer makes `~/Stockroom/recordings`), tick **Record closet visits**, and press **Test connection**. Recording students needs your school's approval and a sign on the door.
+
+The camera setup lives in `~/Stockroom/camera`. `camera/camera.sh status` says whether Frigate is running, and `camera/camera.sh up --reconfigure` rewrites Frigate's config, for example after changing `CAMERA_SIZE=1280x720` for a different webcam. The design and the measurements are in [docs/design/closet-camera.md](design/closet-camera.md).
 
 ## First run
 

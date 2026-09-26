@@ -435,7 +435,7 @@ func restorePhotoWallFolder(t *testing.T, db *DB) func() {
 				signin_photos_folder_id = $1, signin_photos_label = $2,
 				signin_photos_changed_at = $3, signin_photos_changed_by = $4::uuid
 			where id = true`, id, label, at, by)
-		_, _ = db.Pool.Exec(context.Background(),
-			`delete from activity_log where action = 'signin_photo_wall_folder'`)
+		// The activity_log row the test wrote stays: the log is append-only
+		// (ROADMAP §2.4) and a test is not an exception.
 	}
 }

@@ -28,6 +28,7 @@
   import PhotoFrame from "./photo-frame.svelte"
   import Serial from "./serial.svelte"
   import StatusDot from "./status-dot.svelte"
+  import { router } from "../../stores/router.svelte"
 
   let {
     asset,
@@ -96,6 +97,23 @@
   $effect(() => {
     if (open) note = ""
   })
+
+  /** When the item last came back, the start of the window it could have gone missing in. */
+  const lastReturn = $derived(
+    history
+      .map((r) => r.checked_in_at)
+      .filter((t): t is string => !!t)
+      .sort()
+      .at(-1) ?? null,
+  )
+
+  function openActivity(window: boolean) {
+    if (!asset) return
+    const from = lastReturn ?? new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    const query: Record<string, string> = window ? { from } : { item: asset.id }
+    open = false
+    router.go({ name: "admin", tab: "activity", query })
+  }
 
   async function handleCheckIn() {
     if (!asset || !onCheckIn) return
@@ -228,6 +246,16 @@
               {/each}
             </ul>
           {/if}
+          <!-- The missing-item question (ROADMAP §2.5): what happened at the
+               closet between this item's last return and now. The camera's
+               visits, sign-ins and scans in that window are on the activity
+               timeline; the admin draws the conclusion. -->
+          <div class="flex flex-wrap gap-2 pt-1">
+            <Button variant="secondary" size="sm" onclick={() => openActivity(true)}>
+              Closet activity since {lastReturn ? "its last return" : "last week"}
+            </Button>
+            <Button variant="ghost" size="sm" onclick={() => openActivity(false)}>This item's log</Button>
+          </div>
         </section>
       {/if}
 

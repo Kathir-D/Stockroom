@@ -65,7 +65,7 @@ func (d deps) handleSetInitialPassword(w http.ResponseWriter, r *http.Request, a
 
 // POST /auth/logout
 func (d deps) handleLogout(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
-	d.db.Logout(actor)
+	d.db.Logout(r.Context(), actor)
 	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

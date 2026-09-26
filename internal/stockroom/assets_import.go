@@ -184,6 +184,9 @@ func (db *DB) ImportAssets(ctx context.Context, actor Actor, r io.Reader) (Asset
 	if len(res.Rows) == 0 {
 		return res, fmt.Errorf("%w: that CSV has a header but no rows", ErrInvalid)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "assets_imported", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Imported items: %d added, %d updated, %d failed", res.Created, res.Updated, res.Failed),
+		Details: map[string]any{"created": res.Created, "updated": res.Updated, "failed": res.Failed}})
 	return res, nil
 }
 

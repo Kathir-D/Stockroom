@@ -116,6 +116,16 @@ anything else** until it comes back. If you need to lend to them anyway, check
 the cart out yourself: an admin gets an **Override the overdue block** option
 on the cart page.
 
+## The activity log and the closet camera
+
+**Admin → Activity** lists everything that happened at the closet, newest first: every sign-in (and failed sign-in), every barcode scan, every checkout and return, every change an admin made and, if the closet camera is on, every visit. Filter by time, person, type or text, and press **Export CSV** to take a range away. Nobody can edit or delete a row, not even an admin, and restoring a backup keeps everything logged since that backup.
+
+With the camera on, each person who walks in gets a row with a snapshot and a **Play** button. Walking out adds a row that says how long they were inside. Recordings stay on this machine for the number of days set in **Settings → Closet camera** (30 by default) and are then deleted. Press **Keep this recording** in the player to keep one for good. Watching a recording is itself logged.
+
+**When something goes missing**, open the item (Assets, or scan it), and under its custody history press **Closet activity since its last return**. The timeline opens at the moment it was last checked in, with every visit, sign-in and scan since. Stockroom does not match faces to accounts. You compare who walked in with who signed in.
+
+If the camera stops working, admins see a notice at sign-in and the timeline gets a "Closet camera offline" row, then "back online after …" when it returns. Borrowing and returning never wait on the camera.
+
 ## When a student leaves with a camera
 
 The item stays checked out to them, appears on the Overdue list, and the

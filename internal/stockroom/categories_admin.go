@@ -122,6 +122,10 @@ func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput)
 	if err != nil {
 		return Category{}, mapPgError("create category", err)
 	}
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "category_created", ActorID: actorLogID(actor),
+		Summary: "Added category " + c.Name, Details: map[string]any{"category_id": c.ID}}); err != nil {
+		return Category{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Category{}, fmt.Errorf("create category: %w", err)
 	}
@@ -173,6 +177,16 @@ func (db *DB) UpdateCategory(ctx context.Context, actor Actor, id string, in Cat
 		returning `+categoryColumns, id, in.Name, in.ParentID, order))
 	if err != nil {
 		return Category{}, mapPgError("update category", err)
+	}
+	summary := "Edited category " + c.Name
+	if node.Name != c.Name {
+		summary = fmt.Sprintf("Renamed category %s to %s", node.Name, c.Name)
+	} else if !sameParent(node.ParentID, in.ParentID) {
+		summary = "Moved category " + c.Name
+	}
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "category_updated", ActorID: actorLogID(actor),
+		Summary: summary, Details: map[string]any{"category_id": c.ID, "was": node.Name}}); err != nil {
+		return Category{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Category{}, fmt.Errorf("update category: %w", err)
@@ -226,8 +240,13 @@ func (db *DB) DeleteCategory(ctx context.Context, actor Actor, id string) error 
 		return fmt.Errorf("%w: category has %s filed under it", ErrConflict, plural(assets, "asset", "assets"))
 	}
 
-	if _, err := tx.Exec(ctx, `delete from categories where id = $1`, id); err != nil {
+	var name string
+	if err := tx.QueryRow(ctx, `delete from categories where id = $1 returning name`, id).Scan(&name); err != nil {
 		return mapPgError("delete category", err)
+	}
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "category_deleted", ActorID: actorLogID(actor),
+		Summary: "Deleted category " + name, Details: map[string]any{"category_id": id}}); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("delete category: %w", err)

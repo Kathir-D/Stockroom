@@ -177,6 +177,12 @@ func (db *DB) CreateFirstAdmin(ctx context.Context, in FirstAdminInput) (LoginRe
 	if err != nil {
 		return LoginResult{}, mapPgError("create first admin", err)
 	}
+	if err := writeLog(ctx, tx, LogEntry{
+		Category: LogAdmin, Action: "first_admin_created", ActorID: p.ID,
+		Summary: fmt.Sprintf("Created the first admin account, %s", profileLabel(p)),
+	}); err != nil {
+		return LoginResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return LoginResult{}, mapPgError("create first admin", err)
 	}
@@ -184,7 +190,7 @@ func (db *DB) CreateFirstAdmin(ctx context.Context, in FirstAdminInput) (LoginRe
 	// Validated above, so this cannot fail; the process now agrees with the
 	// row it just committed.
 	_ = SetStudentNumberFormat(format, pattern)
-	return db.openSession(ctx, p, false)
+	return db.openSession(ctx, p, false, "password")
 }
 
 // ConfigureFailsafe writes the failsafe admin into the server's .env and
@@ -261,6 +267,8 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 	for _, id := range retired {
 		db.Sessions.DeleteForProfile(id)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "failsafe_configured", ActorID: actorLogID(actor),
+		Summary: "Set the failsafe admin account"})
 	return nil
 }
 
@@ -347,6 +355,10 @@ func (db *DB) LoadExamples(ctx context.Context, actor Actor, files fs.FS) (Examp
 		res.Skipped = append(res.Skipped, "The example people were not added: "+err.Error())
 		err = nil
 	}
+	if err == nil {
+		db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "examples_loaded", ActorID: actorLogID(actor),
+			Summary: "Loaded the example data"})
+	}
 	return res, err
 }
 
@@ -414,6 +426,8 @@ func (db *DB) RemoveExamples(ctx context.Context, actor Actor) (ExamplesRemoved,
 		db.Sessions.DeleteForProfile(id)
 	}
 	out.People = len(deleted)
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "examples_removed", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Removed the example data: %d items, %d people", out.Assets, out.People)})
 	return out, nil
 }
 

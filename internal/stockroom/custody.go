@@ -162,6 +162,9 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 	if serial == "" {
 		return ScanResult{}, fmt.Errorf("%w: no serial number scanned", ErrInvalid)
 	}
+	// Everything below is a scan, and is logged as one whatever it does
+	// (ROADMAP §2.4): a check-in it triggers carries the code and the screen.
+	ctx = withScan(ctx, serial)
 
 	// The open custody row decides which branch this is, not the status
 	// column. They agree in every case the app itself writes; when they have
@@ -175,6 +178,11 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 		select a.id, `+openCustodySQL("a.id")+`
 		from assets a where a.serial_number = $1`, serial).Scan(&id, &open)
 	if errors.Is(err, pgx.ErrNoRows) {
+		db.logBestEffort(ctx, LogEntry{
+			Category: LogScan, Action: "scan_unknown", ActorID: actor.ID,
+			Summary: fmt.Sprintf("Scanned %s: not a Stockroom item", serial),
+			Details: map[string]any{"result": "unknown_code"},
+		})
 		return ScanResult{}, fmt.Errorf("%w: no item with serial %q", ErrNotFound, serial)
 	}
 	if err != nil {
@@ -196,6 +204,11 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 	if err != nil {
 		return ScanResult{}, err
 	}
+	db.logBestEffort(ctx, LogEntry{
+		Category: LogScan, Action: "scan_opened_item", ActorID: actor.ID, AssetID: id,
+		Summary: fmt.Sprintf("Scanned %s (%s): opened the item", serial, asset.Status),
+		Details: map[string]any{"result": "opened_item", "status": asset.Status},
+	})
 	return ScanResult{
 		Action:    ScanDetail,
 		Asset:     asset,
@@ -252,6 +265,9 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	// Rollback after a successful Commit is a no-op, so this covers every
 	// early return below without a flag to track.
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := markLogged(ctx, tx, actor.ID); err != nil {
+		return CheckoutResult{}, err
+	}
 
 	if !(actor.IsAdmin && in.OverrideOverdue) {
 		overdue, err := listCustody(ctx, tx, `ce.id in (select id from overdue_custody) and ce.custodian_id = $1`,
@@ -291,6 +307,30 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 			`update assets set status = 'checked_out' where id = $1`, item.AssetID); err != nil {
 			return CheckoutResult{}, mapPgError("check out", err)
 		}
+
+		// One row per unit, in the checkout's transaction, so the item
+		// filter finds every trip an item made.
+		label := deref(item.SerialNumber)
+		if label == "" {
+			label = item.Name
+		}
+		summary := fmt.Sprintf("Checked out %s, due %s", label, in.DueAt.Local().Format("Mon Jan 2 15:04"))
+		if custodianID != actor.ID {
+			summary = fmt.Sprintf("Checked out %s to %s, due %s", label, out.CustodianName, in.DueAt.Local().Format("Mon Jan 2 15:04"))
+		}
+		if actor.IsAdmin && in.OverrideOverdue {
+			summary += " (overdue block overridden)"
+		}
+		if err := writeLog(ctx, tx, LogEntry{
+			Category: LogEquipment, Action: "checkout", ActorID: actor.ID, AssetID: item.AssetID, AssetLabel: label,
+			Summary: summary,
+			Details: map[string]any{
+				"custody_event_id": eventID, "custodian_id": custodianID, "custodian_name": out.CustodianName,
+				"due_at": in.DueAt, "override_overdue": actor.IsAdmin && in.OverrideOverdue, "cart_size": len(items),
+			},
+		}); err != nil {
+			return CheckoutResult{}, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -317,6 +357,9 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 		return CheckInResult{}, fmt.Errorf("check in: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := markLogged(ctx, tx, actor.ID); err != nil {
+		return CheckInResult{}, err
+	}
 
 	// Lock the asset first so a concurrent check-in or checkout of the same
 	// unit queues behind this one instead of both seeing it as open.
@@ -349,6 +392,9 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 		`update assets set status = 'available' where id = $1`, assetID); err != nil {
 		return CheckInResult{}, mapPgError("check in", err)
 	}
+	if err := writeLog(ctx, tx, checkInEntry(ctx, actor, assetID, held, note)); err != nil {
+		return CheckInResult{}, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return CheckInResult{}, fmt.Errorf("check in: %w", err)
@@ -359,6 +405,31 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 		return CheckInResult{}, err
 	}
 	return CheckInResult{Asset: asset, ReturnedFrom: *held}, nil
+}
+
+// checkInEntry is the log row for one return.
+func checkInEntry(ctx context.Context, actor Actor, assetID string, held *AssetCustody, note *string) LogEntry {
+	summary := "Checked in"
+	if _, scanned := scanFrom(ctx); scanned {
+		summary = "Checked in by scan"
+	}
+	summary += fmt.Sprintf(", held by %s", held.CustodianName)
+	late := held.DueAt != nil && time.Now().After(*held.DueAt)
+	if late {
+		summary += fmt.Sprintf(" (late: was due %s)", held.DueAt.Local().Format("Mon Jan 2 15:04"))
+	}
+	details := map[string]any{
+		"custody_event_id": held.CustodyEventID, "custodian_id": held.CustodianID,
+		"custodian_name": held.CustodianName, "checked_out_at": held.CheckedOutAt, "late": late,
+	}
+	if note != nil {
+		details["damage_note"] = *note
+		summary += ": " + *note
+	}
+	if kit, ok := ctx.Value(ctxKit).(string); ok {
+		details["kit"] = kit
+	}
+	return LogEntry{Category: LogEquipment, Action: "checkin", ActorID: actor.ID, AssetID: assetID, Summary: summary, Details: details}
 }
 
 // ListActiveCustody is everything currently out, soonest due first. Admin
@@ -650,14 +721,29 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 	// written and writing it. A separate read would have been a check against
 	// one snapshot and a write against another; here Postgres evaluates both
 	// against the same row version.
-	tag, err := db.Pool.Exec(ctx,
-		`update custody_events set condition_in = $2
-		   where id = $1 and checked_in_at is not null`,
-		custodyEventID, trimmed)
+	var assetID string
+	err := db.withLoggedTx(ctx, actor.ID, "annotate custody", func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx,
+			`update custody_events set condition_in = $2
+			   where id = $1 and checked_in_at is not null
+			   returning asset_id`,
+			custodyEventID, trimmed).Scan(&assetID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return mapPgError("annotate custody", err)
+		}
+		return writeLog(ctx, tx, LogEntry{
+			Category: LogEquipment, Action: "damage_note", ActorID: actor.ID, AssetID: assetID,
+			Summary: "Added a note to a return: " + trimmed,
+			Details: map[string]any{"custody_event_id": custodyEventID, "note": trimmed},
+		})
+	})
 	if err != nil {
-		return CustodyRecord{}, mapPgError("annotate custody", err)
+		return CustodyRecord{}, err
 	}
-	if tag.RowsAffected() == 0 {
+	if assetID == "" {
 		// Nothing was written, and the two reasons need different answers. Read
 		// again to say which: no such row, or a row still open.
 		var closed bool

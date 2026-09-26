@@ -15,7 +15,7 @@ export type Route =
   | { name: "kits" }
   | { name: "history" }
   | { name: "setup" }
-  | { name: "admin"; tab: AdminTab }
+  | { name: "admin"; tab: AdminTab; query?: Record<string, string> }
 
 export type AdminTab =
   | "assets"
@@ -25,6 +25,7 @@ export type AdminTab =
   | "backup"
   | "settings"
   | "photo-wall"
+  | "activity"
 
 const ADMIN_TABS: AdminTab[] = [
   "assets",
@@ -34,10 +35,11 @@ const ADMIN_TABS: AdminTab[] = [
   "backup",
   "settings",
   "photo-wall",
+  "activity",
 ]
 
 function parse(hash: string): Route {
-  const path = hash.replace(/^#\/?/, "")
+  const [path, qs = ""] = hash.replace(/^#\/?/, "").split("?")
   const [head, ...rest] = path.split("/")
   switch (head) {
     case "cart":
@@ -50,7 +52,15 @@ function parse(hash: string): Route {
       return { name: "setup" }
     case "admin": {
       const tab = rest[0]
-      return { name: "admin", tab: ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : "assets" }
+      // Only the activity timeline takes a query: its filters live in the URL
+      // so an item's "closet activity since it was returned" link lands on the
+      // filtered timeline, and a reload keeps it.
+      const query = Object.fromEntries(new URLSearchParams(qs))
+      return {
+        name: "admin",
+        tab: ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : "assets",
+        ...(Object.keys(query).length ? { query } : {}),
+      }
     }
     case "browse":
       return { name: "browse", category: rest[0] ? decodeURIComponent(rest[0]) : undefined }
@@ -69,8 +79,10 @@ function serialise(route: Route): string {
       return "#/history"
     case "setup":
       return "#/setup"
-    case "admin":
-      return `#/admin/${route.tab}`
+    case "admin": {
+      const qs = route.query ? new URLSearchParams(route.query).toString() : ""
+      return `#/admin/${route.tab}${qs ? "?" + qs : ""}`
+    }
     case "browse":
       return route.category ? `#/browse/${encodeURIComponent(route.category)}` : "#/browse"
   }

@@ -91,15 +91,22 @@ func (db *DB) CreateAsset(ctx context.Context, actor Actor, in AssetInput) (Asse
 	// (migration 20260914120000), so every writer gets one without this code
 	// having to remember, and nothing here can put a client-chosen value in it.
 	var id string
-	err := db.Pool.QueryRow(ctx, `
-		insert into assets (name, description, category_id, serial_number, condition,
-		                    purchase_date, purchase_price, warranty_expiration, status, created_by)
-		values ($1, $2, $3, $4, $5, $6::date, $7, $8::date, 'available', $9)
-		returning id`,
-		in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
-		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration, actor.ID).Scan(&id)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "create asset", func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			insert into assets (name, description, category_id, serial_number, condition,
+			                    purchase_date, purchase_price, warranty_expiration, status, created_by)
+			values ($1, $2, $3, $4, $5, $6::date, $7, $8::date, 'available', $9)
+			returning id`,
+			in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
+			in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration, actor.ID).Scan(&id)
+		if err != nil {
+			return mapPgError("create asset", err)
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "asset_created", ActorID: actorLogID(actor), AssetID: id,
+			Summary: fmt.Sprintf("Added item %s (%s)", in.SerialNumber, in.Name)})
+	})
 	if err != nil {
-		return AssetDetail{}, mapPgError("create asset", err)
+		return AssetDetail{}, err
 	}
 	return db.GetAsset(ctx, actor, id)
 }
@@ -119,19 +126,34 @@ func (db *DB) UpdateAsset(ctx context.Context, actor Actor, id string, in AssetI
 
 	// asset_tag is never updated. It is the row's internal key: generated once,
 	// then stable, so anything that recorded it stays correct.
-	tag, err := db.Pool.Exec(ctx, `
-		update assets
-		set name = $2, description = $3, category_id = $4, serial_number = $5,
-		    condition = $6, purchase_date = $7::date, purchase_price = $8,
-		    warranty_expiration = $9::date
-		where id = $1`,
-		id, in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
-		in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "update asset", func(tx pgx.Tx) error {
+		var oldSerial *string
+		err := tx.QueryRow(ctx, `select serial_number from assets where id = $1 for update`, id).Scan(&oldSerial)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+		}
+		if err != nil {
+			return mapPgError("update asset", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			update assets
+			set name = $2, description = $3, category_id = $4, serial_number = $5,
+			    condition = $6, purchase_date = $7::date, purchase_price = $8,
+			    warranty_expiration = $9::date
+			where id = $1`,
+			id, in.Name, in.Description, in.CategoryID, in.SerialNumber, in.Condition,
+			in.PurchaseDate, in.PurchasePrice, in.WarrantyExpiration); err != nil {
+			return mapPgError("update asset", err)
+		}
+		summary := fmt.Sprintf("Edited item %s (%s)", in.SerialNumber, in.Name)
+		if deref(oldSerial) != in.SerialNumber {
+			summary = fmt.Sprintf("Edited item %s, serial changed from %s", in.SerialNumber, deref(oldSerial))
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "asset_updated", ActorID: actorLogID(actor), AssetID: id,
+			Summary: summary, Details: map[string]any{"serial_was": deref(oldSerial)}})
+	})
 	if err != nil {
-		return AssetDetail{}, mapPgError("update asset", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+		return AssetDetail{}, err
 	}
 	return db.GetAsset(ctx, actor, id)
 }
@@ -181,6 +203,10 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 		return fmt.Errorf("%w: item has custody history; mark it unavailable instead of deleting it", ErrConflict)
 	}
 
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "asset_deleted", ActorID: actorLogID(actor), AssetID: id,
+		Summary: "Deleted item " + assetLabel(ctx, tx, id)}); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `delete from assets where id = $1`, id); err != nil {
 		return mapPgError("delete asset", err)
 	}
@@ -212,6 +238,9 @@ func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status
 		return AssetDetail{}, fmt.Errorf("set asset status: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := markLogged(ctx, tx, actorLogID(actor)); err != nil {
+		return AssetDetail{}, err
+	}
 
 	// Lock the row so a checkout landing at the same moment queues behind
 	// this and cannot slip an open custody row past the check below.
@@ -235,6 +264,13 @@ func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status
 
 	if _, err := tx.Exec(ctx, `update assets set status = $2 where id = $1`, id, string(status)); err != nil {
 		return AssetDetail{}, mapPgError("set asset status", err)
+	}
+	if current != status {
+		if err := writeLog(ctx, tx, LogEntry{Category: LogEquipment, Action: "status_change", ActorID: actorLogID(actor), AssetID: id,
+			Summary: fmt.Sprintf("Marked %s %s", assetLabel(ctx, tx, id), status),
+			Details: map[string]any{"from": current, "to": status}}); err != nil {
+			return AssetDetail{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AssetDetail{}, fmt.Errorf("set asset status: %w", err)
@@ -301,6 +337,8 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 		return AssetDetail{}, staged.rollbackWith(fmt.Errorf("%w: no asset %s", ErrNotFound, id))
 	}
 	staged.commit()
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "asset_photo", ActorID: actorLogID(actor), AssetID: id,
+		Summary: "Replaced the photo of " + assetLabel(ctx, db.Pool, id)})
 	return db.GetAsset(ctx, actor, id)
 }
 
@@ -322,4 +360,13 @@ func (db *DB) requireCategory(ctx context.Context, id *string) error {
 	}
 	_, err = tree.require(*id)
 	return err
+}
+
+// assetLabel is how a log summary names an item: its serial, or its name.
+func assetLabel(ctx context.Context, q querier, id string) string {
+	var label string
+	if err := q.QueryRow(ctx, `select coalesce(serial_number, name) from assets where id = $1`, id).Scan(&label); err != nil {
+		return "an item"
+	}
+	return label
 }

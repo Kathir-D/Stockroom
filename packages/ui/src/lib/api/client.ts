@@ -140,6 +140,17 @@ export function fileUrl(path: string | null | undefined): string | null {
   return config.baseUrl + path;
 }
 
+/**
+ * Which screen is showing, sent on every request as `X-Stockroom-Screen` so
+ * the server's activity log can say where a barcode was scanned (ROADMAP
+ * §2.4). The app sets it on every route change.
+ */
+let currentScreen = "";
+
+export function setScreen(name: string) {
+  currentScreen = name;
+}
+
 interface RequestOptions {
   method?: string;
   /** Serialised as JSON. Mutually exclusive with `form`. */
@@ -180,6 +191,7 @@ async function request<T>(
     if (tok) headers.Authorization = `Bearer ${tok}`;
   }
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (currentScreen) headers["X-Stockroom-Screen"] = currentScreen;
 
   let response: Response;
   try {
