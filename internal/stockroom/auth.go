@@ -192,6 +192,12 @@ func profileLabel(p Profile) string {
 }
 
 func (db *DB) openSession(ctx context.Context, p Profile, limited bool, method string) (LoginResult, error) {
+	// Everything that can still fail runs before the log row, so a row never
+	// names a sign-in that did not happen.
+	overdue, err := db.hasOverdue(ctx, p.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	sess, err := db.Sessions.Create(p.ID, limited)
 	if err != nil {
 		return LoginResult{}, err
@@ -206,11 +212,6 @@ func (db *DB) openSession(ctx context.Context, p Profile, limited bool, method s
 		Category: LogAccount, Action: "signin_" + method, ActorID: p.ID, Summary: summary,
 		Details: map[string]any{"limited": limited},
 	}); err != nil {
-		db.Sessions.Delete(sess.Token)
-		return LoginResult{}, err
-	}
-	overdue, err := db.hasOverdue(ctx, p.ID)
-	if err != nil {
 		db.Sessions.Delete(sess.Token)
 		return LoginResult{}, err
 	}

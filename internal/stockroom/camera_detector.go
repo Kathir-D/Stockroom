@@ -78,10 +78,16 @@ func (db *DB) newDetector(baseURL string) Detector {
 // forever, so the camera never came back online on the admin's screen while
 // curl said it was fine. A fresh loopback connection every few seconds costs
 // nothing, and a detector restart can then never strand the watcher.
-var detectorClient = &http.Client{Transport: &http.Transport{
-	Proxy:             nil,
-	DisableKeepAlives: true,
-}}
+var detectorClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:             nil,
+		DisableKeepAlives: true,
+	},
+	// A redirect is answered as it stands, never followed: the loopback check
+	// on detector_url means nothing if whatever holds the port can send the
+	// watcher somewhere else.
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 /* ----------------------------------------------------------------- Frigate */
 

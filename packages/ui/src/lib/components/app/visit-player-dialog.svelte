@@ -36,6 +36,8 @@
     let objectUrl: string | null = null
     error = null
     url = null
+    // Or Download would save the last visit's clip under this one's name.
+    blob = null
     api.visitClip(id).then(
       (b) => {
         if (cancelled) return

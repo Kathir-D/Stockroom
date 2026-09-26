@@ -76,6 +76,15 @@ func TestActivityRoutes(t *testing.T) {
 	if code, _ := call(t, h, http.MethodPost, "/signin/scan", "", map[string]string{"code": "CAM-1", "result": "hello"}); code != http.StatusBadRequest {
 		t.Errorf("an invented scan result = %d, want 400", code)
 	}
+	// A cross-origin form can send text/plain without a preflight; it may not
+	// write to the log.
+	req = httptest.NewRequest(http.MethodPost, "/signin/scan", strings.NewReader(`{"code":"CAM-1","result":"not_signed_in"}`))
+	req.Header.Set("Content-Type", "text/plain")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("POST /signin/scan as text/plain = %d, want 415", rec.Code)
+	}
 
 	// The camera card reads and refuses a detector off this machine.
 	if code, b := call(t, h, http.MethodGet, "/admin/camera", admin, nil); code != http.StatusOK || b["settings"] == nil {

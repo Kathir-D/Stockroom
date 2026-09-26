@@ -110,30 +110,38 @@
     }
   }
 
+  // Every request takes a number; an answer that is not the latest one is
+  // dropped, so changing a filter mid-request never mixes two filters' rows.
+  let seq = 0
+
   async function load() {
+    const mine = ++seq
     loading = true
     error = null
     try {
       const page = await api.activity(apiQuery())
+      if (mine !== seq) return
       entries = page.entries
       more = page.more
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
+      if (mine === seq) error = err instanceof Error ? err.message : String(err)
     } finally {
-      loading = false
+      if (mine === seq) loading = false
     }
   }
 
   async function loadMore() {
     const last = entries.at(-1)
     if (!last) return
+    const mine = ++seq
     loadingMore = true
     try {
       const page = await api.activity(apiQuery({ before: last.at, before_id: last.id }))
+      if (mine !== seq) return
       entries = [...entries, ...page.entries]
       more = page.more
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      if (mine === seq) toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       loadingMore = false
     }

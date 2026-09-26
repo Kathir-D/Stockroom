@@ -320,7 +320,8 @@ func (f ActivityFilter) where() (string, []any, error) {
 		conds = append(conds, "l.via_scanner")
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
-		p := arg("%" + q + "%")
+		// Escaped, so a search for "50%" or "T7_B" means those characters.
+		p := arg("%" + escapeLike(q) + "%")
 		conds = append(conds, "(l.summary ilike "+p+" or l.actor_name ilike "+p+" or l.asset_label ilike "+p+" or l.details::text ilike "+p+")")
 	}
 	if len(conds) == 0 {

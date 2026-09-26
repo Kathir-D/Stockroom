@@ -287,10 +287,14 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 	// every row written since the backup was taken -- is set aside here and
 	// put back after the load. Otherwise restoring last night's backup would
 	// be a way to erase today's log, which is exactly the log somebody would
-	// want erased.
+	// want erased. The tables are locked first, so a sign-in committing
+	// between the copy and the truncate below cannot fall into the gap.
 	for _, t := range survivingTables {
 		if !archiveSet[t] {
 			continue
+		}
+		if _, err := tx.Exec(ctx, `lock table `+pgx.Identifier{"public", t}.Sanitize()+` in access exclusive mode`); err != nil {
+			return res, fmt.Errorf("restore: lock %s: %w", t, err)
 		}
 		if _, err := tx.Exec(ctx, `create temp table `+pgx.Identifier{"keep_" + t}.Sanitize()+
 			` on commit drop as select * from `+pgx.Identifier{"public", t}.Sanitize()); err != nil {
@@ -329,12 +333,31 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 			continue
 		}
 		live := pgx.Identifier{"public", t}.Sanitize()
-		tag, err := tx.Exec(ctx, `insert into `+live+` select k.* from `+pgx.Identifier{"keep_" + t}.Sanitize()+
+		keep := pgx.Identifier{"keep_" + t}.Sanitize()
+		var newer int64 = -1
+		if t == "activity_log" {
+			if err := tx.QueryRow(ctx, `select count(*) from `+keep+` k where not exists (select 1 from `+live+` l where l.id = k.id)`).Scan(&newer); err != nil {
+				return res, fmt.Errorf("restore: count the newer rows of %s: %w", t, err)
+			}
+			// A log row both copies hold is the live one, never the
+			// archive's: an archive is a zip anybody can edit, and loading
+			// its version of a row would be the edit the append-only
+			// triggers exist to refuse (ADR 0003). Replica mode is still on,
+			// so the triggers stand down for this delete.
+			if _, err := tx.Exec(ctx, `delete from `+live+` l using `+keep+` k where l.id = k.id`); err != nil {
+				return res, fmt.Errorf("restore: keep the live activity log: %w", err)
+			}
+		}
+		tag, err := tx.Exec(ctx, `insert into `+live+` select k.* from `+keep+
 			` k where not exists (select 1 from `+live+` l where l.id = k.id)`)
 		if err != nil {
 			return res, fmt.Errorf("restore: put back the newer rows of %s: %w", t, err)
 		}
-		if n := tag.RowsAffected(); n > 0 {
+		n := tag.RowsAffected()
+		if newer >= 0 {
+			n = newer // the rest were the archive's copies, replaced
+		}
+		if n > 0 {
 			res.KeptNewer = append(res.KeptNewer, TableExport{Table: t, Rows: n})
 		}
 	}
@@ -342,7 +365,7 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 	// backed up, since ended, its recording copied, marked keep or deleted by
 	// retention. Those columns describe files on this disk now, so the live
 	// row's values win wherever it has them.
-	if archiveSet["closet_visits"] && slicesContains(survivingTables, "closet_visits") {
+	if archiveSet["closet_visits"] {
 		if _, err := tx.Exec(ctx, `
 			update public.closet_visits l set
 				ended_at = coalesce(k.ended_at, l.ended_at),

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -379,9 +380,11 @@ func TestCameraRetentionAndKeep(t *testing.T) {
 	}
 
 	// Watching it is logged; a student cannot watch it at all.
-	if _, err := db.OpenVisitMedia(ctx, admin, kept.id, "clip", true); err != nil {
+	m, err := db.OpenVisitMedia(ctx, admin, kept.id, "clip", true)
+	if err != nil {
 		t.Fatalf("OpenVisitMedia: %v", err)
 	}
+	m.File.Close()
 	if n := logCount(t, db, `visit_id = $1 and action = 'recording_viewed'`, kept.id); n != 1 {
 		t.Errorf("watching a recording wrote %d rows, want 1", n)
 	}
@@ -391,6 +394,38 @@ func TestCameraRetentionAndKeep(t *testing.T) {
 	}
 	if _, err := db.OpenVisitMedia(ctx, admin, gone.id, "clip", true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("opening an expired recording = %v, want ErrNotFound", err)
+	}
+}
+
+// A recording path read back from closet_visits -- which a restore loads from
+// an archive anybody can edit -- is neither served nor deleted unless it has
+// the shape the watcher writes.
+func TestCameraRefusesAForeignRecordingPath(t *testing.T) {
+	db, det, s, admin := cameraFixture(t)
+	ctx := context.Background()
+	start := time.Now().Add(-2 * time.Minute)
+	end := start.Add(30 * time.Second)
+	name := "foreign-" + s.CameraName
+	det.set(DetectorEvent{ID: name, Camera: s.CameraName, Start: start, End: &end})
+	db.camera().poll(ctx)
+	v := readVisit(t, db, name)
+
+	secret := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(secret, []byte("ADMIN_PASSWORD=x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-40 * 24 * time.Hour)
+	if _, err := db.Pool.Exec(ctx, `update closet_visits set clip_path = $2, started_at = $3 where id = $1`, v.id, secret, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.OpenVisitMedia(ctx, admin, v.id, "clip", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("serving a clip_path outside the recordings layout = %v, want ErrNotFound", err)
+	}
+	if err := db.pruneRecordings(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(secret); err != nil {
+		t.Errorf("retention deleted a file the watcher never wrote: %v", err)
 	}
 }
 

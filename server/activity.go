@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"mime"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +107,13 @@ func (d deps) handleExportActivity(w http.ResponseWriter, r *http.Request, actor
 
 // POST /signin/scan {"code": "...", "result": "not_signed_in" | "item_at_signin" | "invalid"}
 func (d deps) handleUnattendedScan(w http.ResponseWriter, r *http.Request) {
+	// No session guards this route, so JSON is required: a cross-origin page
+	// can send text/plain without a preflight, and would otherwise be able to
+	// write rows into a log nobody can delete.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "send application/json"})
+		return
+	}
 	if !unattendedScans.allow() {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too many scans"})
 		return
@@ -235,13 +242,8 @@ func (d deps) serveVisitMedia(w http.ResponseWriter, r *http.Request, actor stoc
 		writeError(w, err)
 		return
 	}
-	f, err := os.Open(m.Path)
-	if err != nil {
-		writeError(w, fmt.Errorf("%w: the recording file cannot be opened", stockroom.ErrNotFound))
-		return
-	}
-	defer f.Close()
+	defer m.File.Close()
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, "", m.ModTime, f)
+	http.ServeContent(w, r, "", m.ModTime, m.File)
 }

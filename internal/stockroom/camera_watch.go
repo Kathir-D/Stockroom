@@ -72,14 +72,25 @@ type cameraWatcher struct {
 	message       string
 	online        *bool
 	offlineSince  time.Time
-	mediaTries    map[string]int
+	mediaTries    map[string]*mediaTry
 	lastRetention time.Time
+	// eventCursor is the start of the newest detector event already dealt
+	// with, so a run of flickers too short to become visits cannot pin the
+	// listing window to the last real visit (the listing is capped).
+	eventCursor time.Time
+}
+
+// mediaTry counts one visit's failed downloads, the snapshot and the clip
+// apart: a snapshot the detector never made must not use up the clip's.
+type mediaTry struct {
+	started    time.Time
+	snap, clip int
 }
 
 // camera returns the DB's one watcher, creating it on first use.
 func (db *DB) camera() *cameraWatcher {
 	db.cameraOnce.Do(func() {
-		db.cameraW = &cameraWatcher{db: db, wake: make(chan struct{}, 1), mediaTries: map[string]int{}, state: "off"}
+		db.cameraW = &cameraWatcher{db: db, wake: make(chan struct{}, 1), mediaTries: map[string]*mediaTry{}, state: "off"}
 	})
 	return db.cameraW
 }
@@ -137,6 +148,9 @@ func (w *cameraWatcher) poll(ctx context.Context) {
 		w.set("error", "Could not read the camera settings: "+err.Error(), nil)
 		return
 	}
+	// Retention runs whatever the detector is doing: turning the camera off,
+	// or Frigate being down, must not keep last month's recordings forever.
+	w.retain(ctx, s)
 	if !s.Enabled {
 		w.mu.Lock()
 		// Forget the last known state, so turning the camera back on logs
@@ -180,18 +194,23 @@ func (w *cameraWatcher) poll(ctx context.Context) {
 	// Media gets its own clock: a two-minute clip can take longer to cut than
 	// the whole of the rest of a poll.
 	w.fetchMedia(ctx, det, s)
+}
+
+// retain runs retention at most once per cameraRetentionEvery.
+func (w *cameraWatcher) retain(ctx context.Context, s CameraSettings) {
 	w.mu.Lock()
 	due := time.Since(w.lastRetention) >= cameraRetentionEvery
 	w.mu.Unlock()
-	if due {
-		if err := db.pruneRecordings(ctx, s); err != nil {
-			log.Printf("camera: retention: %v", err)
-		} else {
-			w.mu.Lock()
-			w.lastRetention = time.Now()
-			w.mu.Unlock()
-		}
+	if !due {
+		return
 	}
+	if err := w.db.pruneRecordings(ctx, s); err != nil {
+		log.Printf("camera: retention: %v", err)
+		return
+	}
+	w.mu.Lock()
+	w.lastRetention = time.Now()
+	w.mu.Unlock()
 }
 
 // transition logs a change in whether the camera is delivering, once.
@@ -245,6 +264,11 @@ func (w *cameraWatcher) syncEvents(ctx context.Context, det Detector, s CameraSe
 	if latest != nil {
 		since = latest.Add(-time.Minute)
 	}
+	w.mu.Lock()
+	if w.eventCursor.After(since) {
+		since = w.eventCursor
+	}
+	w.mu.Unlock()
 	if floor := time.Now().Add(-cameraDetectorKeeps); since.Before(floor) {
 		since = floor
 	}
@@ -295,10 +319,37 @@ func (w *cameraWatcher) syncEvents(ctx context.Context, det Detector, s CameraSe
 	}
 
 	sort.Slice(events, func(i, j int) bool { return events[i].Start.Before(events[j].Start) })
+	// The cursor moves past an event only once nothing more can come of it:
+	// a detection still in progress and not yet long enough may still become
+	// a visit, so the cursor stops at the first of those.
+	var cursor time.Time
+	held := false
 	for _, e := range events {
 		if err := db.applyDetectorEvent(ctx, s, e); err != nil {
 			return err
 		}
+		if held {
+			continue
+		}
+		if e.End == nil && !e.FalsePositive {
+			var known bool
+			if err := db.Pool.QueryRow(ctx, `select exists(select 1 from closet_visits where detector_event_id = $1)`, e.ID).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				held = true
+				cursor = e.Start
+				continue
+			}
+		}
+		cursor = e.Start
+	}
+	if !cursor.IsZero() {
+		w.mu.Lock()
+		if cursor.After(w.eventCursor) {
+			w.eventCursor = cursor
+		}
+		w.mu.Unlock()
 	}
 	return nil
 }
@@ -431,31 +482,42 @@ func (w *cameraWatcher) fetchMedia(ctx context.Context, det Detector, s CameraSe
 	// never made would otherwise hold the head of the queue and stall every
 	// newer one for good.
 	w.mu.Lock()
-	gaveUp := make([]string, 0, len(w.mediaTries))
-	for id, n := range w.mediaTries {
-		if n >= cameraMediaAttempts {
-			gaveUp = append(gaveUp, id)
+	snapGaveUp, clipGaveUp := []string{}, []string{}
+	forgotten := time.Now().Add(-cameraDetectorKeeps)
+	for id, t := range w.mediaTries {
+		if t.started.Before(forgotten) {
+			// Out of the query's window for good; nothing will ask again.
+			delete(w.mediaTries, id)
+			continue
+		}
+		if t.snap >= cameraMediaAttempts {
+			snapGaveUp = append(snapGaveUp, id)
+		}
+		if t.clip >= cameraMediaAttempts {
+			clipGaveUp = append(clipGaveUp, id)
 		}
 	}
 	w.mu.Unlock()
 	rows, err := db.Pool.Query(ctx, `
-		select v.id, v.detector_event_id, v.started_at, v.snapshot_path is null,
-		       v.clip_path is null and v.ended_at is not null
+		select v.id, v.detector_event_id, v.started_at,
+		       v.snapshot_path is null and v.id <> all($5::uuid[]),
+		       v.clip_path is null and v.ended_at < $1 and v.id <> all($6::uuid[])
 		from closet_visits v
 		where v.camera = $4 and v.started_at > $2 and v.recording_deleted_at is null
-		  and v.id <> all($5::uuid[])
 		  and (
 		    -- finished a little while ago and still missing something
-		    (v.ended_at < $1 and (v.snapshot_path is null or v.clip_path is null))
+		    (v.ended_at < $1 and ((v.snapshot_path is null and v.id <> all($5::uuid[]))
+		                       or (v.clip_path is null and v.id <> all($6::uuid[]))))
 		    -- or still in the closet with no snapshot yet: the timeline shows
 		    -- who is in there now, not only after they leave
-		    or (v.ended_at is null and v.snapshot_path is null and v.started_at < now() - interval '5 seconds')
+		    or (v.ended_at is null and v.snapshot_path is null and v.id <> all($5::uuid[])
+		        and v.started_at < now() - interval '5 seconds')
 		  )
 		-- newest first: after downtime, whoever is in the closet now gets a
 		-- snapshot before the backlog does, and the backlog drains behind them
 		order by v.started_at desc
 		limit $3`, time.Now().Add(-cameraMediaDelay), time.Now().Add(-cameraDetectorKeeps), cameraMediaPerPoll,
-		s.CameraName, gaveUp)
+		s.CameraName, snapGaveUp, clipGaveUp)
 	if err != nil {
 		log.Printf("camera: list visits needing recordings: %v", err)
 		return
@@ -474,33 +536,44 @@ func (w *cameraWatcher) fetchMedia(ctx context.Context, det Detector, s CameraSe
 	}
 	rows.Close()
 
-	for _, n := range todo {
+	// failed counts one failed download of one kind, and says so in the log
+	// the moment a visit runs out of attempts for it.
+	failed := func(n need, kind string, count func(*mediaTry) *int) {
 		w.mu.Lock()
-		tries := w.mediaTries[n.id]
-		if tries >= cameraMediaAttempts {
-			w.mu.Unlock()
-			continue
+		t := w.mediaTries[n.id]
+		if t == nil {
+			t = &mediaTry{started: n.started}
+			w.mediaTries[n.id] = t
 		}
-		w.mediaTries[n.id] = tries + 1
+		c := count(t)
+		*c++
+		gaveUp := *c == cameraMediaAttempts
 		w.mu.Unlock()
-
+		if gaveUp {
+			log.Printf("camera: giving up on the %s for visit %s after %d attempts", kind, n.id, cameraMediaAttempts)
+		}
+	}
+	for _, n := range todo {
 		mctx, cancel := context.WithTimeout(ctx, cameraMediaTimeout)
 		dir := filepath.Join(s.RecordingsDir, n.started.Local().Format("2006-01-02"))
 		if n.snap {
 			if p, _, err := saveMedia(mctx, dir, n.id+".jpg", func() (io.ReadCloser, error) { return det.Snapshot(mctx, n.eventID) }); err == nil {
 				_, _ = db.Pool.Exec(ctx, `update closet_visits set snapshot_path = $2 where id = $1`, n.id, p)
-			} else if !errors.Is(err, ErrNotFound) {
-				log.Printf("camera: snapshot for visit %s: %v", n.id, err)
+			} else {
+				if !errors.Is(err, ErrNotFound) {
+					log.Printf("camera: snapshot for visit %s: %v", n.id, err)
+				}
+				failed(n, "snapshot", func(t *mediaTry) *int { return &t.snap })
 			}
 		}
 		if n.clip {
 			if p, size, err := saveMedia(mctx, dir, n.id+".mp4", func() (io.ReadCloser, error) { return det.Clip(mctx, n.eventID) }); err == nil {
 				_, _ = db.Pool.Exec(ctx, `update closet_visits set clip_path = $2, clip_bytes = $3 where id = $1`, n.id, p, size)
-				w.mu.Lock()
-				delete(w.mediaTries, n.id)
-				w.mu.Unlock()
-			} else if !errors.Is(err, ErrNotFound) {
-				log.Printf("camera: clip for visit %s: %v", n.id, err)
+			} else {
+				if !errors.Is(err, ErrNotFound) {
+					log.Printf("camera: clip for visit %s: %v", n.id, err)
+				}
+				failed(n, "clip", func(t *mediaTry) *int { return &t.clip })
 			}
 		}
 		cancel()
@@ -553,37 +626,49 @@ func (db *DB) pruneRecordings(ctx context.Context, s CameraSettings) error {
 	if err != nil {
 		return err
 	}
-	type victim struct {
-		id         string
-		snap, clip *string
-	}
-	var victims []victim
+	var ids []string
 	for rows.Next() {
-		var v victim
-		if err := rows.Scan(&v.id, &v.snap, &v.clip); err == nil {
-			victims = append(victims, v)
+		var id string
+		var snap, clip *string
+		if err := rows.Scan(&id, &snap, &clip); err == nil {
+			ids = append(ids, id)
 		}
 	}
 	rows.Close()
 	deleted := 0
-	for _, v := range victims {
-		ok := true
-		for _, p := range []*string{v.snap, v.clip} {
+	for _, id := range ids {
+		// Claim the visit before touching its files, re-checking keep in the
+		// same statement: "keep" pressed after the listing above wins. A file
+		// that then fails to delete is logged and left, which beats a kept
+		// clip deleted and marked gone.
+		var snap, clip *string
+		err := db.Pool.QueryRow(ctx, `
+			update closet_visits set recording_deleted_at = now()
+			where id = $1 and not keep and recording_deleted_at is null
+			returning snapshot_path, clip_path`, id).Scan(&snap, &clip)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for i, p := range []*string{snap, clip} {
 			if p == nil {
+				continue
+			}
+			ext := ".jpg"
+			if i == 1 {
+				ext = ".mp4"
+			}
+			if !isRecordingPath(*p, id, ext) {
+				log.Printf("camera: retention left %s alone: not a path the watcher writes", *p)
 				continue
 			}
 			if err := os.Remove(*p); err != nil && !errors.Is(err, os.ErrNotExist) {
 				log.Printf("camera: retention could not delete %s: %v", *p, err)
-				ok = false
 			}
 		}
-		if !ok {
-			continue
-		}
-		if _, err := db.Pool.Exec(ctx, `update closet_visits set recording_deleted_at = now() where id = $1`, v.id); err != nil {
-			return err
-		}
-		if v.snap != nil || v.clip != nil {
+		if snap != nil || clip != nil {
 			deleted++
 		}
 	}
@@ -597,9 +682,23 @@ func (db *DB) pruneRecordings(ctx context.Context, s CameraSettings) error {
 	return nil
 }
 
-// VisitMedia is a recording file an admin asked for.
+// isRecordingPath reports whether p has the shape saveMedia writes:
+// <recordings folder>/<yyyy-mm-dd>/<visit id><ext>, absolute and clean. The
+// paths are read back from closet_visits, which a restore loads from an
+// uploaded archive; without this, an edited archive could point the clip
+// route, or retention's delete, at any file the server can reach.
+func isRecordingPath(p, id, ext string) bool {
+	if !filepath.IsAbs(p) || filepath.Clean(p) != p || filepath.Base(p) != id+ext {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", filepath.Base(filepath.Dir(p)))
+	return err == nil
+}
+
+// VisitMedia is a recording file an admin asked for, already open. The
+// caller closes File.
 type VisitMedia struct {
-	Path    string
+	File    *os.File
 	ModTime time.Time
 	Size    int64
 }
@@ -617,9 +716,9 @@ func (db *DB) OpenVisitMedia(ctx context.Context, actor Actor, id, kind string, 
 	var path *string
 	var deleted *time.Time
 	var started time.Time
-	col := "snapshot_path"
+	col, ext := "snapshot_path", ".jpg"
 	if kind == "clip" {
-		col = "clip_path"
+		col, ext = "clip_path", ".mp4"
 	}
 	err := db.Pool.QueryRow(ctx, `select `+col+`, recording_deleted_at, started_at from closet_visits where id = $1`, id).Scan(&path, &deleted, &started)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -634,19 +733,32 @@ func (db *DB) OpenVisitMedia(ctx context.Context, actor Actor, id, kind string, 
 	if path == nil {
 		return VisitMedia{}, fmt.Errorf("%w: no recording has been saved for that visit yet", ErrNotFound)
 	}
-	st, err := os.Stat(*path)
+	if !isRecordingPath(*path, id, ext) {
+		// closet_visits comes back from a backup archive, so a path in it is
+		// only trusted when it has the shape saveMedia gives it.
+		return VisitMedia{}, fmt.Errorf("%w: the recording's saved location is not one the camera writes", ErrNotFound)
+	}
+	// Opened before the view is logged, so a file that cannot be read is not
+	// recorded as watched.
+	f, err := os.Open(*path)
 	if err != nil {
 		return VisitMedia{}, fmt.Errorf("%w: the recording file is missing from the recordings folder", ErrNotFound)
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return VisitMedia{}, fmt.Errorf("%w: the recording file cannot be read", ErrNotFound)
 	}
 	if kind == "clip" && logView {
 		if err := db.logNow(ctx, LogEntry{
 			Category: LogAdmin, Action: "recording_viewed", ActorID: actorLogID(actor), VisitID: id,
 			Summary: fmt.Sprintf("Watched the closet recording from %s", started.Local().Format("Jan 2 15:04")),
 		}); err != nil {
+			f.Close()
 			return VisitMedia{}, err
 		}
 	}
-	return VisitMedia{Path: *path, ModTime: st.ModTime(), Size: st.Size()}, nil
+	return VisitMedia{File: f, ModTime: st.ModTime(), Size: st.Size()}, nil
 }
 
 /* ------------------------------------------------------------------ status */

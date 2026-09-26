@@ -140,12 +140,15 @@ func (db *DB) ImportCategories(ctx context.Context, actor Actor, r io.Reader) (C
 		return res, fmt.Errorf("%w: %d of %d categories could not be created, so nothing was changed. First problem: %s",
 			ErrInvalid, res.Failed, len(paths), firstRowError(res.Rows))
 	}
+	// In the transaction, so the change cannot land without its row.
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "categories_imported", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Imported categories: %d added, %d already there", res.Created, res.Existing),
+		Details: map[string]any{"created": res.Created, "existing": res.Existing}}); err != nil {
+		return res, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return res, mapPgError("import categories", err)
 	}
-	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "categories_imported", ActorID: actorLogID(actor),
-		Summary: fmt.Sprintf("Imported categories: %d added, %d already there", res.Created, res.Existing),
-		Details: map[string]any{"created": res.Created, "existing": res.Existing}})
 	return res, nil
 }
 
