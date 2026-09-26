@@ -263,16 +263,20 @@ type ActivityFilter struct {
 	Categories []string
 	ScansOnly  bool
 	Query      string
-	// Before pages backwards: rows strictly older than this time.
-	Before *time.Time
-	Limit  int
+	// Before and BeforeID page backwards from the last entry of the previous
+	// page: rows strictly after it in (created_at, id) descending order, so
+	// rows sharing that entry's timestamp are not skipped. BeforeID without
+	// Before is ignored; Before alone means strictly older than that time.
+	Before   *time.Time
+	BeforeID string
+	Limit    int
 }
 
 // ActivityPage is one page of the timeline, newest first.
 type ActivityPage struct {
 	Entries []ActivityEntry `json:"entries"`
 	// More is true when older rows match the same filter; ask again with
-	// Before set to the last entry's time.
+	// Before and BeforeID set to the last entry's time and id.
 	More bool `json:"more"`
 }
 
@@ -292,7 +296,11 @@ func (f ActivityFilter) where() (string, []any, error) {
 		conds = append(conds, "l.created_at <= "+arg(*f.To))
 	}
 	if f.Before != nil {
-		conds = append(conds, "l.created_at < "+arg(*f.Before))
+		if f.BeforeID != "" {
+			conds = append(conds, "(l.created_at, l.id) < ("+arg(*f.Before)+"::timestamptz, "+arg(f.BeforeID)+"::uuid)")
+		} else {
+			conds = append(conds, "l.created_at < "+arg(*f.Before))
+		}
 	}
 	if f.PersonID != "" {
 		conds = append(conds, "l.actor_id = "+arg(f.PersonID)+"::uuid")
@@ -434,12 +442,22 @@ func (db *DB) ExportActivityCSV(ctx context.Context, actor Actor, f ActivityFilt
 		}
 		raw, _ := json.Marshal(e.Details)
 		_ = cw.Write([]string{
-			e.At.Format(time.RFC3339), e.Category, e.Action, e.Summary,
-			deref(e.ActorName), deref(e.AssetLabel), fmt.Sprint(e.ViaScanner), vs, ve, string(raw),
+			e.At.Format(time.RFC3339), e.Category, e.Action, csvSafe(e.Summary),
+			csvSafe(deref(e.ActorName)), csvSafe(deref(e.AssetLabel)), fmt.Sprint(e.ViaScanner), vs, ve, string(raw),
 		})
 	}
 	cw.Flush()
 	return cw.Error()
+}
+
+// csvSafe stops a spreadsheet reading a cell as a formula. The summary, the
+// person and the item carry text somebody typed or scanned, and a leading =,
+// +, -, @, tab or carriage return would make Excel or Sheets evaluate it.
+func csvSafe(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
 }
 
 // --- the unauthenticated scan ------------------------------------------------

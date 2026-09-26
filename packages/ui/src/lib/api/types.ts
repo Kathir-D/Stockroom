@@ -760,7 +760,7 @@ export interface ActivityEntry {
 
 export interface ActivityPage {
   entries: ActivityEntry[];
-  /** Older rows match too; ask again with `before` = the last entry's `at`. */
+  /** Older rows match too; ask again with `before` and `before_id` = the last entry's `at` and `id`. */
   more: boolean;
 }
 
@@ -768,6 +768,8 @@ export interface ActivityQuery {
   from?: string;
   to?: string;
   before?: string;
+  /** The last entry's id, beside `before`, so rows sharing its time are not skipped. */
+  before_id?: string;
   person?: string;
   item?: string;
   /** Comma-separated categories. */

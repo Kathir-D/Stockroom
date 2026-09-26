@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
@@ -25,7 +26,7 @@ func withScreen(next http.Handler) http.Handler {
 }
 
 // activityFilter reads the timeline's query string: from, to and before as
-// RFC 3339 instants, person and item as ids, type as a comma-separated list
+// RFC 3339 instants, before_id as the last entry's id beside before, person and item as ids, type as a comma-separated list
 // of categories, scans=1, q for text and limit.
 func activityFilter(r *http.Request) (stockroom.ActivityFilter, error) {
 	q := r.URL.Query()
@@ -51,6 +52,7 @@ func activityFilter(r *http.Request) (stockroom.ActivityFilter, error) {
 	if f.Before, err = parseTime("before"); err != nil {
 		return f, err
 	}
+	f.BeforeID = strings.TrimSpace(q.Get("before_id"))
 	f.PersonID = strings.TrimSpace(q.Get("person"))
 	f.AssetID = strings.TrimSpace(q.Get("item"))
 	if t := strings.TrimSpace(q.Get("type")); t != "" {
@@ -90,12 +92,17 @@ func (d deps) handleExportActivity(w http.ResponseWriter, r *http.Request, actor
 		writeError(w, err)
 		return
 	}
+	// Buffered, so a failure is a JSON error rather than a download with CSV
+	// headers and an error body.
+	var buf bytes.Buffer
+	if err := d.db.ExportActivityCSV(r.Context(), actor, f, &buf); err != nil {
+		writeError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="stockroom-activity-%s.csv"`, time.Now().Format("2006-01-02")))
 	w.Header().Set("Cache-Control", "no-store")
-	if err := d.db.ExportActivityCSV(r.Context(), actor, f, w); err != nil {
-		writeError(w, err)
-	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 // POST /signin/scan {"code": "...", "result": "not_signed_in" | "item_at_signin" | "invalid"}

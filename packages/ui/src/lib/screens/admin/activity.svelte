@@ -129,7 +129,7 @@
     if (!last) return
     loadingMore = true
     try {
-      const page = await api.activity(apiQuery({ before: last.at }))
+      const page = await api.activity(apiQuery({ before: last.at, before_id: last.id }))
       entries = [...entries, ...page.entries]
       more = page.more
     } catch (err) {

@@ -137,7 +137,10 @@ func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResul
 func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password string) (LoginResult, error) {
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
-		db.logFailedSignIn(ctx, strings.TrimSpace(studentNumber), "password", "not a valid student number")
+		// A typed field that fails the format may hold something that is not a
+		// number at all -- a password typed into the wrong box -- so the raw
+		// input is not logged.
+		db.logFailedSignIn(ctx, "", "password", "not a valid student number")
 		return LoginResult{}, err
 	}
 	p, err := db.profileByStudentNumber(ctx, sn)

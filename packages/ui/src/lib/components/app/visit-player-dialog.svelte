@@ -25,13 +25,18 @@
   let error = $state<string | null>(null)
   let saving = $state(false)
 
+  // Keyed on the id, not the object: marking a visit keep hands back a new
+  // object for the same visit, and refetching would log another viewing.
+  const visitId = $derived(visit?.id)
+
   $effect(() => {
-    if (!open || !visit) return
+    const id = visitId
+    if (!open || !id) return
     let cancelled = false
     let objectUrl: string | null = null
     error = null
     url = null
-    api.visitClip(visit.id).then(
+    api.visitClip(id).then(
       (b) => {
         if (cancelled) return
         blob = b

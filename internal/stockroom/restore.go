@@ -338,6 +338,25 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 			res.KeptNewer = append(res.KeptNewer, TableExport{Table: t, Rows: n})
 		}
 	}
+	// A visit the archive does carry may be older there than here: open when
+	// backed up, since ended, its recording copied, marked keep or deleted by
+	// retention. Those columns describe files on this disk now, so the live
+	// row's values win wherever it has them.
+	if archiveSet["closet_visits"] && slicesContains(survivingTables, "closet_visits") {
+		if _, err := tx.Exec(ctx, `
+			update public.closet_visits l set
+				ended_at = coalesce(k.ended_at, l.ended_at),
+				top_score = coalesce(k.top_score, l.top_score),
+				snapshot_path = coalesce(k.snapshot_path, l.snapshot_path),
+				clip_path = coalesce(k.clip_path, l.clip_path),
+				clip_bytes = coalesce(k.clip_bytes, l.clip_bytes),
+				keep = k.keep, kept_by = k.kept_by, kept_at = k.kept_at,
+				recording_deleted_at = coalesce(k.recording_deleted_at, l.recording_deleted_at)
+			from keep_closet_visits k
+			where l.id = k.id`); err != nil {
+			return res, fmt.Errorf("restore: carry the current state of closet visits: %w", err)
+		}
+	}
 	summary := fmt.Sprintf("Restored the database from the backup taken %s", archive.manifest.RanAt.Local().Format("Mon Jan 2 15:04"))
 	if opts.Source != "" {
 		summary += " (" + opts.Source + ")"

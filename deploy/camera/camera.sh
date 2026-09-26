@@ -112,6 +112,9 @@ render_config() {
       [ -f "$f" ] || die "no such file: $f"
       f="$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"
       echo "$(dirname "$f")" > "$CAMERA_DIR/.sample-dir"
+      # A file is not the webcam: drop the device mapping a previous webcam
+      # source left for compose().
+      rm -f "$CAMERA_DIR/.linux-webcam"
       if command -v ffprobe >/dev/null 2>&1; then
         local dims
         dims="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$f" || true)"

@@ -2,6 +2,7 @@ package stockroom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -142,6 +143,9 @@ func (db *DB) UpdateUser(ctx context.Context, actor Actor, id string, in UserInp
 	err := db.withLoggedTx(ctx, actorLogID(actor), "update user", func(tx pgx.Tx) error {
 		var wasAdmin bool
 		if err := tx.QueryRow(ctx, `select is_admin from profiles where id = $1 for update`, id).Scan(&wasAdmin); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: no user %s", ErrNotFound, id)
+			}
 			return mapPgError("update user", err)
 		}
 		var err error

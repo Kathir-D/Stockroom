@@ -228,6 +228,9 @@ func (f *frigateDetector) PersonEvents(ctx context.Context, camera string, since
 	q.Set("cameras", camera)
 	q.Set("labels", "person")
 	q.Set("after", fmt.Sprintf("%.3f", float64(since.UnixMilli())/1000))
+	// Oldest first: the watcher resumes from the newest visit it has, so a
+	// newest-first page capped at the limit would skip what lay beneath it.
+	q.Set("sort", "date_asc")
 	q.Set("limit", "200")
 	var events []frigateEvent
 	if err := f.getJSON(ctx, "/api/events", q, &events); err != nil {
