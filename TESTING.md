@@ -41,6 +41,7 @@ Each module has a happy-path test and, where it has one, a test that the admin-o
 | Catalogue | `assets_admin_test.go`, `categories_admin_test.go`, `imports_test.go`, `examples_test.go`, `barcode_test.go` |
 | Custody and kits | `custody_test.go`, `kits_test.go` |
 | Backup and restore | `backup_test.go`, `backup_status_test.go`, `export_test.go`, `archive_test.go`, `restore_test.go`, `settings_test.go`, `photos_backup_test.go` |
+| Activity log and closet camera | `activity_test.go` (one row per action and per scan, append-only, admin-only, the log outliving a deleted account), `camera_test.go` (a fake detector: walk-in and walk-out, blips, outages, a forgotten visit, retention and keep; the Frigate connector against Frigate 0.18's real response shapes) |
 | Sign-in photo wall | `photowall_test.go`, `photowall_drive_test.go`, `photowall_image_test.go`, `photowall_admin_test.go` |
 | Infrastructure | `db_test.go`, `config_test.go`, `migrate_test.go`, `pgerr_test.go` |
 
@@ -48,7 +49,7 @@ Each module has a happy-path test and, where it has one, a test that the admin-o
 
 ### Go: `server`
 
-HTTP round trips for auth, checkout, kits, admin routes, imports, backup and restore, export, the photo wall routes, CORS, error-to-status mapping and the embedded UI. Each group includes a test that admin routes return 403 to a student.
+HTTP round trips for auth, checkout, kits, admin routes, imports, backup and restore, export, the photo wall routes, the activity and camera routes (`activity_test.go`), CORS, error-to-status mapping and the embedded UI. Each group includes a test that admin routes return 403 to a student.
 
 ### Database: `supabase/tests`
 
@@ -61,7 +62,7 @@ HTTP round trips for auth, checkout, kits, admin routes, imports, backup and res
 
 ### Frontend
 
-`packages/ui` has Vitest tests for status resolution (`status.test.ts`), scan-vs-typed detection (`scanner.test.ts`), kit expansion (`kits.test.ts`), the kits store (`stores/kits.test.ts`), the session keep-alive (`keep-alive.test.ts`) and student-number filtering (`student-number.test.ts`).
+`packages/ui` has Vitest tests for status resolution (`status.test.ts`), scan-vs-typed detection (`scanner.test.ts`), kit expansion (`kits.test.ts`), the kits store (`stores/kits.test.ts`), the session keep-alive (`keep-alive.test.ts`), the activity timeline's URL filter (`stores/router.test.ts`) and student-number filtering (`student-number.test.ts`).
 
 `web-app` and `desktop-app/frontend` each have smoke tests that the shared package compiles under that host and renders the sign-in screen.
 
@@ -71,6 +72,10 @@ HTTP round trips for auth, checkout, kits, admin routes, imports, backup and res
 |---|---|
 | `scripts/backup-check.sh` | Signs in as the failsafe admin, shows the backup configuration, and optionally tests each target (`--test`), runs a backup (`--run`), lists stored versions (`--versions`) and verifies the newest archive. `--all` runs everything |
 | `scripts/verify-archive.py` | Verifies one archive without a database: checksums, row counts, sequences, `RESTORE.md`, and that no GitHub token is present |
+
+## Manual camera checks
+
+The detector itself is not in CI: Frigate is a 6 GB image. Run it against sample footage on a development machine (`docs/design/closet-camera.md` §5 and §6). Each loop of the EPFL clip gives the same fourteen visits. Then stop the container (`docker stop stockroom-camera-frigate-1`) to check that sign-in still answers and the timeline shows one offline row and one "back online after" row.
 
 ## Not yet covered
 

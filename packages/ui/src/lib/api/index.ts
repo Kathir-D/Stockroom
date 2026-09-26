@@ -8,6 +8,12 @@
 
 import { ApiError, request, setToken } from "./client";
 import type {
+  ActivityPage,
+  ActivityQuery,
+  CameraOverview,
+  CameraSettingsInput,
+  ClosetVisit,
+  DetectorHealth,
   AssetDetail,
   AssetInput,
   AssetListItem,
@@ -63,6 +69,7 @@ export {
   fileUrl,
   getToken,
   lastRequestAt,
+  setScreen,
   setToken,
 } from "./client";
 
@@ -763,4 +770,62 @@ export function rebuildPhotoWall() {
  */
 export function photoWallPreview() {
   return request<{ photos: string[] }>("/admin/photo-wall/preview");
+}
+
+/* ------------------------------------------------ activity log, camera ---- */
+
+/**
+ * A barcode no signed-in route saw: scanned with nobody signed in, or an item
+ * barcode read at the sign-in screen. Every scan is in the activity log
+ * (ROADMAP §2.4). Fire and forget: a scan that could not be logged must not
+ * change what the person at the counter sees.
+ */
+export function logUnattendedScan(code: string, result: "not_signed_in" | "item_at_signin" | "invalid") {
+  return request<{ ok: boolean }>("/signin/scan", {
+    method: "POST",
+    body: { code, result },
+    anonymous: true,
+  }).catch(() => undefined);
+}
+
+/** The admin timeline, newest first. */
+export function activity(query: ActivityQuery = {}) {
+  return request<ActivityPage>("/admin/activity", { query: { ...query } });
+}
+
+/** The same filter as a CSV download. The export is itself logged. */
+export function activityCsv(query: ActivityQuery = {}) {
+  return request<Blob>("/admin/activity.csv", { query: { ...query }, blob: true });
+}
+
+export function camera() {
+  return request<CameraOverview>("/admin/camera");
+}
+
+export function saveCamera(input: CameraSettingsInput) {
+  return request<CameraOverview>("/admin/camera", { method: "PUT", body: input });
+}
+
+export function testCamera(input: CameraSettingsInput = {}) {
+  return request<DetectorHealth>("/admin/camera/test", { method: "POST", body: input });
+}
+
+/**
+ * A visit's snapshot or clip. Fetched as a Blob for the same reason as the
+ * barcode: a `<video src>` cannot carry the bearer token. Watching a clip is
+ * logged by the server.
+ */
+export function visitSnapshot(visitId: string) {
+  return request<Blob>(`/admin/visits/${encodeURIComponent(visitId)}/snapshot.jpg`, { blob: true });
+}
+
+export function visitClip(visitId: string) {
+  return request<Blob>(`/admin/visits/${encodeURIComponent(visitId)}/clip.mp4`, { blob: true });
+}
+
+export function keepVisit(visitId: string, keep: boolean) {
+  return request<ClosetVisit>(`/admin/visits/${encodeURIComponent(visitId)}/keep`, {
+    method: "POST",
+    body: { keep },
+  });
 }

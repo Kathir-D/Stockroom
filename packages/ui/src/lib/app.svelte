@@ -39,6 +39,7 @@
   import AdminCategories from "@stockroom/ui/screens/admin/categories.svelte"
   import AdminOverdue from "@stockroom/ui/screens/admin/overdue.svelte"
   import AdminPhotoWall from "@stockroom/ui/screens/admin/photo-wall.svelte"
+  import AdminActivity from "@stockroom/ui/screens/admin/activity.svelte"
   import AdminSettings from "@stockroom/ui/screens/admin/settings.svelte"
   import AdminUsers from "@stockroom/ui/screens/admin/users.svelte"
   import Browse from "@stockroom/ui/screens/browse.svelte"
@@ -114,6 +115,14 @@
    * damage note can't fire a phantom scan (§9.3).
    */
   const scannerArmed = $derived(signedIn)
+
+  // Every request says which screen sent it, so a scan's activity-log row can
+  // say where it was scanned (ROADMAP §2.4).
+  $effect(() => {
+    api.setScreen(
+      !signedIn ? "sign-in" : route.name === "admin" ? `admin/${route.tab}` : route.name,
+    )
+  })
 
   /** Load the tree once per session; the unit list follows the filter. */
   $effect(() => {
@@ -367,6 +376,15 @@
               onDismiss={() => session.dismissBackupWarning()}
             />
           {/if}
+          {#if session.visibleCameraWarning && route.name !== "setup"}
+            <BackupNotice
+              warning={{ message: session.visibleCameraWarning, admins: [] }}
+              isAdmin={session.isAdmin}
+              actionLabel="Open Settings"
+              onOpenBackup={() => router.go({ name: "admin", tab: "settings" })}
+              onDismiss={() => session.dismissCameraWarning()}
+            />
+          {/if}
 
           {#if route.name === "cart"}
             <CartPage onBack={() => router.backToBrowse()} {onCheckedOut} />
@@ -389,6 +407,8 @@
               <AdminSettings />
             {:else if route.tab === "photo-wall"}
               <AdminPhotoWall />
+            {:else if route.tab === "activity"}
+              <AdminActivity />
             {:else}
               <AdminBackup />
             {/if}

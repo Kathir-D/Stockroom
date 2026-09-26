@@ -29,11 +29,14 @@
   let {
     warning,
     isAdmin = false,
+    actionLabel = "Open Backup",
     onOpenBackup,
     onDismiss,
   }: {
     warning: BackupWarning
     isAdmin?: boolean
+    /** The admin's button. The closet camera's notice reuses this banner. */
+    actionLabel?: string
     onOpenBackup?: () => void
     onDismiss: () => void
   } = $props()
@@ -64,7 +67,7 @@
   <p class="min-w-0 flex-1 text-sm text-fg">{warning.message}</p>
 
   {#if isAdmin && onOpenBackup}
-    <Button variant="secondary" size="sm" onclick={onOpenBackup}>Open Backup</Button>
+    <Button variant="secondary" size="sm" onclick={onOpenBackup}>{actionLabel}</Button>
   {/if}
 
   <Button variant="ghost" size="icon-sm" aria-label="Dismiss this notice" onclick={onDismiss}>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS only: go2rtc reading the closet webcam and serving it to Frigate as
+  RTSP on 127.0.0.1:8554. Docker Desktop cannot pass a USB camera into a
+  container, so this half of the camera runs on the host (ROADMAP §2.1).
+  scripts/install.sh --with-camera substitutes __GO2RTC__ and __CAMERA_DIR__.
+
+  An agent, for the same reason as com.stockroom.server: it needs the logged-in
+  session, which is also the only session macOS will grant camera access to.
+  The first start asks for camera permission once; allow it.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.stockroom.go2rtc</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__GO2RTC__</string>
+    <string>-config</string>
+    <string>__CAMERA_DIR__/go2rtc.yaml</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__CAMERA_DIR__/go2rtc.log</string>
+  <key>StandardErrorPath</key>
+  <string>__CAMERA_DIR__/go2rtc.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

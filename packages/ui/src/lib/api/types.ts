@@ -218,12 +218,15 @@ export interface LoginResult {
   has_overdue: boolean;
   profile: Profile;
   backup_warning: BackupWarning | null;
+  /** An admin's closet-camera problem (offline, disk low). Never a student's. */
+  camera_warning?: string | null;
 }
 
 export interface MeResult {
   profile: Profile;
   has_overdue: boolean;
   backup_warning: BackupWarning | null;
+  camera_warning?: string | null;
 }
 
 export interface UserInput {
@@ -510,6 +513,8 @@ export interface RestoreResult {
   sequences: number;
   /** What could not be checked, rather than a pretence that it was. */
   warnings: string[];
+  /** Log rows and closet visits written after the backup, kept rather than erased. */
+  kept_newer?: TableExport[] | null;
 }
 
 export interface DriveConnectResult {
@@ -717,4 +722,100 @@ export interface ExamplesResult {
   assets: AssetImportResult;
   people: RosterResult;
   skipped?: string[];
+}
+
+/* ------------------------------------------------ activity log, camera ---- */
+
+/** The timeline's type filter (`activity_log.category`). */
+export type ActivityCategory = "closet" | "account" | "scan" | "equipment" | "admin";
+
+/** One person tracked by the closet camera, from walking in to walking out. */
+export interface ClosetVisit {
+  id: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  has_snapshot: boolean;
+  has_clip: boolean;
+  clip_bytes: number | null;
+  keep: boolean;
+  recording_deleted: boolean;
+}
+
+/** One row of `GET /admin/activity`. */
+export interface ActivityEntry {
+  id: string;
+  at: string;
+  category: ActivityCategory;
+  action: string;
+  summary: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  asset_id: string | null;
+  asset_label: string | null;
+  via_scanner: boolean;
+  details: Record<string, unknown>;
+  visit?: ClosetVisit | null;
+}
+
+export interface ActivityPage {
+  entries: ActivityEntry[];
+  /** Older rows match too; ask again with `before` and `before_id` = the last entry's `at` and `id`. */
+  more: boolean;
+}
+
+export interface ActivityQuery {
+  from?: string;
+  to?: string;
+  before?: string;
+  /** The last entry's id, beside `before`, so rows sharing its time are not skipped. */
+  before_id?: string;
+  person?: string;
+  item?: string;
+  /** Comma-separated categories. */
+  type?: string;
+  scans?: "1";
+  q?: string;
+  limit?: string;
+}
+
+export interface CameraSettings {
+  enabled: boolean;
+  detector_url: string;
+  camera_name: string;
+  recordings_dir: string;
+  retention_days: number;
+  min_free_gb: number;
+  min_visit_seconds: number;
+  updated_at: string;
+}
+
+export type CameraSettingsInput = Partial<Omit<CameraSettings, "updated_at">>;
+
+export interface DetectorHealth {
+  detector: string;
+  version: string;
+  camera_found: boolean;
+  camera_online: boolean;
+  camera_fps: number;
+  inference_ms: number;
+  message: string;
+}
+
+export interface CameraStatus {
+  state: "off" | "starting" | "online" | "camera_offline" | "detector_down" | "error";
+  message: string;
+  detector: DetectorHealth | null;
+  last_poll: string | null;
+  offline_since: string | null;
+  in_closet: number;
+  visits_today: number;
+  recordings: number;
+  free_bytes: number | null;
+  warnings: string[];
+}
+
+export interface CameraOverview {
+  settings: CameraSettings;
+  status: CameraStatus;
 }

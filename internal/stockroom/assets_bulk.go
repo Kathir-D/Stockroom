@@ -182,6 +182,12 @@ func (db *DB) BulkAddAssets(ctx context.Context, actor Actor, in BulkAddInput) (
 		out = append(out, a)
 	}
 
+	// In the transaction, so the change cannot land without its row.
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "assets_bulk_added", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Added %d numbered units of %s", len(out), in.Name),
+		Details: map[string]any{"count": len(out), "prefix": in.Prefix}}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, mapPgError("bulk add", err)
 	}

@@ -52,6 +52,22 @@ class SessionStore {
     this.backupWarningDismissed = true
   }
 
+  /**
+   * An admin's closet-camera problem -- offline, detector down, disk low --
+   * on the same banner surface as the backup warning. The server only ever
+   * sends it to an admin.
+   */
+  cameraWarning = $state<string | null>(null)
+  cameraWarningDismissed = $state(false)
+
+  get visibleCameraWarning() {
+    return this.cameraWarningDismissed ? null : this.cameraWarning
+  }
+
+  dismissCameraWarning() {
+    this.cameraWarningDismissed = true
+  }
+
   get signedIn() {
     return this.profile !== null
   }
@@ -87,7 +103,7 @@ class SessionStore {
     }
     try {
       const result = await api.me()
-      this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
+      this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
       // `/me` answers for a limited session too, so the token being valid does
       // not by itself mean the session is full. A 403 from the first full-only
       // read is what reveals that; ask for the tree to find out now rather than
@@ -115,8 +131,9 @@ class SessionStore {
     has_overdue: boolean
     needs_password?: boolean
     backup_warning?: BackupWarning | null
+    camera_warning?: string | null
   }) {
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning ?? null)
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning ?? null, result.camera_warning ?? null)
     this.needsPassword = result.needs_password === true
     if (!this.needsPassword) await this.refreshOverdue()
   }
@@ -124,18 +141,20 @@ class SessionStore {
   private adoptProfile(
     profile: Profile,
     hasOverdue: boolean,
-    backupWarning: BackupWarning | null = null
+    backupWarning: BackupWarning | null = null,
+    cameraWarning: string | null | undefined = null
   ) {
     this.profile = profile
     this.hasOverdue = hasOverdue
     this.backupWarning = backupWarning
+    this.cameraWarning = cameraWarning ?? null
   }
 
   /** Called after `setInitialPassword` upgrades a limited token in place. */
   async completePasswordSetup() {
     this.needsPassword = false
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
     await this.refreshOverdue()
   }
 
@@ -170,7 +189,7 @@ class SessionStore {
   async refresh() {
     if (!this.signedIn) return
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning)
+    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
     await this.refreshOverdue()
   }
 
@@ -191,6 +210,8 @@ class SessionStore {
     this.overdueItems = []
     this.backupWarning = null
     this.backupWarningDismissed = false
+    this.cameraWarning = null
+    this.cameraWarningDismissed = false
     api.setToken(null)
     cart.clear()
   }

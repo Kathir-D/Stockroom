@@ -49,6 +49,10 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
 	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
 	mux.HandleFunc("POST /setup/admin", d.handleCreateFirstAdmin)
+	// A barcode scanned with nobody signed in, or an item barcode read at
+	// the sign-in screen: the scans no other route sees (ROADMAP §2.4). The
+	// one unauthenticated write besides the logins, so it is rate limited.
+	mux.HandleFunc("POST /signin/scan", d.handleUnattendedScan)
 	mux.Handle("GET "+stockroom.PhotoWallPrefix, photoTileServer(d.db.SignInPhotoWall))
 
 	// A limited session (scan login, no password yet) may only set its
@@ -165,6 +169,18 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("POST /admin/photo-wall/rebuild", d.withSession(d.handleRebuildPhotoWall, fullOnly))
 	mux.Handle("GET /admin/photo-wall/preview", d.withSession(d.handlePhotoWallPreview, fullOnly))
 
+	// The activity log and the closet camera (ROADMAP §2.4, §2.5). Admin-only,
+	// enforced inside internal/stockroom. The recordings are served by visit
+	// id, never by path, and watching a clip writes its own log row.
+	mux.Handle("GET /admin/activity", d.withSession(d.handleListActivity, fullOnly))
+	mux.Handle("GET /admin/activity.csv", d.withSession(d.handleExportActivity, fullOnly))
+	mux.Handle("GET /admin/camera", d.withSession(d.handleGetCamera, fullOnly))
+	mux.Handle("PUT /admin/camera", d.withSession(d.handleSaveCamera, fullOnly))
+	mux.Handle("POST /admin/camera/test", d.withSession(d.handleTestCamera, fullOnly))
+	mux.Handle("GET /admin/visits/{id}/snapshot.jpg", d.withSession(d.handleVisitSnapshot, fullOnly))
+	mux.Handle("GET /admin/visits/{id}/clip.mp4", d.withSession(d.handleVisitClip, fullOnly))
+	mux.Handle("POST /admin/visits/{id}/keep", d.withSession(d.handleVisitKeep, fullOnly))
+
 	// User management. Admin-only, enforced inside internal/stockroom.
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))
@@ -187,7 +203,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET "+uiPrefix, ui)
 	mux.Handle("GET /", ui)
 
-	return logRequests(withCORS(mux))
+	return logRequests(withCORS(withScreen(mux)))
 }
 
 // localOrigins are the browser origins allowed to call this server.
@@ -275,7 +291,7 @@ func withCORS(next http.Handler) http.Handler {
 		if originAllowed(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Stockroom-Screen")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			// Without Vary, a cache could hand one origin's response to another.
 			w.Header().Add("Vary", "Origin")

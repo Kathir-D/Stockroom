@@ -59,6 +59,10 @@ func (db *DB) ExportEverything(ctx context.Context, actor Actor) (Export, error)
 	if err != nil {
 		return Export{}, err
 	}
+	if err := db.logNow(ctx, LogEntry{Category: LogAdmin, Action: "export", ActorID: actorLogID(actor),
+		Summary: "Downloaded Export everything"}); err != nil {
+		return Export{}, err
+	}
 	return Export{
 		Filename: fmt.Sprintf(exportNamePattern, now.Format("2006-01-02")),
 		Archive:  snap.archive,

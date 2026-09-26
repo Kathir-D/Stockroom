@@ -1,0 +1,5 @@
+# Added by camera.sh on Linux when the source is a webcam: map the device in.
+services:
+  frigate:
+    devices:
+      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}

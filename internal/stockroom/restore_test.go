@@ -59,6 +59,12 @@ func TestRestoreRoundTrip(t *testing.T) {
 	// Everything below happens *after* the snapshot, so the restore has to
 	// undo all of it.
 	marker := insertTestAsset(t, db, Profile{ID: admin.ID})
+	// ...except the activity log, which a restore keeps (ROADMAP §2.4): a
+	// row written after the backup must still be there afterwards.
+	logMarker := "restore-test-" + marker
+	if err := db.logNow(ctx, LogEntry{Category: LogAdmin, Action: "test_marker", Summary: logMarker}); err != nil {
+		t.Fatal(err)
+	}
 
 	archive, err := os.ReadFile(res.Archive)
 	if err != nil {
@@ -81,8 +87,16 @@ func TestRestoreRoundTrip(t *testing.T) {
 		t.Error("an asset created after the backup survived the restore; the tables were not replaced")
 	}
 
-	// Every table holds what the manifest said it did.
+	// Every table holds what the manifest said it did, plus -- for the two
+	// tables a restore adds to rather than replaces -- what it kept.
+	kept := map[string]int64{}
+	for _, k := range restored.KeptNewer {
+		kept[k.Table] = k.Rows
+	}
 	for _, table := range restored.Tables {
+		if slicesContains(survivingTables, table.Table) {
+			continue
+		}
 		var live int64
 		if err := db.Pool.QueryRow(ctx,
 			`select count(*) from `+quoteTestIdent(table.Table)).Scan(&live); err != nil {
@@ -102,8 +116,9 @@ func TestRestoreRoundTrip(t *testing.T) {
 
 	// trg_asset_status_log fires on an assets status change and would have
 	// written one junk row per asset on the way in. session_replication_role =
-	// replica is what keeps activity_log restoring clean, and a count that
-	// matches the archive is how that is visible.
+	// replica is what keeps activity_log restoring clean: after the restore it
+	// holds the archive's rows, the rows written since the backup, and the one
+	// row recording the restore itself -- and nothing else.
 	var activityNow int64
 	if err := db.Pool.QueryRow(ctx, `select count(*) from activity_log`).Scan(&activityNow); err != nil {
 		t.Fatal(err)
@@ -111,11 +126,27 @@ func TestRestoreRoundTrip(t *testing.T) {
 	var wantActivity int64
 	for _, table := range restored.Tables {
 		if table.Table == "activity_log" {
-			wantActivity = table.Rows
+			wantActivity = table.Rows + kept["activity_log"] + 1
 		}
 	}
 	if activityNow != wantActivity {
-		t.Errorf("activity_log holds %d rows after the restore, the archive carried %d: the triggers were not suspended", activityNow, wantActivity)
+		t.Errorf("activity_log holds %d rows after the restore, want %d (archive + kept + the restore's own row): the triggers were not suspended", activityNow, wantActivity)
+	}
+	if kept["activity_log"] < 1 {
+		t.Errorf("the restore kept %d newer activity rows, want at least the marker", kept["activity_log"])
+	}
+	var markerKept, restoreLogged bool
+	if err := db.Pool.QueryRow(ctx, `
+		select exists (select 1 from activity_log where summary = $1),
+		       exists (select 1 from activity_log where action = 'restore' and actor_id = $2)`,
+		logMarker, admin.ID).Scan(&markerKept, &restoreLogged); err != nil {
+		t.Fatal(err)
+	}
+	if !markerKept {
+		t.Error("a log row written after the backup was erased by the restore")
+	}
+	if !restoreLogged {
+		t.Error("the restore did not log itself")
 	}
 }
 

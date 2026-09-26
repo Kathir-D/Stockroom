@@ -198,13 +198,8 @@ func (db *DB) logGoogleSignIn(ctx context.Context, actor Actor, remote string) e
 		id := actor.ID
 		actorID = &id
 	}
-	if _, err := db.Pool.Exec(ctx, `
-		insert into activity_log (asset_id, actor_id, action, details)
-		values (null, $1, 'google_sign_in', jsonb_build_object('remote', $2::text))`,
-		actorID, remote); err != nil {
-		return mapPgError("log the Google sign-in", err)
-	}
-	return nil
+	return db.logNow(ctx, LogEntry{Category: LogAdmin, Action: "google_sign_in", ActorID: deref(actorID),
+		Summary: "Signed in to Google for Drive", Details: map[string]any{"remote": remote}})
 }
 
 /* ------------------------------------------------------------- folders ---- */

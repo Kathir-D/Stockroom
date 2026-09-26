@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -91,6 +93,9 @@ type LoginResult struct {
 	// start -- and because sign-in is the only moment everybody passes
 	// through. See backup_status.go.
 	BackupWarning *BackupWarning `json:"backup_warning"`
+	// CameraWarning is set for an admin when the closet camera is on and
+	// needs attention (camera_watch.go). Never for a student.
+	CameraWarning *string `json:"camera_warning"`
 }
 
 // LoginByScan signs in from an ID-card scan: student number only, no
@@ -99,11 +104,21 @@ type LoginResult struct {
 // ErrNotFound so the UI can say "not registered" rather than "wrong
 // password".
 func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResult, error) {
+	// Every card scan is logged, including the ones that sign nobody in
+	// (ROADMAP §2.4). The code read is kept whole: the log is admin-only,
+	// and a number that almost matched somebody is exactly what an admin
+	// tracing a problem needs (decided 2026-09-26).
+	ctx = withScan(ctx, strings.TrimSpace(studentNumber))
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
+		db.logFailedSignIn(ctx, "", "scan", "not a valid student number")
 		return LoginResult{}, err
 	}
 	p, err := db.profileByStudentNumber(ctx, sn)
+	if errors.Is(err, ErrNotFound) {
+		db.logFailedSignIn(ctx, "", "scan", "no account has that number")
+		return LoginResult{}, err
+	}
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -111,7 +126,7 @@ func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResul
 	// SetInitialPassword read it, so a blank column can still be set from
 	// the first scan login instead of locking the account out.
 	limited := p.PasswordHash == nil || *p.PasswordHash == ""
-	return db.openSession(ctx, p, limited)
+	return db.openSession(ctx, p, limited, "scan")
 }
 
 // LoginByPassword signs in from a typed student number and password. A wrong
@@ -122,28 +137,81 @@ func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResul
 func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password string) (LoginResult, error) {
 	sn, err := NormalizeStudentNumber(studentNumber)
 	if err != nil {
+		// A typed field that fails the format may hold something that is not a
+		// number at all -- a password typed into the wrong box -- so the raw
+		// input is not logged.
+		db.logFailedSignIn(ctx, "", "password", "not a valid student number")
 		return LoginResult{}, err
 	}
 	p, err := db.profileByStudentNumber(ctx, sn)
 	if errors.Is(err, ErrNotFound) {
+		db.logFailedSignIn(ctx, sn, "password", "no account has that number")
 		return LoginResult{}, ErrBadCredentials
 	}
 	if err != nil {
 		return LoginResult{}, err
 	}
 	if err := CheckPassword(p.PasswordHash, password); err != nil {
+		reason := "wrong password"
+		if errors.Is(err, ErrPasswordNotSet) {
+			reason = "the account has no password yet"
+		}
+		db.logFailedSignInFor(ctx, p, sn, "password", reason)
 		return LoginResult{}, err
 	}
-	return db.openSession(ctx, p, false)
+	return db.openSession(ctx, p, false, "password")
 }
 
-func (db *DB) openSession(ctx context.Context, p Profile, limited bool) (LoginResult, error) {
+// logFailedSignIn records a refused sign-in. The number typed or scanned is
+// the code, in full (see LoginByScan). Best effort: the sign-in is refused
+// either way, and a refusal must not turn into a 500 because the log could
+// not be written.
+func (db *DB) logFailedSignIn(ctx context.Context, code, method, reason string) {
+	e := LogEntry{
+		Category: LogAccount, Action: "signin_failed",
+		Summary: fmt.Sprintf("Failed sign-in by %s: %s", method, reason),
+		Details: map[string]any{"method": method, "reason": reason},
+	}
+	if code != "" {
+		e.Details["code"] = code
+	}
+	db.logBestEffort(ctx, e)
+}
+
+// logFailedSignInFor is a refusal for a known account: a wrong password.
+func (db *DB) logFailedSignInFor(ctx context.Context, p Profile, code, method, reason string) {
+	db.logBestEffort(ctx, LogEntry{
+		Category: LogAccount, Action: "signin_failed", ActorID: p.ID,
+		Summary: fmt.Sprintf("Failed sign-in by %s for %s: %s", method, profileLabel(p), reason),
+		Details: map[string]any{"method": method, "reason": reason, "code": code},
+	})
+}
+
+func profileLabel(p Profile) string {
+	return displayName(p.FirstName, p.LastName, p.FullName, p.StudentNumber)
+}
+
+func (db *DB) openSession(ctx context.Context, p Profile, limited bool, method string) (LoginResult, error) {
+	// Everything that can still fail runs before the log row, so a row never
+	// names a sign-in that did not happen.
+	overdue, err := db.hasOverdue(ctx, p.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	sess, err := db.Sessions.Create(p.ID, limited)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	overdue, err := db.hasOverdue(ctx, p.ID)
-	if err != nil {
+	// The sign-in is not complete until it is in the log: a sign-in that
+	// left no trace is the one thing the log exists to rule out.
+	summary := fmt.Sprintf("%s signed in by %s", profileLabel(p), method)
+	if limited {
+		summary += " (no password set yet)"
+	}
+	if err := db.logNow(ctx, LogEntry{
+		Category: LogAccount, Action: "signin_" + method, ActorID: p.ID, Summary: summary,
+		Details: map[string]any{"limited": limited},
+	}); err != nil {
 		db.Sessions.Delete(sess.Token)
 		return LoginResult{}, err
 	}
@@ -152,6 +220,7 @@ func (db *DB) openSession(ctx context.Context, p Profile, limited bool) (LoginRe
 	// nothing; a warning there is noise in front of a form.
 	if !limited {
 		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
+		out.CameraWarning = db.cameraWarningFor(ctx, p.IsAdmin)
 	}
 	return out, nil
 }
@@ -166,23 +235,47 @@ func (db *DB) SetInitialPassword(ctx context.Context, actor Actor, password stri
 	if err != nil {
 		return err
 	}
-	tag, err := db.Pool.Exec(ctx,
-		`update profiles set password_hash = $2
-		 where id = $1 and (password_hash is null or password_hash = '')`,
-		actor.ID, hash)
+	err = db.withLoggedTx(ctx, actor.ID, "set initial password", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`update profiles set password_hash = $2
+			 where id = $1 and (password_hash is null or password_hash = '')`,
+			actor.ID, hash)
+		if err != nil {
+			return fmt.Errorf("set initial password: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: password already set", ErrConflict)
+		}
+		return writeLog(ctx, tx, LogEntry{
+			Category: LogAccount, Action: "password_set", ActorID: actor.ID,
+			Summary: "Set a password for the first time",
+		})
+	})
 	if err != nil {
-		return fmt.Errorf("set initial password: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: password already set", ErrConflict)
+		return err
 	}
 	db.Sessions.Upgrade(actor.Token)
 	return nil
 }
 
 // Logout ends the actor's session.
-func (db *DB) Logout(actor Actor) {
+func (db *DB) Logout(ctx context.Context, actor Actor) {
 	db.Sessions.Delete(actor.Token)
+	db.logBestEffort(ctx, LogEntry{
+		Category: LogAccount, Action: "signout", ActorID: actor.ID, Summary: "Signed out",
+	})
+}
+
+// logIdleTimeout is the SessionStore's expiry hook: a session that timed out
+// is a sign-out nobody pressed, and the log says when it happened -- the
+// moment the idle period ran out, not the moment the server noticed.
+func (db *DB) logIdleTimeout(s Session, at time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db.logBestEffort(ctx, LogEntry{
+		Category: LogAccount, Action: "idle_timeout", ActorID: s.ProfileID, At: at,
+		Summary: "Signed out automatically after being idle",
+	})
 }
 
 // Resolve turns a session token into an Actor. The profile is reloaded from
@@ -218,6 +311,7 @@ type MeResult struct {
 	Profile       Profile        `json:"profile"`
 	HasOverdue    bool           `json:"has_overdue"`
 	BackupWarning *BackupWarning `json:"backup_warning"`
+	CameraWarning *string        `json:"camera_warning"`
 }
 
 // Me returns the actor's own profile. Any session, including a limited one,
@@ -234,6 +328,7 @@ func (db *DB) Me(ctx context.Context, actor Actor) (MeResult, error) {
 	out := MeResult{Profile: p, HasOverdue: overdue}
 	if !actor.Limited {
 		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
+		out.CameraWarning = db.cameraWarningFor(ctx, p.IsAdmin)
 	}
 	return out, nil
 }

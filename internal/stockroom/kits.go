@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -97,11 +98,17 @@ func (db *DB) CreateKit(ctx context.Context, actor Actor, in KitInput) (KitDetai
 	}
 
 	var id string
-	err := db.Pool.QueryRow(ctx, `
-		insert into kits (name, description) values ($1, $2) returning id`,
-		in.Name, in.Description).Scan(&id)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "create kit", func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			insert into kits (name, description) values ($1, $2) returning id`,
+			in.Name, in.Description).Scan(&id); err != nil {
+			return mapPgError("create kit", err)
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "kit_created", ActorID: actorLogID(actor),
+			Summary: "Created kit " + in.Name, Details: map[string]any{"kit_id": id, "kit": in.Name}})
+	})
 	if err != nil {
-		return KitDetail{}, mapPgError("create kit", err)
+		return KitDetail{}, err
 	}
 	return db.GetKit(ctx, actor, id)
 }
@@ -116,13 +123,28 @@ func (db *DB) UpdateKit(ctx context.Context, actor Actor, id string, in KitInput
 		return KitDetail{}, err
 	}
 
-	tag, err := db.Pool.Exec(ctx,
-		`update kits set name = $2, description = $3 where id = $1`, id, in.Name, in.Description)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "update kit", func(tx pgx.Tx) error {
+		var old string
+		err := tx.QueryRow(ctx, `select name from kits where id = $1 for update`, id).Scan(&old)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no kit %s", ErrNotFound, id)
+		}
+		if err != nil {
+			return mapPgError("update kit", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`update kits set name = $2, description = $3 where id = $1`, id, in.Name, in.Description); err != nil {
+			return mapPgError("update kit", err)
+		}
+		summary := "Edited kit " + in.Name
+		if old != in.Name {
+			summary = fmt.Sprintf("Renamed kit %s to %s", old, in.Name)
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "kit_updated", ActorID: actorLogID(actor),
+			Summary: summary, Details: map[string]any{"kit_id": id, "kit": in.Name, "was": old}})
+	})
 	if err != nil {
-		return KitDetail{}, mapPgError("update kit", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return KitDetail{}, fmt.Errorf("%w: no kit %s", ErrNotFound, id)
+		return KitDetail{}, err
 	}
 	return db.GetKit(ctx, actor, id)
 }
@@ -138,14 +160,18 @@ func (db *DB) DeleteKit(ctx context.Context, actor Actor, id string) error {
 	if err := RequireAdmin(actor); err != nil {
 		return err
 	}
-	tag, err := db.Pool.Exec(ctx, `delete from kits where id = $1`, id)
-	if err != nil {
-		return mapPgError("delete kit", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: no kit %s", ErrNotFound, id)
-	}
-	return nil
+	return db.withLoggedTx(ctx, actorLogID(actor), "delete kit", func(tx pgx.Tx) error {
+		var name string
+		err := tx.QueryRow(ctx, `delete from kits where id = $1 returning name`, id).Scan(&name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no kit %s", ErrNotFound, id)
+		}
+		if err != nil {
+			return mapPgError("delete kit", err)
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "kit_deleted", ActorID: actorLogID(actor),
+			Summary: "Deleted kit " + name, Details: map[string]any{"kit_id": id, "kit": name}})
+	})
 }
 
 // AddAssetToKit puts one unit in a kit.
@@ -160,8 +186,14 @@ func (db *DB) AddAssetToKit(ctx context.Context, actor Actor, kitID, assetID str
 		return KitDetail{}, err
 	}
 
-	_, err := db.Pool.Exec(ctx,
-		`insert into kit_items (kit_id, asset_id) values ($1, $2)`, kitID, assetID)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "add to kit", func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`insert into kit_items (kit_id, asset_id) values ($1, $2)`, kitID, assetID); err != nil {
+			return err
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "kit_item_added", ActorID: actorLogID(actor), AssetID: assetID,
+			Summary: "Put an item in kit " + kitName(ctx, tx, kitID), Details: map[string]any{"kit_id": kitID}})
+	})
 	if err != nil {
 		return KitDetail{}, db.explainKitInsert(ctx, kitID, assetID, err)
 	}
@@ -176,12 +208,24 @@ func (db *DB) RemoveAssetFromKit(ctx context.Context, actor Actor, kitID, assetI
 		return KitDetail{}, err
 	}
 
-	tag, err := db.Pool.Exec(ctx,
-		`delete from kit_items where kit_id = $1 and asset_id = $2`, kitID, assetID)
+	var removed int64
+	err := db.withLoggedTx(ctx, actorLogID(actor), "remove from kit", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`delete from kit_items where kit_id = $1 and asset_id = $2`, kitID, assetID)
+		if err != nil {
+			return mapPgError("remove from kit", err)
+		}
+		removed = tag.RowsAffected()
+		if removed == 0 {
+			return nil
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "kit_item_removed", ActorID: actorLogID(actor), AssetID: assetID,
+			Summary: "Took an item out of kit " + kitName(ctx, tx, kitID), Details: map[string]any{"kit_id": kitID}})
+	})
 	if err != nil {
-		return KitDetail{}, mapPgError("remove from kit", err)
+		return KitDetail{}, err
 	}
-	if tag.RowsAffected() == 0 {
+	if removed == 0 {
 		// Two reasons, and they want different answers: the kit is gone, or
 		// the unit was never in it.
 		var exists bool
@@ -195,6 +239,14 @@ func (db *DB) RemoveAssetFromKit(ctx context.Context, actor Actor, kitID, assetI
 		return KitDetail{}, fmt.Errorf("%w: that item is not in this kit", ErrNotFound)
 	}
 	return db.GetKit(ctx, actor, kitID)
+}
+
+func kitName(ctx context.Context, q querier, id string) string {
+	var name string
+	if err := q.QueryRow(ctx, `select name from kits where id = $1`, id).Scan(&name); err != nil {
+		return "(unknown)"
+	}
+	return name
 }
 
 // KitItemRef names one unit of a kit in a result, without the whole row.
@@ -246,6 +298,8 @@ func (db *DB) CheckInKit(ctx context.Context, actor Actor, kitID string) (KitChe
 		AlreadyIn: []KitItemRef{},
 		Failed:    []KitReturnProblem{},
 	}
+	// Each unit's own check-in row says which kit it came back in.
+	ctx = context.WithValue(ctx, ctxKit, kit.Name)
 	for _, item := range kit.Items {
 		ref := KitItemRef{AssetID: item.ID, Name: item.Name, SerialNumber: item.SerialNumber}
 		if item.Custody == nil {
@@ -263,6 +317,15 @@ func (db *DB) CheckInKit(ctx context.Context, actor Actor, kitID string) (KitChe
 		}
 		out.Returned = append(out.Returned, done)
 	}
+	// One more row for the press itself, which is what an admin reading the
+	// timeline remembers ("they returned Kit #1"), with the per-unit outcome.
+	db.logBestEffort(ctx, LogEntry{
+		Category: LogEquipment, Action: "kit_checkin", ActorID: actor.ID,
+		Summary: fmt.Sprintf("Returned kit %s: %d checked in, %d already in, %d failed",
+			kit.Name, len(out.Returned), len(out.AlreadyIn), len(out.Failed)),
+		Details: map[string]any{"kit_id": kitID, "kit": kit.Name, "returned": len(out.Returned),
+			"already_in": len(out.AlreadyIn), "failed": len(out.Failed)},
+	})
 	return out, nil
 }
 

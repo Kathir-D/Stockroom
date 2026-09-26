@@ -141,6 +141,9 @@ func (db *DB) ImportRoster(ctx context.Context, actor Actor, r io.Reader, photoD
 		}
 		res.Rows = append(res.Rows, row)
 	}
+	db.logBestEffort(ctx, LogEntry{Category: LogAdmin, Action: "roster_imported", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Imported the roster: %d added, %d updated, %d failed", res.Created, res.Updated, res.Failed),
+		Details: map[string]any{"created": res.Created, "updated": res.Updated, "failed": res.Failed}})
 	return res, nil
 }
 

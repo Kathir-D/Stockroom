@@ -11,6 +11,8 @@
 #   ./scripts/dev.sh test         the full suite (what .githooks/pre-commit and CI run)
 #   ./scripts/dev.sh stop         stop Supabase and anything left listening
 #   ./scripts/dev.sh status       what is running right now, and what is not
+#   ./scripts/dev.sh camera ...   the closet camera's detector (deploy/camera/camera.sh):
+#                                 camera up --source file:clip.mp4 | webcam, camera down, camera status
 #
 # `up` is idempotent: run it again after a crash and it reuses whatever is
 # already healthy instead of starting a second copy that cannot bind its port.
@@ -626,6 +628,10 @@ main() {
     test|tests)      cmd_test "$@" ;;
     stop|down)       cmd_stop "$@" ;;
     status)          cmd_status "$@" ;;
+    # Optional and separate from `up`: the camera is a subsystem most working
+    # copies never run, and Frigate is a 6 GB image nobody should pull by
+    # accident.
+    camera)          exec "$REPO_ROOT/deploy/camera/camera.sh" "$@" ;;
     -h|--help|help)  usage ;;
     # `dev.sh --no-open` should mean `dev.sh up --no-open`, not an error: `up`
     # is the default subcommand, so its flags have to work without it.

@@ -18,6 +18,7 @@
   import AlertTriangleIcon from "@lucide/svelte/icons/triangle-alert"
   import DatabaseBackupIcon from "@lucide/svelte/icons/database-backup"
   import SettingsIcon from "@lucide/svelte/icons/settings"
+  import ActivityIcon from "@lucide/svelte/icons/activity"
   import ImagesIcon from "@lucide/svelte/icons/images"
   import { Separator } from "@stockroom/ui/components/ui/separator"
   import { cn } from "@stockroom/ui/utils"
@@ -57,6 +58,8 @@
     // also the only item here that is decoration rather than inventory, so it
     // belongs at the bottom of the list on those grounds too.
     { tab: "photo-wall", label: "Photo wall", icon: ImagesIcon },
+    // The timeline an admin opens when something is missing (ROADMAP §2.5).
+    { tab: "activity", label: "Activity", icon: ActivityIcon },
   ]
 
   const browsing = $derived(route.name === "browse")

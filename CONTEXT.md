@@ -64,3 +64,13 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 **Location.** Same. Location is who has it.
 **Role.** The enum column is unused. Say admin or student.
 **Borrow / loan.** Say checkout.
+
+## The closet
+
+**Activity log.** `activity_log`, the one append-only timeline of everything that happens at the closet: camera visits, sign-ins, every scan, checkouts, returns and admin changes. Each row has a **category** (closet, account, scan, equipment, admin), an action, a readable summary, and the actor's name and item's serial as they were when it was written. Admin-only to read. Nothing in the app can change or delete a row, and a restore keeps rows written after the backup (ADR 0003).
+
+**Visit.** One person the closet camera tracked, from **walked in** to **walked out**, a row in `closet_visits`. Its recording (a clip and a snapshot) lives in the recordings folder on this machine and is deleted after the retention period unless an admin marks it **keep**.
+
+**Detector.** The program that watches the camera and decides a person is in view. Frigate today, behind the `Detector` interface. Stockroom never detects anyone itself.
+
+**Via scanner.** A log row that a barcode scan caused, whatever the scan then did: signed someone in, returned an item, opened one, or was refused.

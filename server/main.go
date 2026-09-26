@@ -120,6 +120,16 @@ func main() {
 	// when the machine is available" is met on a closet PC that gets unplugged.
 	db.StartBackupScheduler(ctx)
 
+	// Idle sessions are swept on a timer so each idle timeout lands in the
+	// activity log when it happens, not at the next sign-in.
+	db.StartSessionSweeper(ctx)
+
+	// The closet camera's watcher (camera_watch.go). It runs whether or not
+	// the camera is on -- one settings read every few seconds while off -- so
+	// turning it on in Admin -> Settings needs no restart, and nothing it
+	// meets (a detector that is down, an unplugged camera) is fatal.
+	db.StartCamera(ctx)
+
 	// The sign-in photo wall (docs/design/signin-photo-wall.html). It starts
 	// only once an admin has signed in to Google for it in Admin → Photo wall,
 	// which creates the rclone remote -- that sign-in is the switch, and it can

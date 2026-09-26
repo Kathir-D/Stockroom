@@ -224,6 +224,11 @@
       error = fast
         ? "That looks like an item barcode. Scan your student ID to sign in first."
         : formatHint(rule)
+      // Every scan is in the activity log, this one included: an item
+      // scanned with nobody signed in is exactly what someone tracing a
+      // missing item wants to see (ROADMAP §2.4). A typed mistake is not a
+      // scan and is not logged.
+      if (fast) void api.logUnattendedScan(trimmed, "item_at_signin")
       studentNumber = ""
       return
     }

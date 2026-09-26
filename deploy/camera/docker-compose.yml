@@ -1,0 +1,42 @@
+# The closet camera's person detector: one Frigate container (ROADMAP §2.1).
+#
+# Optional. Without it Stockroom runs exactly as before -- the camera is off
+# until an admin turns it on in Admin -> Settings -> Closet camera, and even
+# then a detector that is down costs the timeline its closet rows and nothing
+# else (sign-in and checkout never wait on it).
+#
+# `deploy/camera/camera.sh up` renders config/config.yml and starts this; it
+# is not meant to be run by hand. Frigate's API is bound to 127.0.0.1:5055
+# only. That port has NO authentication (Frigate's authenticated UI is 8971,
+# which is not published at all), so the loopback binding is the whole of its
+# access control, the same rule as the database's 127.0.0.1:54322.
+name: stockroom-camera
+
+services:
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:${FRIGATE_TAG:-stable}
+    restart: unless-stopped
+    shm_size: 128mb
+    # A USB webcam on Linux is mapped straight in. On macOS Docker Desktop
+    # cannot pass a USB device into a container at all, so camera.sh runs
+    # go2rtc on the host and Frigate reads it over RTSP instead; the device
+    # list is then empty (compose.linux-webcam.yml adds it).
+    volumes:
+      - ${CAMERA_DIR:?set CAMERA_DIR}/config:/config
+      - ${CAMERA_DIR}/media:/media/frigate
+      - ${CAMERA_SAMPLE_DIR:-./empty}:/media/sample:ro
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 500000000
+    ports:
+      # 5055 on the host, not Frigate's own 5000: macOS's AirPlay Receiver
+      # listens on *:5000, and while this container was stopped it answered
+      # Stockroom's polls with 403 -- a detector that looked alive and broken
+      # rather than simply down.
+      - "127.0.0.1:5055:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: ${TZ:-UTC}
+    stop_grace_period: 30s

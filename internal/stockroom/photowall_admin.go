@@ -451,11 +451,9 @@ func (db *DB) savePhotoWallFolder(ctx context.Context, actor Actor, folderID, la
 		where id = true`, folderID, label, actorID); err != nil {
 		return mapPgError("save the photo wall folder", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		insert into activity_log (asset_id, actor_id, action, details)
-		values (null, $1, 'signin_photo_wall_folder', jsonb_build_object('label', $2::text))`,
-		actorID, label); err != nil {
-		return mapPgError("log the photo wall folder change", err)
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "signin_photo_wall_folder", ActorID: deref(actorID),
+		Summary: "Changed the sign-in photo wall folder to " + label, Details: map[string]any{"label": label}}); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("save the photo wall folder: %w", err)
