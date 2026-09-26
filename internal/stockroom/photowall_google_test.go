@@ -395,6 +395,16 @@ func TestGoogleFolderPickerUsesHandles(t *testing.T) {
 	if _, err := db.CreateGoogleFolder(ctx, admin, GoogleSharedWithMe, "x"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a new folder in Shared with me = %v, want ErrInvalid", err)
 	}
+
+	// Making a folder that is already there chooses it, but only when the
+	// name is unambiguous: Drive allows two folders with one name.
+	if f, err := db.CreateGoogleFolder(ctx, admin, GoogleMyDrive, "Photos"); err != nil || f.Name != "Photos" {
+		t.Errorf("making an existing folder = %+v, %v, want that folder", f, err)
+	}
+	t.Setenv("FAKE_RCLONE_LSJSON", `[{"Path":"Photos","Name":"Photos","IsDir":true,"ID":"1FAKEAxyz"},{"Path":"Photos","Name":"Photos","IsDir":true,"ID":"1FAKEBxyz"}]`)
+	if _, err := db.CreateGoogleFolder(ctx, admin, GoogleMyDrive, "Photos"); !errors.Is(err, ErrConflict) {
+		t.Errorf("making a folder whose name two folders share = %v, want ErrConflict", err)
+	}
 }
 
 // The local picker lists folders only, skips hidden ones, and makes one.

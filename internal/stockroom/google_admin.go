@@ -329,12 +329,22 @@ func (db *DB) CreateGoogleFolder(ctx context.Context, actor Actor, in, name stri
 	if err != nil {
 		return GoogleFolder{}, err
 	}
+	// Drive allows two folders with one name, and mkdir then picks one of
+	// them without saying which. Choosing for the admin could point a backup
+	// at the wrong folder, so more than one match is refused.
+	var match []GoogleFolder
 	for _, f := range folders {
 		if f.Name == name {
-			return f, nil
+			match = append(match, f)
 		}
 	}
-	return GoogleFolder{}, fmt.Errorf("made the folder %q, but Google Drive does not list it yet. Open the picker again in a moment", name)
+	switch len(match) {
+	case 0:
+		return GoogleFolder{}, fmt.Errorf("made the folder %q, but Google Drive does not list it yet. Open the picker again in a moment", name)
+	case 1:
+		return match[0], nil
+	}
+	return GoogleFolder{}, fmt.Errorf("%w: there are %d folders called %q here already. Pick one from the list, or use a different name", ErrConflict, len(match), name)
 }
 
 // googleFolderArgs is `rclone <verb> <remote>:[name]` pointed at the folder
