@@ -13,7 +13,7 @@ import (
 // It never carries a password: an account sets its first one at its first
 // scan login (Auth.SetInitialPassword) and an admin replaces it with
 // SetUserPassword. Nor a photo: the roster import is the only writer of
-// profiles.photo_path (CLAUDE.md §13).
+// profiles.photo_path (docs/decisions.md).
 type UserInput struct {
 	StudentNumber string  `json:"student_number"`
 	FirstName     string  `json:"first_name"`

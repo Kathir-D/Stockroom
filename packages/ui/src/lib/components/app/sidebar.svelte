@@ -93,7 +93,7 @@
 
   <!-- Kits sit under the tree rather than inside it: a kit is a bundle of units
        that may come from four different Types, so it has no place in a tree
-       whose whole meaning is where a unit files (CLAUDE.md §6.2). Visible to
+       whose whole meaning is where a unit files (CLAUDE.md §6). Visible to
        everyone, because taking a kit out is a student action. -->
   <button
     type="button"

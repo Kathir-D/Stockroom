@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The first-run wizard (CLAUDE.md §13, Phase B), steps 1 and 3 to 7. Step 2,
+   * The first-run wizard (docs/decisions.md, Phase B), steps 1 and 3 to 7. Step 2,
    * creating the admin, happens on the sign-in screen, because it is the one
    * step with no session (components/app/first-admin.svelte).
    *
@@ -204,7 +204,7 @@
   /* -------------------------------------------------- step 7: backups ---- */
 
   let backupDir = $state("")
-  /** What a full path looks like on this machine; relative ones are refused (CLAUDE.md §13, 2026-09-21). */
+  /** What a full path looks like on this machine; relative ones are refused (docs/decisions.md, 2026-09-21). */
   const backupDirExample =
     typeof navigator !== "undefined" && /^win/i.test(navigator.platform)
       ? "C:\\Stockroom backups"

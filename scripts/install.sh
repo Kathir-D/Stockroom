@@ -151,7 +151,7 @@ say ""
 say "Building..."
 
 # One definition of an installed JS tree, called from here as well as from
-# `dev.sh up` and `dev.sh test` (CLAUDE.md §13, 2026-09-14). Duplicating the
+# `dev.sh up` and `dev.sh test` (docs/decisions.md, 2026-09-14). Duplicating the
 # npm install here is how the nested-node_modules bug gets back in.
 "$REPO/scripts/dev.sh" deps >/dev/null || die "dependency install failed; run ./scripts/dev.sh deps to see why"
 ok "dependencies are up to date"
@@ -344,7 +344,7 @@ UPLOADS_DIR=${STOCKROOM_HOME}/uploads
 # SEED. Absolute paths on purpose: a relative backup folder resolves against
 # whatever directory the service happened to start in, which produces a
 # complete archive, a manifest that verifies, every screen reporting health,
-# and files nowhere anybody will look (CLAUDE.md §13, 2026-09-21).
+# and files nowhere anybody will look (docs/decisions.md, 2026-09-21).
 BACKUP_DIR=${STOCKROOM_HOME}/backups
 PHOTO_BACKUP_DIR=${STOCKROOM_HOME}/photo-backups
 RCLONE_REMOTE=

@@ -3,7 +3,7 @@ name: release
 # Builds a binary per platform on a version tag and attaches them to a GitHub
 # release. Each one carries the web UI and every migration compiled in, so what
 # a school downloads is one file and what they run is one process
-# (CLAUDE.md §13, Phase A).
+# (docs/decisions.md, Phase A).
 #
 # Without this a school needs Go and Node installed to get a binary at all,
 # which is the whole difference between "download and run" and "be a
@@ -57,7 +57,7 @@ jobs:
           cache: false
 
       # One install at the repository root. A per-app `npm ci --prefix` is the
-      # nested-node_modules bug in the place nobody watches (CLAUDE.md §13,
+      # nested-node_modules bug in the place nobody watches (docs/decisions.md,
       # 2026-09-14).
       - run: npm ci
 

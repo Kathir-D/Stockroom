@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// What a student number is allowed to look like (CLAUDE.md §13, Phase B).
+// What a student number is allowed to look like (docs/decisions.md, Phase B).
 //
 // This was a constant -- digits only -- and for a school whose IDs are
 // `AB12345` that made Stockroom unusable rather than merely inconvenient:
@@ -126,7 +126,7 @@ func StudentNumberRule() (StudentNumberFormat, string) {
 // It is served to the unauthenticated sign-in screen because that screen has
 // to filter keystrokes before anybody has a session, and because the filter and
 // the validator disagreeing is the exact bug this whole file exists to fix:
-// §13 (2026-09-15) records that the scan-vs-typed comparison runs the keystroke
+// docs/decisions.md (2026-09-15) records that the scan-vs-typed comparison runs the keystroke
 // buffer through the *field's* filter, so a filter stricter than the validator
 // makes every scan look like a mismatch and demands a password from somebody
 // who has not got one.
@@ -155,7 +155,7 @@ func StudentNumberFilterPattern() string {
 // NormalizeStudentNumber trims and validates against the active format.
 //
 // The length bound applies whatever the format: it is a mis-scan guard, not a
-// format (CLAUDE.md §13, 2026-09-08), and a scanner that reads a whole line of
+// format (docs/decisions.md, 2026-09-08), and a scanner that reads a whole line of
 // junk should be refused before it becomes an account.
 func NormalizeStudentNumber(s string) (string, error) {
 	s = strings.TrimSpace(s)

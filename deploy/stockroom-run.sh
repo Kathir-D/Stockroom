@@ -3,7 +3,7 @@
 #
 # It exists so there is ONE definition of "start Stockroom" rather than a
 # macOS copy and a Linux copy that drift -- the same reasoning that collapsed
-# four dev scripts into scripts/dev.sh (CLAUDE.md §13, 2026-09-15).
+# four dev scripts into scripts/dev.sh (docs/decisions.md, 2026-09-15).
 #
 # Its whole job is three steps:
 #

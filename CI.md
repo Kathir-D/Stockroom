@@ -22,6 +22,8 @@ Differs from the Linux job in three ways:
 
 It also parses `scripts/dev.ps1` with PowerShell's parser.
 
+Native Windows is not a supported platform: Windows runs Stockroom only through WSL 2 (`ROADMAP.md` section 11). Whether this job stays, as a cheap portability check, or goes is decided in that section.
+
 ## Docs-only changes
 
 Every step after the change check is conditional on `dorny/paths-filter` reporting a code change. These paths count as code:
@@ -53,6 +55,8 @@ To require the checks, go to Settings → Rules → Rulesets → New branch rule
 - Require branches to be up to date before merging
 
 A check appears in the search box only after the workflow has run once.
+
+The packaging work in `ROADMAP.md` track B adds jobs, such as a Postgres version matrix and a `.deb` build and install test. Add each to the required checks once it has run on `main`.
 
 With `gh`, as classic branch protection:
 

@@ -226,7 +226,7 @@ func TestBackupLockMakesASecondRunASkip(t *testing.T) {
 }
 
 // An unset backup folder is a setting nobody filled in, not a bug and not a
-// bad request: 503 with the message intact (CLAUDE.md §8.1).
+// bad request: 503 with the message intact (docs/api.md).
 func TestBackupWithNoFolderIsNotConfigured(t *testing.T) {
 	db := requireTestDB(t)
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))

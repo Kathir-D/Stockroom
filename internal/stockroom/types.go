@@ -4,7 +4,7 @@ import "time"
 
 // Row types for every table and view in the base schema
 // (supabase/migrations/20260826173006_init_schema.sql). Columns added by the
-// v1 migration (CLAUDE.md §6.2) are marked "v1" and will be nil/zero until
+// v1 migration (CLAUDE.md §6) are marked "v1" and will be nil/zero until
 // that migration is applied. Tables that v1 does not use (locations, tags,
 // bookings, saved_filters) still get structs so backup/export can read them.
 

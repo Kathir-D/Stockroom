@@ -222,7 +222,7 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 // whoever is holding it on paper while they still have it in a bag.
 //
 // What counts as "out" is the open custody row, not the status column, the
-// same rule the core loop follows (CLAUDE.md §13). An asset whose column drifted
+// same rule the core loop follows (docs/decisions.md). An asset whose column drifted
 // to checked_out with no open row can therefore be set back to available here,
 // which is how an admin repairs that drift.
 func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status AssetStatus) (AssetDetail, error) {
@@ -350,7 +350,7 @@ func (db *DB) SetAssetPhoto(ctx context.Context, actor Actor, id, filename strin
 // fine: an asset with no category is listed, just last.
 //
 // The node's depth is not checked. Every seeded unit hangs off a Model
-// (CLAUDE.md §6.2) and the admin panel offers those, but a Type with no
+// (CLAUDE.md §6) and the admin panel offers those, but a Type with no
 // Categories under it yet would otherwise have nowhere to put a unit at all,
 // and the browse list already handles a short path.
 func (db *DB) requireCategory(ctx context.Context, id *string) error {

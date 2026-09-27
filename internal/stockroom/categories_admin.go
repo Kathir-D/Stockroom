@@ -24,7 +24,7 @@ import (
 
 // MaxCategoryDepth is how deep the tree may go: Type (1) -> Category (2) ->
 // Model (3). The browse filter is built around those three levels
-// (CLAUDE.md §6.2), so a fourth would have nowhere to render.
+// (CLAUDE.md §6), so a fourth would have nowhere to render.
 const MaxCategoryDepth = 3
 
 // categoryWriteLock is the advisory lock every category write takes before it
@@ -80,7 +80,7 @@ func (in *CategoryInput) normalize() error {
 
 // CreateCategory adds a node under parent, or a new Type when parent is null.
 // The name is unique across the whole table, not just among siblings
-// (CLAUDE.md §6.2), so a second "Other" is ErrConflict wherever it sits.
+// (CLAUDE.md §6), so a second "Other" is ErrConflict wherever it sits.
 func (db *DB) CreateCategory(ctx context.Context, actor Actor, in CategoryInput) (Category, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return Category{}, err

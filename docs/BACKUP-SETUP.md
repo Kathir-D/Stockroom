@@ -23,7 +23,7 @@ copy off the machine, in case the machine itself is lost or damaged.
    Leave it empty to skip photos entirely.
 
 > Typing a path still works, but it must be a full one, starting with `/` on
-> macOS and Linux or a drive letter such as `C:\` on Windows. Stockroom refuses
+> Linux and macOS. Under WSL, a Windows folder is under `/mnt/c/`. Stockroom refuses
 > anything else, because a path copied out of Finder without its leading `/`
 > once put a term of backups somewhere nobody looked.
 
@@ -46,8 +46,8 @@ where. If it does not, the message on screen says what is wrong.
 | Keep backups for (days) | Older local folders are deleted | `90` |
 | Warn after (hours) | How stale a backup gets before everyone signing in is told | `48` |
 
-The backup runs **inside Stockroom itself**, so nothing has to be scheduled in
-Windows or macOS. The machine only has to be switched on. If it was off at the
+The backup runs **inside Stockroom itself**, so nothing has to be scheduled on
+the machine. The machine only has to be switched on. If it was off at the
 scheduled hour, the next start runs one straight away.
 
 ---
@@ -56,11 +56,9 @@ scheduled hour, the next start runs one straight away.
 
 ### 3a. Install rclone *(once, per machine)*
 
-- **Windows**: open PowerShell and run `winget install Rclone.Rclone`.
-  If that does not work, download the Windows zip from
-  <https://rclone.org/downloads/>, extract it to `C:\rclone`, then
-  Start → "Edit the system environment variables" → **Environment Variables** →
-  select **Path** → **Edit** → **New** → `C:\rclone`.
+- **Linux, and Ubuntu under WSL**: `sudo -v && curl https://rclone.org/install.sh | sudo bash`.
+  Use this rather than `apt install rclone`: Debian 12 and Ubuntu 24.04 ship
+  rclone 1.60, and Stockroom is tested against 1.75.
 - **macOS**: `brew install rclone`
 - Check it worked: `rclone version` should print a version number.
 

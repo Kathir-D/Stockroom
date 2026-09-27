@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// The bulk ways in (CLAUDE.md §13, Phase B): one happy path and one gate per
-// module, the house rule (CLAUDE.md §13, 2026-09-13).
+// The bulk ways in (docs/decisions.md, Phase B): one happy path and one gate per
+// module, the house rule (docs/decisions.md, 2026-09-13).
 
 func TestImportCategoriesIsIdempotentAndOrdered(t *testing.T) {
 	db := requireTestDB(t)

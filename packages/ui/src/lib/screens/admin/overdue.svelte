@@ -13,7 +13,7 @@
    * record a return that never happened.
    *
    * This roster is admin-only, as distinct from the current holder of a
-   * *named* item, which every signed-in user can see (CLAUDE.md §13,
+   * *named* item, which every signed-in user can see (docs/decisions.md,
    * 2026-09-12). Overdue reads the same `overdue_custody` view as sign-in and
    * `CheckOutAssets`, so "overdue" means one thing everywhere.
    */

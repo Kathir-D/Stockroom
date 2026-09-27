@@ -17,7 +17,7 @@
  *
  * This is a guess until the hardware arrives in Week 7, which is exactly why it
  * is one named constant: tuning it against a real scanner is then a one-line
- * change rather than an archaeology exercise (CLAUDE.md §13, "still open").
+ * change rather than an archaeology exercise (CLAUDE.md §12, open questions).
  * `Ctrl+Shift+D` prints the last burst's inter-key timings to the console; use
  * it on the day the scanner shows up.
  */
@@ -179,7 +179,7 @@ export function attachScanner(options: ScannerOptions): () => void {
     // means a person is correcting what they typed — and the buffer has to
     // follow, or it keeps characters that are no longer on screen. That was a
     // real bug: type a number, delete it, press Enter, and the deleted number
-    // signed you in, because the buffer only ever grew (CLAUDE.md §13,
+    // signed you in, because the buffer only ever grew (docs/decisions.md,
     // 2026-09-15).
     //
     // Everything except Backspace discards the burst, because none of them says

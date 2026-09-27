@@ -39,7 +39,7 @@
 
 | Dependency | Why | Install |
 |---|---|---|
-| **Docker** | Runs PostgreSQL | https://www.docker.com/products/docker-desktop/ |
+| **Docker** | Runs PostgreSQL today, and the Supabase CLI in development. The planned packages use the system's PostgreSQL instead | https://www.docker.com/products/docker-desktop/ |
 | **Go** 1.25+ | Builds the API server and the desktop app's Go host | https://go.dev/dl/ |
 | **Node.js** 22+ (with npm) | Builds the frontend | https://nodejs.org/en/download |
 | **Supabase CLI** | Development only. Runs the dev database, migrations and database tests | https://supabase.com/docs/guides/cli/getting-started |
@@ -48,7 +48,9 @@
 
 ## Installation
 
-Supported on macOS and Linux. Windows does not have an installer yet.
+Linux is the main target, then macOS. Windows will be supported only through WSL 2, running the Linux package inside Ubuntu, and there is no native Windows installer.
+
+Today's installer builds from a checkout, so it needs Go, Node and Docker. It is being replaced by one command per platform, a `.deb` on Linux and a Homebrew formula on macOS ([ROADMAP.md](ROADMAP.md) track B).
 
 ```bash
 git clone https://github.com/Kathir-D/Stockroom.git
@@ -117,7 +119,7 @@ cd Stockroom
 ./scripts/dev.sh
 ```
 
-This creates `.env` from `.env.example`, starts the Supabase stack (applying migrations and seed data), installs dependencies, starts the API server and then both frontends. Press Ctrl+C to stop; data is kept between runs. On Windows use `scripts\dev.ps1`.
+This creates `.env` from `.env.example`, starts the Supabase stack (applying migrations and seed data), installs dependencies, starts the API server and then both frontends. Press Ctrl+C to stop; data is kept between runs. On Windows, work inside Ubuntu under WSL 2. `scripts\dev.ps1` exists for native Windows but has never run on it.
 
 | Command | Description |
 |---|---|
@@ -182,7 +184,7 @@ examples/             sample category trees, roster and asset list
 docs/                 guides, design docs and ADRs
 ```
 
-More detail: [TESTING.md](TESTING.md), [CI.md](CI.md), [CONTEXT.md](CONTEXT.md) (glossary), [docs/adr/](docs/adr/), [ROADMAP.md](ROADMAP.md) (open work) and [CLAUDE.md](CLAUDE.md) (full technical reference).
+More detail: [TESTING.md](TESTING.md), [CI.md](CI.md), [CONTEXT.md](CONTEXT.md) (glossary), [docs/adr/](docs/adr/), [ROADMAP.md](ROADMAP.md) (open work), [docs/decisions.md](docs/decisions.md) (why), [docs/api.md](docs/api.md) (endpoints) and [CLAUDE.md](CLAUDE.md) (technical reference).
 
 ## Troubleshooting
 

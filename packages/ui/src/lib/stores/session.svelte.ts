@@ -180,7 +180,7 @@ class SessionStore {
    * Load the user's own overdue rows.
    *
    * Not from `/custody/overdue`, which is the admin roster of who has what and
-   * refuses a non-admin (CLAUDE.md §13, 2026-09-12). A user's own history is the
+   * refuses a non-admin (docs/decisions.md, 2026-09-12). A user's own history is the
    * read they are allowed, and the overdue flag on it is the same definition —
    * both come from the `overdue_custody` view.
    */

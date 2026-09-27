@@ -12,7 +12,7 @@ import (
 
 // The category tree is the browse screen's left-hand filter: Type ->
 // Category -> Model, three levels deep, held in one table via parent_id
-// (CLAUDE.md §6.2). It is a few dozen rows, so the whole table is read in one
+// (CLAUDE.md §6). It is a few dozen rows, so the whole table is read in one
 // query and shaped in Go rather than with recursive SQL.
 //
 // categoryTree is the one shape that read produces. Every question the

@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Importing a category tree in one go (CLAUDE.md §13, Phase B).
+// Importing a category tree in one go (docs/decisions.md, Phase B).
 //
 // This exists because building an eight-Type tree through the *New category*
 // dialog is roughly sixty dialogs, it is the **first** thing a new school
@@ -63,7 +63,7 @@ const (
 // ImportCategories creates every node named by the file that does not already
 // exist, in document order.
 //
-// Document order is the point of the `sort_order` column (CLAUDE.md §13,
+// Document order is the point of the `sort_order` column (docs/decisions.md,
 // 2026-09-13): a browse sidebar sorted alphabetically puts Audio above Cameras
 // and reads as wrong to everybody who knows the cupboard. New siblings are
 // appended in the order the file lists them.
@@ -134,7 +134,7 @@ func (db *DB) ImportCategories(ctx context.Context, actor Actor, r io.Reader) (C
 
 	if res.Failed > 0 {
 		// Named, not counted. The overwhelmingly likely cause is the
-		// whole-table uniqueness of categories.name (CLAUDE.md §6.2) -- two
+		// whole-table uniqueness of categories.name (CLAUDE.md §6) -- two
 		// departments both wanting an "Accessories" node -- and a message that
 		// does not say which line is a message nobody can act on.
 		return res, fmt.Errorf("%w: %d of %d categories could not be created, so nothing was changed. First problem: %s",
@@ -369,7 +369,7 @@ func parseCategoryText(body string) ([][]string, error) {
 
 		// Every node becomes a path, not only leaves: a Type with no Models
 		// under it yet is still a Type the admin wants, and `Primes` is
-		// seeded exactly that way (CLAUDE.md §6.2).
+		// seeded exactly that way (CLAUDE.md §6).
 		path := make([]string, len(stack))
 		copy(path, stack)
 		paths = append(paths, path)

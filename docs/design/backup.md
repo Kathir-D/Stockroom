@@ -360,7 +360,7 @@ one instant. The staging-and-rename logic is untouched.
 - **`inventory.csv`** — reuse `loadCategoryTree(ctx, q)` (`categories.go:74`, which
   takes a `querier`, so it runs on the transaction) and `tree.pathOf`
   (`categories.go:237`) for the category path rather than a recursive CTE, keeping
-  `CLAUDE.md` §13's "the browse list is sorted in Go, not in SQL". Reuse
+  `docs/decisions.md`'s "the browse list is sorted in Go, not in SQL". Reuse
   `openCustodySQL` (`custody.go:33`) so "out" keeps one definition.
   Columns: `name, serial_number, asset_tag, type, category, model, status,
   condition, held_by, student_number, checked_out_at, due_at, overdue, photo_path`.

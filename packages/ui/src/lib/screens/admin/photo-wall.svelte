@@ -272,7 +272,7 @@
         {#if status.last_error}
           <!-- Hue on the icon, never as a fill: the five status colours belong
                to asset state, and an amber panel here reads as an item that is
-               due soon (CLAUDE.md §13). -->
+               due soon (docs/decisions.md). -->
           <p class="flex items-start gap-2 text-xs text-fg-muted" role="status">
             <AlertTriangleIcon
               class="mt-0.5 size-4 shrink-0 text-status-due-soon"

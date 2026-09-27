@@ -306,7 +306,7 @@ func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallS
 	//
 	// Not when rclone is missing, though: the screen already has a line about
 	// that, and this one would be the same fact in a second wording -- the
-	// thing the backup banner was corrected for (CLAUDE.md §13). A missing
+	// thing the backup banner was corrected for (docs/decisions.md). A missing
 	// binary is *why* there is no source, so naming both reads as two
 	// problems.
 	//

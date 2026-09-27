@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Importing an inventory from a CSV (CLAUDE.md §13, Phase B).
+// Importing an inventory from a CSV (docs/decisions.md, Phase B).
 //
 // A department with three hundred items cannot type them into a dialog, and
 // `roster.go` already established the shape this should take: a header row
@@ -311,7 +311,7 @@ func resolveImportCategory(tree categoryTree, byName map[string][]string, catego
 		id := ids[0]
 		return &id, nil
 	default:
-		// categories.name is unique across the table (CLAUDE.md §6.2), so this
+		// categories.name is unique across the table (CLAUDE.md §6), so this
 		// should be unreachable. Kept because "should be unreachable" and
 		// "silently files under the wrong one" are one migration apart.
 		return nil, fmt.Errorf("%q matches more than one category", want)

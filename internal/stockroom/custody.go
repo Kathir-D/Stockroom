@@ -28,7 +28,7 @@ const MaxCheckoutDays = 7
 // custody row exists for it. Every check that decides between borrowed and
 // on the shelf uses this predicate rather than the status column: the scan
 // branch, the cart lock, the delete and status refusals. Drift between the
-// two is then visible instead of duplicated (CLAUDE.md §13). The
+// two is then visible instead of duplicated (docs/decisions.md). The
 // argument is the asset id expression, so it can name a joined column or a
 // placeholder.
 func openCustodySQL(assetID string) string {

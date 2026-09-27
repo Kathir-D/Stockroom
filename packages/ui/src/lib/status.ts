@@ -171,7 +171,7 @@ export function abbreviateName(name: string): string {
  *
  * `custody` is the open custody event, which is what actually says whether an
  * item is out: the server reads the row rather than trusting `assets.status`, so
- * a drifted status still reports the real holder (CLAUDE.md §13). This follows
+ * a drifted status still reports the real holder (docs/decisions.md). This follows
  * the same order for the same reason.
  *
  * `viewerId` splits "out" in two (see the file comment). It is optional and
@@ -275,7 +275,7 @@ export function groupStatus(availableCount: number, total: number): ResolvedStat
  * `You · Sep 12` for the viewer's own item, `Jordan Smith · Sep 15` for anyone
  * else's. The current holder's *name* is open to every signed-in user; their
  * student number is not, and is null in the payload for a non-admin (§8.3,
- * CLAUDE.md §13, 2026-09-13).
+ * docs/decisions.md, 2026-09-13).
  */
 export function custodianLine(custody: AssetCustody, viewerId: string | null): string {
   const who = custody.custodian_id === viewerId ? "You" : custody.custodian_name

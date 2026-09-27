@@ -47,7 +47,7 @@ export default defineConfig({
     // would put `/assets/index-a1b2c3.js` squarely inside the equipment
     // catalogue's route, and the router would answer a JavaScript request with
     // "asset not found". Renaming the directory is the fix; renaming the API
-    // route would change a documented endpoint (CLAUDE.md §8.1) to suit a
+    // route would change a documented endpoint (docs/api.md) to suit a
     // bundler.
     assetsDir: 'static',
   },

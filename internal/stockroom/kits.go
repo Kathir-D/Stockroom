@@ -319,7 +319,7 @@ func (db *DB) CheckInKit(ctx context.Context, actor Actor, kitID string) (KitChe
 		// No damage note: a kit return is one press over several units, so
 		// there is no unit for a note to be about. A note goes on the unit
 		// through AnnotateCustodyEvent afterwards, which is where the scan
-		// flow already puts it (CLAUDE.md §13, 2026-09-14).
+		// flow already puts it (docs/decisions.md, 2026-09-14).
 		done, err := db.CheckInAssetVia(ctx, actor, item.ID, nil, ReturnedByKit)
 		if err != nil {
 			out.Failed = append(out.Failed, KitReturnProblem{KitItemRef: ref, Reason: err.Error()})
@@ -403,7 +403,7 @@ func (db *DB) kitsWhere(ctx context.Context, actor Actor, where, orderBy string,
 
 // summarize counts the three states and decides whether the kit can go in a
 // cart. A unit with an open custody row counts as out whatever its status
-// column says, which is the rule the rest of the app follows (CLAUDE.md §13).
+// column says, which is the rule the rest of the app follows (docs/decisions.md).
 func (k *KitDetail) summarize() {
 	for _, item := range k.Items {
 		switch {
