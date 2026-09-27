@@ -47,8 +47,8 @@ func TestReturnsNeedingReview(t *testing.T) {
 	if _, err := db.ScanItemVia(ctx, actorFor(student), typedSerial, false); err != nil {
 		t.Fatal(err)
 	}
-	if r, via := reasonsOf(t, db, typed); !slices.Equal(r, []string{ReviewNotScanned}) || *via != ReturnedByTyped {
-		t.Errorf("typed return: reasons %v via %v, want not_scanned via typed", r, *via)
+	if r, via := reasonsOf(t, db, typed); !slices.Equal(r, []string{ReviewNotScanned}) || via == nil || *via != ReturnedByTyped {
+		t.Errorf("typed return: reasons %v via %v, want not_scanned via typed", r, via)
 	}
 
 	damaged := insertTestAsset(t, db, admin)

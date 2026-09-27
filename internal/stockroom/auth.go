@@ -191,10 +191,13 @@ func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password strin
 		return LoginResult{}, err
 	}
 	if err := CheckPassword(p.PasswordHash, password); err != nil {
+		// Counted whatever the reason, so probing numbers for "no password
+		// yet" is as slow as guessing passwords.
+		locked := guard.fail(sn)
 		reason := "wrong password"
 		if errors.Is(err, ErrPasswordNotSet) {
 			reason = "the account has no password yet"
-		} else if guard.fail(sn) {
+		} else if locked {
 			reason = "wrong password; the number is locked for a few minutes"
 		}
 		db.logFailedSignInFor(ctx, p, sn, "password", reason)

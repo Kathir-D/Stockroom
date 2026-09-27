@@ -25,10 +25,12 @@ import (
 // DefaultDueTime is the closing time a fresh install uses.
 const DefaultDueTime = "15:30"
 
-// parseDueTime reads "HH:MM" (24-hour).
+// parseDueTime reads "HH:MM" (24-hour). Both halves must be two digits, as
+// the column's check constraint requires: time.Parse alone accepts "9:30",
+// which the UPDATE would then refuse with a constraint name.
 func parseDueTime(s string) (hour, minute int, err error) {
 	t, err := time.Parse("15:04", s)
-	if err != nil {
+	if err != nil || len(s) != 5 || s[2] != ':' {
 		return 0, 0, fmt.Errorf("%w: the due time must be HH:MM on a 24-hour clock, such as 15:30", ErrInvalid)
 	}
 	return t.Hour(), t.Minute(), nil

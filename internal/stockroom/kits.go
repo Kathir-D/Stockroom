@@ -188,7 +188,13 @@ func (db *DB) AddAssetToKit(ctx context.Context, actor Actor, kitID, assetID str
 
 	err := db.withLoggedTx(ctx, actorLogID(actor), "add to kit", func(tx pgx.Tx) error {
 		var retired bool
-		if err := tx.QueryRow(ctx, `select retired_at is not null from assets where id = $1`, assetID).Scan(&retired); err == nil && retired {
+		// No row falls through to the insert, whose foreign key names the
+		// missing asset (explainKitInsert).
+		err := tx.QueryRow(ctx, `select retired_at is not null from assets where id = $1`, assetID).Scan(&retired)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return mapPgError("add to kit", err)
+		}
+		if retired {
 			return fmt.Errorf("%w: that item is retired", ErrConflict)
 		}
 		if _, err := tx.Exec(ctx,

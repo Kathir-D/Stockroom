@@ -225,13 +225,27 @@ func (db *DB) archiveMissing(ctx context.Context, actor Actor, named []string, r
 	if len(ids) == 0 {
 		return nil
 	}
-	tag, err := db.Pool.Exec(ctx, `update profiles set archived_at = now() where id = any($1::uuid[]) and archived_at is null`, ids)
+	// The custody check is repeated here: an item checked out since the
+	// select above must still keep its borrower active.
+	archived, err := db.Pool.Query(ctx, `
+		update profiles p set archived_at = now()
+		 where p.id = any($1::uuid[]) and p.archived_at is null
+		   and not exists (select 1 from active_custody ac where ac.custodian_id = p.id)
+		returning p.id::text`, ids)
 	if err != nil {
 		return mapPgError("archive accounts", err)
 	}
-	res.Archived = int(tag.RowsAffected())
-	for _, id := range ids {
+	defer archived.Close()
+	for archived.Next() {
+		var id string
+		if err := archived.Scan(&id); err != nil {
+			return err
+		}
+		res.Archived++
 		db.Sessions.DeleteForProfile(id)
+	}
+	if err := archived.Err(); err != nil {
+		return mapPgError("archive accounts", err)
 	}
 	return nil
 }
