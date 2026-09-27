@@ -221,6 +221,10 @@ type BackupStatusResult struct {
 
 	PhotoMirror *PhotoMirrorStatus `json:"photo_mirror"`
 
+	// Rclone is the binary serve resolved at startup, or nil when it never
+	// resolved one (tests).
+	Rclone *RcloneInfo `json:"rclone"`
+
 	// Warnings are the plain sentences the screen shows in a banner, already
 	// worded. The UI decides how to render them, not what they say.
 	Warnings []string `json:"warnings"`
@@ -269,6 +273,7 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 		Targets:                 []BackupTargetStatus{},
 		Log:                     []string{},
 		Schedule:                fmt.Sprintf("%02d:00 daily", settings.ScheduleHour),
+		Rclone:                  Rclone(),
 	}
 
 	dir := db.BackupDir
@@ -348,12 +353,30 @@ func (db *DB) BackupStatus(ctx context.Context, actor Actor) (BackupStatusResult
 	if w := settings.sharedClientWarning(); w != "" {
 		out.Warnings = append(out.Warnings, w)
 	}
+	if w := rcloneWarning(out.Rclone, targetEnabled(settings, driveTargetName)); w != "" {
+		out.Warnings = append(out.Warnings, w)
+	}
 
 	if photos, err := db.PhotoMirrorStatus(ctx, settings); err == nil && photos != nil {
 		out.PhotoMirror = photos
 		out.Warnings = append(out.Warnings, photos.Warnings...)
 	}
 	return out, nil
+}
+
+// rcloneWarning is the backup screen's sentence about rclone, when there is
+// one to say. Only a Drive target needs rclone, so without one it is silent.
+func rcloneWarning(info *RcloneInfo, driveOn bool) string {
+	switch {
+	case info == nil || !driveOn:
+		return ""
+	case !info.Found:
+		return "The Drive backup needs rclone, and this machine has none: " + info.Error
+	case info.TooOld:
+		return fmt.Sprintf("rclone %s at %s is older than %s, the oldest Stockroom was tested with. Drive backups may fail until it is updated.",
+			info.Version, info.Path, info.MinVersion)
+	}
+	return ""
 }
 
 const failsafeWarning = "No failsafe admin is configured. If the database is lost you will not be able to sign in to restore it. Set ADMIN_STUDENT_NUMBER and ADMIN_PASSWORD in .env and restart the server."

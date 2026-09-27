@@ -508,6 +508,15 @@ export interface PhotoMirrorStatus {
   warnings: string[];
 }
 
+export interface RcloneInfo {
+  path: string;
+  version: string;
+  found: boolean;
+  too_old: boolean;
+  min_version: string;
+  error?: string;
+}
+
 export interface BackupStatusResult {
   configured: boolean;
   dir: string;
@@ -524,6 +533,8 @@ export interface BackupStatusResult {
    */
   failsafe_admin_configured: boolean;
   photo_mirror: PhotoMirrorStatus | null;
+  /** The rclone the server resolved at startup, or null when it never looked. */
+  rclone: RcloneInfo | null;
   /** Already-worded sentences. The UI decides how to render them, not what they say. */
   warnings: string[];
   log: string[];
@@ -614,6 +625,8 @@ export interface HealthResult {
   ok: boolean;
   db: string;
   time: string;
+  /** The server's version, "dev" from a working copy. */
+  version?: string;
 }
 
 /**

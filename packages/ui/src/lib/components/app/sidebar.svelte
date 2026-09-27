@@ -23,6 +23,7 @@
   import ImagesIcon from "@lucide/svelte/icons/images"
   import { Separator } from "@stockroom/ui/components/ui/separator"
   import { cn } from "@stockroom/ui/utils"
+  import { health } from "../../api"
   import type { CategoryNode } from "../../api/types"
   import type { AdminTab, Route } from "../../stores/router.svelte"
   import CategoryTree from "./category-tree.svelte"
@@ -66,6 +67,16 @@
   ]
 
   const browsing = $derived(route.name === "browse")
+
+  // The running version, for an admin reporting a problem. Read from /health
+  // once the Admin group appears; a failure leaves the footer out.
+  let version = $state<string | null>(null)
+  $effect(() => {
+    if (!isAdmin || version !== null) return
+    health()
+      .then((h) => (version = h.version ?? null))
+      .catch(() => {})
+  })
 </script>
 
 <nav
@@ -135,5 +146,8 @@
         </li>
       {/each}
     </ul>
+    {#if version}
+      <p class="mt-auto px-2 pt-2 text-[11px] text-fg-faint">Stockroom {version}</p>
+    {/if}
   {/if}
 </nav>

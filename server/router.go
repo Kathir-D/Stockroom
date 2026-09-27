@@ -36,9 +36,10 @@ func newRouter(d deps) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":   true,
-			"db":   "ok",
-			"time": time.Now().UTC(),
+			"ok":      true,
+			"db":      "ok",
+			"time":    time.Now().UTC(),
+			"version": stockroom.Version(),
 		})
 	})
 

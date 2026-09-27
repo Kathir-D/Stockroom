@@ -154,6 +154,7 @@ func (db *DB) takeSnapshot(ctx context.Context, workDir string, ranAt time.Time,
 		return snapshot{}, err
 	}
 
+	manifest.StockroomVersion = Version()
 	manifest.SchemaVersion, err = schemaVersion(ctx, tx)
 	if err != nil {
 		return snapshot{}, err

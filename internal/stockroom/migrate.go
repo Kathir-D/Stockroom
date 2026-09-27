@@ -2,6 +2,7 @@ package stockroom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"regexp"
@@ -79,6 +80,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]string, err
 	if err != nil {
 		return nil, err
 	}
+	if err := checkNotNewer(files, applied); err != nil {
+		return nil, err
+	}
 
 	var ran []string
 	for _, file := range files {
@@ -91,6 +95,71 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]string, err
 		ran = append(ran, file.name)
 	}
 	return ran, nil
+}
+
+// ErrDatabaseNewer is a database that records a migration newer than any this
+// binary carries: somebody installed an older Stockroom over a newer one.
+// Serving would run old queries against a schema they were never written for.
+var ErrDatabaseNewer = errors.New("the database is newer than this version of Stockroom")
+
+// checkNotNewer refuses a database whose newest recorded version is past the
+// newest embedded file. A recorded version that is older and simply missing
+// from the set (a migration squashed away) is not this failure.
+func checkNotNewer(files []migrationFile, applied map[string]bool) error {
+	newest := files[len(files)-1].version
+	var ahead []string
+	for v := range applied {
+		if v > newest {
+			ahead = append(ahead, v)
+		}
+	}
+	if len(ahead) == 0 {
+		return nil
+	}
+	sort.Strings(ahead)
+	return fmt.Errorf("%w: it records migration %s and this binary stops at %s. Install the newer version of Stockroom",
+		ErrDatabaseNewer, ahead[len(ahead)-1], newest)
+}
+
+// EmbeddedSchemaVersion is the newest migration version in fsys, the schema
+// this binary brings a database up to.
+func EmbeddedSchemaVersion(fsys fs.FS) (string, error) {
+	files, err := migrationFilenames(fsys)
+	if err != nil {
+		return "", err
+	}
+	return files[len(files)-1].version, nil
+}
+
+// PendingMigrations returns the versions Migrate would apply, without taking
+// the lock or applying anything. A database with no bookkeeping table has
+// every migration pending.
+func PendingMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]string, error) {
+	files, err := migrationFilenames(fsys)
+	if err != nil {
+		return nil, err
+	}
+	var present bool
+	if err := pool.QueryRow(ctx, `
+		select to_regclass('supabase_migrations.schema_migrations') is not null`).Scan(&present); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	applied := map[string]bool{}
+	if present {
+		if applied, err = appliedVersions(ctx, pool); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkNotNewer(files, applied); err != nil {
+		return nil, err
+	}
+	var pending []string
+	for _, f := range files {
+		if !applied[f.version] {
+			pending = append(pending, f.version)
+		}
+	}
+	return pending, nil
 }
 
 // migrateLockKey is the advisory-lock id this function takes. Arbitrary, but

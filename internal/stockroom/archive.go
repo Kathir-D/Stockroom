@@ -59,6 +59,10 @@ type Manifest struct {
 	// different schema is refused unless the admin overrides, because the CSV
 	// columns and the live columns may no longer agree.
 	SchemaVersion string `json:"schema_version"`
+	// StockroomVersion is the binary that wrote the archive ("dev" from a
+	// working copy). Informational: the restore compares schema versions,
+	// because two releases can share a schema.
+	StockroomVersion string `json:"stockroom_version,omitempty"`
 	// Rows is table name -> row count, checked inside the restore transaction.
 	Rows map[string]int64 `json:"rows"`
 	// Files is zip path -> lowercase hex SHA-256, checked before the restore

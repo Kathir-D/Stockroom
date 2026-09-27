@@ -1,9 +1,11 @@
 package stockroom
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -49,29 +51,153 @@ type Config struct {
 	SignInPhotosTTLMinutes    int
 	SignInPhotosManifestHours int
 
+	// PreMigrateDump is PRE_MIGRATE_DUMP: whether serve runs pg_dump before
+	// applying a migration (premigrate.go). PGDump is PG_DUMP, an explicit
+	// path to that binary, and RcloneBinary is RCLONE_BINARY, the same for
+	// rclone. Both are empty unless a service manager's short PATH needs them.
+	PreMigrateDump PreMigrateDumpMode
+	PGDump         string
+	RcloneBinary   string
+
 	// EnvPath is the .env file this configuration was read from, or "" when
 	// there was none. The setup wizard writes the failsafe admin into it,
 	// because that account has to survive the database being lost and so
 	// cannot live in the database (CLAUDE.md §7).
 	EnvPath string
+	// Source says how EnvPath was found. An installed server (a --config
+	// flag, STOCKROOM_CONFIG or a system path) refuses relative data paths;
+	// a working copy's .env keeps them.
+	Source ConfigSource
 }
 
-// LoadConfig reads .env (searching the current directory and its parents, so
-// `go run ./server` works from the repo root or a subdirectory) and then the
-// process environment. Real environment variables win over .env values.
-func LoadConfig() (Config, error) {
-	envPath := ""
-	if path, ok := findDotEnv(); ok {
-		if err := godotenv.Load(path); err != nil {
-			return Config{}, fmt.Errorf("load %s: %w", path, err)
+// ConfigSource is where LoadConfigFrom found its file, in precedence order.
+type ConfigSource string
+
+const (
+	ConfigFromFlag   ConfigSource = "--config"
+	ConfigFromEnv    ConfigSource = "STOCKROOM_CONFIG"
+	ConfigFromDotEnv ConfigSource = ".env in a working copy"
+	ConfigFromSystem ConfigSource = "system path"
+	ConfigNotFound   ConfigSource = "no config file"
+)
+
+// Installed reports whether the config belongs to an install rather than a
+// working copy. Relative paths in an installed config would resolve against
+// whatever directory the service manager started in, which is / under systemd.
+func (c Config) Installed() bool {
+	switch c.Source {
+	case ConfigFromFlag, ConfigFromEnv, ConfigFromSystem:
+		return true
+	}
+	return false
+}
+
+// Describe is the one line every subcommand prints about its config.
+func (c Config) Describe() string {
+	if c.EnvPath == "" {
+		return "config: none found, using defaults and the environment"
+	}
+	return fmt.Sprintf("config: %s (%s)", c.EnvPath, c.Source)
+}
+
+// PreMigrateDumpMode is PRE_MIGRATE_DUMP's value.
+type PreMigrateDumpMode string
+
+const (
+	// PreMigrateDumpOff skips the dump. It is the default, so a development
+	// machine with no pg_dump starts as before.
+	PreMigrateDumpOff PreMigrateDumpMode = "off"
+	// PreMigrateDumpRequired refuses to migrate without a dump. Setup writes it.
+	PreMigrateDumpRequired PreMigrateDumpMode = "required"
+)
+
+// systemConfigPaths lists where an installed Stockroom keeps its config, for
+// this platform. A variable so tests can point it at a temporary directory.
+var systemConfigPaths = defaultSystemConfigPaths
+
+func defaultSystemConfigPaths() []string {
+	switch runtime.GOOS {
+	case "linux":
+		return []string{"/etc/stockroom/stockroom.env"}
+	case "darwin":
+		return []string{filepath.Join(BrewPrefix(), "var", "stockroom", "stockroom.env")}
+	}
+	return nil
+}
+
+// BrewPrefix is Homebrew's prefix without running brew, which a LaunchDaemon's
+// PATH doesn't have: HOMEBREW_PREFIX when set, else the default for this CPU.
+func BrewPrefix() string {
+	if p := os.Getenv("HOMEBREW_PREFIX"); p != "" {
+		return p
+	}
+	if runtime.GOARCH == "arm64" {
+		return "/opt/homebrew"
+	}
+	return "/usr/local"
+}
+
+// FindConfig picks the config file. The first match wins: the --config flag,
+// STOCKROOM_CONFIG, a .env found walking up from the working directory (so
+// development is unchanged), then the system path. A path given by flag or
+// variable must exist; pointing at a missing file is a typo, not a request
+// for defaults.
+func FindConfig(flagPath string) (string, ConfigSource, error) {
+	for _, explicit := range []struct {
+		path   string
+		source ConfigSource
+	}{
+		{flagPath, ConfigFromFlag},
+		{os.Getenv("STOCKROOM_CONFIG"), ConfigFromEnv},
+	} {
+		if explicit.path == "" {
+			continue
 		}
-		envPath = path
+		abs, err := filepath.Abs(explicit.path)
+		if err != nil {
+			return "", "", fmt.Errorf("%s %q: %w", explicit.source, explicit.path, err)
+		}
+		if st, err := os.Stat(abs); err != nil {
+			return "", "", fmt.Errorf("%s %q: %w", explicit.source, explicit.path, err)
+		} else if st.IsDir() {
+			return "", "", fmt.Errorf("%s %q is a directory", explicit.source, explicit.path)
+		}
+		return abs, explicit.source, nil
+	}
+	if path, ok := findDotEnv(); ok {
+		return path, ConfigFromDotEnv, nil
+	}
+	for _, path := range systemConfigPaths() {
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			return path, ConfigFromSystem, nil
+		}
+	}
+	return "", ConfigNotFound, nil
+}
+
+// LoadConfig is LoadConfigFrom with no --config flag.
+func LoadConfig() (Config, error) {
+	return LoadConfigFrom("")
+}
+
+// LoadConfigFrom reads the file FindConfig picks and then the process
+// environment. Real environment variables win over the file's values.
+func LoadConfigFrom(flagPath string) (Config, error) {
+	envPath, source, err := FindConfig(flagPath)
+	if err != nil {
+		return Config{}, err
+	}
+	if envPath != "" {
+		if err := godotenv.Load(envPath); err != nil {
+			return Config{}, fmt.Errorf("load %s: %w", envPath, err)
+		}
 	}
 
 	// Values with a sensible local default fall back to it when unset; the
 	// admin failsafe and backup dir are deliberately blank until configured.
 	cfg := Config{
 		EnvPath:            envPath,
+		Source:             source,
 		DatabaseURL:        getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres"),
 		ServerAddr:         getenv("SERVER_ADDR", "127.0.0.1:8080"),
 		AdminStudentNumber: os.Getenv("ADMIN_STUDENT_NUMBER"),
@@ -83,6 +209,16 @@ func LoadConfig() (Config, error) {
 
 		SignInPhotosFolderID: os.Getenv("SIGNIN_PHOTOS_FOLDER_ID"),
 		SignInPhotosDir:      getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
+
+		PGDump:       os.Getenv("PG_DUMP"),
+		RcloneBinary: os.Getenv("RCLONE_BINARY"),
+	}
+
+	switch mode := PreMigrateDumpMode(getenv("PRE_MIGRATE_DUMP", string(PreMigrateDumpOff))); mode {
+	case PreMigrateDumpOff, PreMigrateDumpRequired:
+		cfg.PreMigrateDump = mode
+	default:
+		return Config{}, fmt.Errorf("PRE_MIGRATE_DUMP must be %q or %q, got %q", PreMigrateDumpRequired, PreMigrateDumpOff, mode)
 	}
 
 	// The idle timeout is the one value that must parse; a bad number is a
@@ -114,7 +250,34 @@ func LoadConfig() (Config, error) {
 		*v.out = n
 	}
 
+	if err := cfg.checkInstalledPaths(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// checkInstalledPaths refuses a relative data path in an installed config.
+// The backup folders already follow this rule (validateDir, docs/decisions.md
+// 2026-09-21); these are the paths the server writes to before any admin has
+// chosen anything.
+func (c Config) checkInstalledPaths() error {
+	if !c.Installed() {
+		return nil
+	}
+	var errs []error
+	for _, p := range []struct{ key, value string }{
+		{"UPLOADS_DIR", c.UploadsDir},
+		{"SIGNIN_PHOTOS_DIR", c.SignInPhotosDir},
+		{"BACKUP_DIR", c.BackupDir},
+		{"PHOTO_BACKUP_DIR", c.PhotoBackupDir},
+		{"PG_DUMP", c.PGDump},
+		{"RCLONE_BINARY", c.RcloneBinary},
+	} {
+		if p.value != "" && !filepath.IsAbs(p.value) {
+			errs = append(errs, fmt.Errorf("%s must be an absolute path in %s, got %q", p.key, c.EnvPath, p.value))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // positiveInt reads key as a positive integer, falling back to def when it is

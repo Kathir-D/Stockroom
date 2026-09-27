@@ -290,3 +290,97 @@ jobs:
       - name: Docs-only change
         if: steps.changes.outputs.code != 'true'
         run: echo "Only documentation changed; nothing to build or test."
+
+  # The oldest PostgreSQL Stockroom runs on. Production uses the operating
+  # system's Postgres (ROADMAP.md decision 1): Ubuntu 22.04 ships 14, Debian 12
+  # ships 15, Ubuntu 24.04 ships 16. Each leg starts the binary against an
+  # empty database so it applies the migrations itself, as an install does,
+  # then loads the seed and runs the Go suite. The lowest passing version is
+  # the .deb's `Depends: postgresql (>= N)`.
+  tests-postgres:
+    name: tests-postgres (${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "15", "16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      PGPASSWORD: postgres
+      STOCKROOM_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'cmd/**'
+              - 'supabase/**'
+              - 'packages/**'
+              - 'desktop-app/**'
+              - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - '.githooks/**'
+              - '.github/workflows/**'
+              - 'examples/**'
+              - 'packaging/**'
+              - '.goreleaser.yaml'
+
+      - name: Set up Go
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and boot the server (applies the schema)
+        if: steps.changes.outputs.code == 'true'
+        env:
+          SERVER_ADDR: 127.0.0.1:8080
+        run: |
+          go build -o stockroom ./server
+          ./stockroom serve > server.log 2>&1 &
+          pid=$!
+          for _ in $(seq 60); do
+            curl -fs http://127.0.0.1:8080/health && break
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8080/health >/dev/null || { cat server.log; echo "the server never answered /health"; exit 1; }
+          kill $pid
+          tail -20 server.log
+
+      - name: Load the seed
+        if: steps.changes.outputs.code == 'true'
+        run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -q -f supabase/seed.sql
+
+      - name: Go tests
+        if: steps.changes.outputs.code == 'true'
+        run: go test ./... -count=1 -p 1
+
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to build or test."
