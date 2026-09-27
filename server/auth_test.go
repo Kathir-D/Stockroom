@@ -142,7 +142,7 @@ func TestScanLoginThenSetPassword(t *testing.T) {
 }
 
 // An admin's card answers 401 with password_required, which is what moves
-// the sign-in screen to the password field (ROADMAP §3.1).
+// the sign-in screen to the password field (CLAUDE.md §7).
 func TestAdminScanAsksForPassword(t *testing.T) {
 	h, d := testDeps(t)
 	_, sn := seedUser(t, d, true, "admin password")
@@ -195,5 +195,36 @@ func TestHostCheck(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("Host %s = %d, want %d", host, rec.Code, want)
 		}
+	}
+}
+
+// A card switch ends the old session by its bearer token while the cookie
+// already holds the new one, and the logout must leave that cookie alone.
+func TestLogoutKeepsAnotherSessionsCookie(t *testing.T) {
+	h, d := testDeps(t)
+	_, oldSN := seedUser(t, d, false, "old password")
+	_, newSN := seedUser(t, d, false, "new password")
+	_, oldBody := call(t, h, http.MethodPost, "/auth/scan", "", map[string]string{"student_number": oldSN})
+	_, newBody := call(t, h, http.MethodPost, "/auth/scan", "", map[string]string{"student_number": newSN})
+	oldTok, _ := oldBody["token"].(string)
+	newTok, _ := newBody["token"].(string)
+	if oldTok == "" || newTok == "" {
+		t.Fatalf("scan logins = %v / %v", oldBody, newBody)
+	}
+
+	logout := func(cookie string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+		req.Header.Set("Authorization", "Bearer "+oldTok)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := logout(newTok); rec.Code != http.StatusOK || rec.Header().Get("Set-Cookie") != "" {
+		t.Errorf("logout of the old session = %d, Set-Cookie %q; want 200 and no cookie change",
+			rec.Code, rec.Header().Get("Set-Cookie"))
+	}
+	if code, _ := call(t, h, http.MethodGet, "/me", newTok, nil); code != http.StatusOK {
+		t.Errorf("new session after the old logout = %d, want 200", code)
 	}
 }

@@ -375,7 +375,7 @@ func assetLabel(ctx context.Context, q querier, id string) string {
 }
 
 // SetAssetRetired takes an item out of the catalogue for good, or brings it
-// back (ROADMAP §3.4). Retiring is what an admin does instead of deleting an
+// back (CLAUDE.md §7). Retiring is what an admin does instead of deleting an
 // item with custody history: it becomes unavailable, disappears from browse
 // and from its kit, and keeps every custody row. Bringing it back makes it
 // available again. Refused while the item is out.

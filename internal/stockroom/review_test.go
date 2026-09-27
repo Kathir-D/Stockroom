@@ -23,7 +23,7 @@ func reasonsOf(t *testing.T, db *DB, assetID string) (reasons []string, via *str
 
 // A scan returns an item with nothing to review; a typed serial or a button
 // press by a student marks the return, and a damage note flags the item for
-// every viewer until an admin clears it (ROADMAP §3.2).
+// every viewer until an admin clears it (CLAUDE.md §7).
 func TestReturnsNeedingReview(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func TestScanJustAfterCheckoutAsks(t *testing.T) {
 }
 
 // Marking a lost item closes the loan as lost, takes the item off the shelf
-// and ends the borrower's overdue block (ROADMAP §3.2).
+// and ends the borrower's overdue block (CLAUDE.md §7).
 func TestMarkAssetLost(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
@@ -172,5 +172,74 @@ func TestMarkAssetLost(t *testing.T) {
 	}
 	if overdue, _ := db.hasOverdue(ctx, student.ID); overdue {
 		t.Error("the borrower is still overdue on a lost item")
+	}
+}
+
+// A typed serial of your own fresh checkout is a deliberate return, not a
+// pile scanned twice: it is returned and goes to review rather than asking.
+func TestTypedScanJustAfterCheckoutReturns(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	student := insertTestProfile(t, db, false, "student-password")
+	id, serial := insertScannableAsset(t, db, student, StatusAvailable)
+	if _, err := db.CheckOutAssets(ctx, actorFor(student), CheckoutInput{AssetIDs: []string{id}, DueAt: soon()}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ScanItemVia(ctx, actorFor(student), serial, false)
+	if err != nil || res.Action != ScanCheckedIn {
+		t.Fatalf("typed scan just after checkout = %+v, %v; want checked_in", res.Action, err)
+	}
+	if r, _ := reasonsOf(t, db, id); !slices.Equal(r, []string{ReviewNotScanned}) {
+		t.Errorf("reasons %v, want not_scanned", r)
+	}
+}
+
+// A student may add a damage note only to a fresh return: not to one an
+// admin already reviewed, not to a lost loan, and not long after. An admin
+// may annotate any return.
+func TestDamageNoteCannotReopenAReview(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := insertTestProfile(t, db, true, "admin-password")
+	student := insertTestProfile(t, db, false, "student-password")
+
+	returned := insertTestAsset(t, db, admin)
+	openCustody(t, db, returned, student, admin, time.Now().Add(48*time.Hour))
+	in, err := db.CheckInAsset(ctx, actorFor(admin), returned, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := in.ReturnedFrom.CustodyEventID
+	if _, err := db.AnnotateCustodyEvent(ctx, actorFor(student), event, "dent on the hood"); err != nil {
+		t.Fatalf("note on a fresh return = %v, want nil", err)
+	}
+	if _, err := db.ResolveReview(ctx, actorFor(admin), event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AnnotateCustodyEvent(ctx, actorFor(student), event, "still dented"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("student reopens a reviewed return = %v, want ErrForbidden", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `update custody_events set reviewed_at = null, review_reasons = '{}',
+		checked_in_at = now() - interval '2 hours' where id = $1`, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AnnotateCustodyEvent(ctx, actorFor(student), event, "old dent"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("student notes an old return = %v, want ErrForbidden", err)
+	}
+	if _, err := db.AnnotateCustodyEvent(ctx, actorFor(admin), event, "admin note"); err != nil {
+		t.Errorf("admin notes an old return = %v, want nil", err)
+	}
+
+	lost := insertTestAsset(t, db, admin)
+	openCustody(t, db, lost, student, admin, time.Now().Add(48*time.Hour))
+	if _, err := db.MarkAssetLost(ctx, actorFor(admin), lost, nil); err != nil {
+		t.Fatal(err)
+	}
+	hist, err := db.GetAssetHistory(ctx, actorFor(admin), lost)
+	if err != nil || len(hist) != 1 {
+		t.Fatalf("history = %v, %v", hist, err)
+	}
+	if _, err := db.AnnotateCustodyEvent(ctx, actorFor(admin), hist[0].ID, "found it?"); !errors.Is(err, ErrConflict) {
+		t.Errorf("note on a lost loan = %v, want ErrConflict", err)
 	}
 }

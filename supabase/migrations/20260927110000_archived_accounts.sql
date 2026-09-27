@@ -1,4 +1,4 @@
--- Archived accounts (ROADMAP §3.4).
+-- Archived accounts (CLAUDE.md §7).
 --
 -- custody_events names profiles in three columns with no delete rule, so an
 -- account that ever borrowed anything cannot be deleted, and the roster import

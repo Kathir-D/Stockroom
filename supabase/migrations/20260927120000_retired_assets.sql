@@ -1,4 +1,4 @@
--- Retired items (ROADMAP §3.4).
+-- Retired items (CLAUDE.md §7).
 --
 -- custody_events.asset_id cascades, so deleting an item deleted its custody
 -- history, which works against "full custody history on every asset". Retiring

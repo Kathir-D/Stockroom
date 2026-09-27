@@ -9,9 +9,8 @@
  */
 
 import * as api from "../api/index"
+import { DEFAULT_DUE_TIME } from "../due"
 import { DIGITS_RULE, ruleFrom, type StudentNumberRule } from "../student-number"
-
-export const DEFAULT_DUE_TIME = "15:30"
 
 class RulesStore {
   studentNumber = $state<StudentNumberRule>(DIGITS_RULE)

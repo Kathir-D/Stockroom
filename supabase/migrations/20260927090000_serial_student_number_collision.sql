@@ -1,4 +1,4 @@
--- A barcode is either an item or a card, never both (ROADMAP §3.1).
+-- A barcode is either an item or a card, never both (CLAUDE.md §7).
 --
 -- A card scanned while somebody else is signed in now switches accounts, so
 -- the app has to know which kind of code it read. The rule that makes that a

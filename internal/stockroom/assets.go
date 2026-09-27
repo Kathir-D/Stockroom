@@ -29,7 +29,7 @@ type AssetFilter struct {
 	// tag.
 	Search string
 	// IncludeRetired lists retired items too. Only an admin's list honours
-	// it; browse never shows them (ROADMAP §3.4).
+	// it; browse never shows them (CLAUDE.md §7).
 	IncludeRetired bool
 }
 
@@ -399,7 +399,7 @@ const assetColumns = `a.id, a.asset_tag, a.name, a.description, a.category_id, a
 // report no admin has cleared. The two subqueries in assetColumns share it so
 // the note and its time cannot come from different returns.
 const unreviewedDamageSQL = `from custody_events dr
-	where dr.asset_id = a.id and 'damage' = any(dr.review_reasons) and dr.reviewed_at is null
+	where dr.asset_id = a.id and '` + ReviewDamage + `' = any(dr.review_reasons) and dr.reviewed_at is null
 	order by dr.checked_in_at desc nulls last, dr.id desc limit 1`
 
 func scanAsset(row pgx.Row) (Asset, error) {

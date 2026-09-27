@@ -20,7 +20,7 @@ func (d deps) handleScan(w http.ResponseWriter, r *http.Request, actor stockroom
 		Serial string `json:"serial"`
 		// ViaScanner says the code arrived at scanner speed. Missing means
 		// yes, which is what every client sent before it existed. False marks
-		// a student's return for review (ROADMAP §3.2).
+		// a student's return for review (CLAUDE.md §7).
 		ViaScanner *bool `json:"via_scanner"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
@@ -151,7 +151,7 @@ func (d deps) handleUserHistory(w http.ResponseWriter, r *http.Request, actor st
 }
 
 // POST /assets/{id}/lost {"note": "..."}
-// An admin closes a loan without the item (ROADMAP §3.2).
+// An admin closes a loan without the item (CLAUDE.md §7).
 func (d deps) handleMarkLost(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var body struct {
 		Note *string `json:"note"`
@@ -171,7 +171,7 @@ func (d deps) handleMarkLost(w http.ResponseWriter, r *http.Request, actor stock
 }
 
 // GET /custody/review
-// Returns an admin has not looked at yet (ROADMAP §3.2).
+// Returns an admin has not looked at yet (CLAUDE.md §7).
 func (d deps) handleNeedsReview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	rows, err := d.db.ListNeedsReview(r.Context(), actor)
 	if err != nil {

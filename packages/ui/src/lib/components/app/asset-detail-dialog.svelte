@@ -164,9 +164,9 @@
           {/if}
 
           {#if asset.damage_report}
-            <!-- Unreviewed; still available by decision (ROADMAP §3.2). -->
+            <!-- Unreviewed; still available by decision (CLAUDE.md §7). -->
             <dt class="text-xs text-fg-muted">Damage reported</dt>
-            <dd class="text-status-due-soon">{asset.damage_report}</dd>
+            <dd class="text-fg">{asset.damage_report}</dd>
           {/if}
 
           {#if asset.retired_at}

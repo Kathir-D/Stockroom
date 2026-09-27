@@ -70,7 +70,7 @@ class SessionStore {
 
   /**
    * What is waiting for an admin: overdue items and returns to check
-   * (ROADMAP §3.3). The server only sends it to an admin.
+   * (CLAUDE.md §7). The server only sends it to an admin.
    */
   adminNotice = $state<string | null>(null)
   adminNoticeDismissed = $state(false)
@@ -229,7 +229,7 @@ class SessionStore {
   /**
    * Everything `clear()` drops except the token. A card scan that switches
    * accounts has already stored the new person's token by the time the old
-   * person's state has to go (ROADMAP §3.1).
+   * person's state has to go (CLAUDE.md §7).
    */
   forget() {
     this.profile = null

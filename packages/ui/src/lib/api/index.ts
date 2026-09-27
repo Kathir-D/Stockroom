@@ -175,7 +175,7 @@ export async function logout() {
 
 /**
  * End a session that is no longer the current one: the account a card scan
- * just replaced (ROADMAP §3.1). Anonymous, so its answer cannot trip the
+ * just replaced (CLAUDE.md §7). Anonymous, so its answer cannot trip the
  * idle-timeout hook for the session that replaced it. Best effort.
  */
 export async function logoutToken(previous: string | null) {
@@ -229,7 +229,7 @@ export function scan(serial: string, viaScanner = true) {
   return request<ScanResult>("/scan", {
     method: "POST",
     // False when the serial was typed: a student's typed return is marked for
-    // an admin to check (ROADMAP §3.2).
+    // an admin to check (CLAUDE.md §7).
     body: { serial, via_scanner: viaScanner },
   });
 }

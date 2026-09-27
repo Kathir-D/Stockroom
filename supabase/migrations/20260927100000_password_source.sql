@@ -1,4 +1,4 @@
--- Who chose each password, and when (ROADMAP §3.1).
+-- Who chose each password, and when (CLAUDE.md §7).
 --
 -- A roster-imported student has no password until their first scan sign-in
 -- sets one, so whoever scans the number first chooses it. Admin -> Users

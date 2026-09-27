@@ -4,7 +4,7 @@
    * (design-system.md §5.1).
    *
    * The person picks the **last day they need the item**. It is due at the
-   * closing time on the next school day after that (ROADMAP §3.2, `due.ts`),
+   * closing time on the next school day after that (CLAUDE.md §7, `due.ts`),
    * and the button says exactly when.
    *
    * Everything beyond the cap is *disabled* rather than validated after the

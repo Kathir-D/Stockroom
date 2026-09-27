@@ -51,7 +51,7 @@
   let error = $state<string | null>(null)
   let search = $state("")
   /**
-   * Archived accounts are hidden until asked for (ROADMAP §3.4): after a few
+   * Archived accounts are hidden until asked for (CLAUDE.md §7): after a few
    * years they outnumber the students who are actually here.
    */
   let showArchived = $state(false)
@@ -105,8 +105,8 @@
   )
 
   /**
-   * Who chose the password, for spotting a first-scan takeover (ROADMAP
-   * §3.1): a roster student's password is set by whoever scans the number
+   * Who chose the password, for spotting a first-scan takeover (CLAUDE.md
+   * §7): a roster student's password is set by whoever scans the number
    * first. "Set by the student" on an account whose owner says they never
    * set one is the sign.
    */

@@ -121,11 +121,20 @@ func main() {
 	db.StartBackupScheduler(ctx)
 
 	// Profile photos used to be named by student number, which /files/ would
-	// confirm for anybody who asked (ROADMAP §3.1). Renaming is a one-off
+	// confirm for anybody who asked (CLAUDE.md §7). Renaming is a one-off
 	// that finds nothing after the first start; a failure only means the
 	// old names keep working.
 	if err := db.RenameProfilePhotosByID(ctx); err != nil {
 		log.Printf("warning: could not rename every profile photo: %v", err)
+	}
+	// The trigger that keeps serials and student numbers apart checks new
+	// writes only, so an upgraded install may already hold a collision.
+	if clashes, err := db.ScanCodeCollisions(ctx); err != nil {
+		log.Printf("warning: could not check serials against student numbers: %v", err)
+	} else {
+		for _, c := range clashes {
+			log.Printf("warning: %s", c)
+		}
 	}
 
 	// Idle sessions are swept on a timer so each idle timeout lands in the

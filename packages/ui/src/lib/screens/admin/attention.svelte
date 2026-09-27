@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Admin → Needs attention (ROADMAP §3.2, §3.3).
+   * Admin → Needs attention (CLAUDE.md §7).
    *
    * Returns an admin should look at, newest first:
    *

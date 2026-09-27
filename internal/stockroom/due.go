@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// When a loan is due (ROADMAP §3.2, decided 2026-09-26).
+// When a loan is due (CLAUDE.md §7, decided 2026-09-26).
 //
 // The borrower picks the last day they will use the item, and it is due at the
 // closing time (app_settings.due_time, 15:30 unless changed) on the next
@@ -47,9 +47,21 @@ func nextSchoolDayAt(day time.Time, hour, minute int) time.Time {
 	return next
 }
 
-// DueFor is when a loan is due whose borrower picked lastDay as the last day
-// of use.
-func DueFor(lastDay time.Time, dueTime string) (time.Time, error) {
+// closingAtOrAfter is the first closing time on a school day at or after t,
+// in t's location. A due time the picker computed is already one, so it comes
+// back unchanged.
+func closingAtOrAfter(t time.Time, hour, minute int) time.Time {
+	y, m, d := t.Date()
+	c := time.Date(y, m, d, hour, minute, 0, 0, t.Location())
+	if c.Before(t) || c.Weekday() == time.Saturday || c.Weekday() == time.Sunday {
+		return nextSchoolDayAt(c, hour, minute)
+	}
+	return c
+}
+
+// dueFor is when a loan is due whose borrower picked lastDay as the last day
+// of use. The date picker computes the same thing in due.ts.
+func dueFor(lastDay time.Time, dueTime string) (time.Time, error) {
 	h, m, err := parseDueTime(dueTime)
 	if err != nil {
 		return time.Time{}, err

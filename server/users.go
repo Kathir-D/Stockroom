@@ -122,7 +122,7 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 	var csvBody io.Reader
 	photoDir := ""
 	// archive_missing archives every student the file does not name
-	// (ROADMAP §3.4). A form field, or ?archive_missing=1 on a text/csv body.
+	// (CLAUDE.md §7). A form field, or ?archive_missing=1 on a text/csv body.
 	archiveMissing := r.URL.Query().Get("archive_missing") == "1"
 
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))

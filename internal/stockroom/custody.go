@@ -54,10 +54,14 @@ const (
 	// ScanConfirmReturn is a scan of an item the person scanning checked out
 	// a few minutes ago. Nothing happened: the screen asks "Return it?",
 	// because a student who scans their pile again on the way out, to be
-	// sure, would otherwise return everything they are carrying (ROADMAP
-	// §3.2). ReturnedFrom names the loan the question is about.
+	// sure, would otherwise return everything they are carrying (CLAUDE.md
+	// §7). ReturnedFrom names the loan the question is about.
 	ScanConfirmReturn ScanAction = "confirm_return"
 )
+
+// noteWindow is how long after a return a student may still add a damage
+// note to it (AnnotateCustodyEvent).
+const noteWindow = 30 * time.Minute
 
 // recentCheckoutWindow is how long after a checkout a scan of the same item
 // by the same person asks before returning it.
@@ -175,7 +179,7 @@ type CustodyRecord struct {
 	Outcome     string  `json:"outcome"`
 	ReturnedVia *string `json:"returned_via"`
 	// ReviewReasons say why an admin should look at this return, until
-	// ReviewedAt is set (ROADMAP §3.2).
+	// ReviewedAt is set (CLAUDE.md §7).
 	ReviewReasons []string   `json:"review_reasons"`
 	ReviewedAt    *time.Time `json:"reviewed_at"`
 }
@@ -196,7 +200,7 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 // ScanItemVia is ScanItem saying whether the code arrived at scanner speed.
 // A typed serial still returns an item that is out, but the return is marked
 // for an admin to review when a student typed it: nothing shows the item
-// came back (ROADMAP §3.2).
+// came back (CLAUDE.md §7).
 func (db *DB) ScanItemVia(ctx context.Context, actor Actor, serial string, viaScanner bool) (ScanResult, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return ScanResult{}, err
@@ -234,15 +238,19 @@ func (db *DB) ScanItemVia(ctx context.Context, actor Actor, serial string, viaSc
 
 	if open {
 		// A loan this person made a few minutes ago is asked about rather
-		// than returned (ScanConfirmReturn).
+		// than returned (ScanConfirmReturn). Only at scanner speed: the
+		// question guards against a pile scanned twice, and a typed serial is
+		// a deliberate return that goes to review like any other.
 		var recent bool
-		if err := db.Pool.QueryRow(ctx, `
+		if viaScanner {
+			if err := db.Pool.QueryRow(ctx, `
 			select exists (select 1 from custody_events
 			 where asset_id = $1 and checked_in_at is null
 			   and checked_out_at > now() - make_interval(secs => $3)
 			   and (custodian_id = $2 or checked_out_by = $2))`,
-			id, actor.ID, recentCheckoutWindow.Seconds()).Scan(&recent); err != nil {
-			return ScanResult{}, mapPgError("scan item", err)
+				id, actor.ID, recentCheckoutWindow.Seconds()).Scan(&recent); err != nil {
+				return ScanResult{}, mapPgError("scan item", err)
+			}
 		}
 		held, err := currentCustody(ctx, db.Pool, id, actor)
 		if err != nil {
@@ -321,9 +329,11 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	if err != nil {
 		return CheckoutResult{}, err
 	}
-	if err := checkDueAt(in.DueAt, time.Now(), db.dueTime(ctx)); err != nil {
+	dueAt, err := checkDueAt(in.DueAt, time.Now(), db.dueTime(ctx))
+	if err != nil {
 		return CheckoutResult{}, err
 	}
+	in.DueAt = dueAt
 
 	custodian, err := db.profileByID(ctx, custodianID)
 	if errors.Is(err, ErrNotFound) {
@@ -331,9 +341,6 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	}
 	if err != nil {
 		return CheckoutResult{}, mapPgError("check out", err)
-	}
-	if custodian.ArchivedAt != nil {
-		return CheckoutResult{}, fmt.Errorf("%w: that account is archived", ErrConflict)
 	}
 
 	tx, err := db.Pool.Begin(ctx)
@@ -345,6 +352,22 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := markLogged(ctx, tx, actor.ID); err != nil {
 		return CheckoutResult{}, err
+	}
+	// Read under a share lock, so archiving this account (which locks the row
+	// for update, then checks what it holds) either finishes first and is seen
+	// here, or waits until this cart has committed and then sees the items.
+	// Checked outside the transaction, the two could interleave and leave an
+	// item out to an account that can no longer sign in to return it.
+	var archived bool
+	if err := tx.QueryRow(ctx,
+		`select archived_at is not null from profiles where id = $1 for share`, custodianID).Scan(&archived); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CheckoutResult{}, fmt.Errorf("%w: no such user", ErrNotFound)
+		}
+		return CheckoutResult{}, mapPgError("check out", err)
+	}
+	if archived {
+		return CheckoutResult{}, fmt.Errorf("%w: that account is archived", ErrConflict)
 	}
 
 	if !(actor.IsAdmin && in.OverrideOverdue) {
@@ -430,7 +453,7 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 
 // CheckInAssetVia is CheckInAsset saying how the item came back (the
 // Returned* constants). A damage note, or a student's return that no scan
-// backs up, marks the return for an admin's review (ROADMAP §3.2).
+// backs up, marks the return for an admin's review (CLAUDE.md §7).
 func (db *DB) CheckInAssetVia(ctx context.Context, actor Actor, assetID string, damageNote *string, via string) (CheckInResult, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return CheckInResult{}, err
@@ -605,29 +628,36 @@ func normalizeCartIDs(ids []string) ([]string, error) {
 	return out, nil
 }
 
-// checkDueAt bounds the due date. Both ends matter: a date in the past would
-// be overdue the moment it was written, and the seven-day cap is the whole
-// point of asking for a date at all. The cap is on the last day of use, so
-// the latest due time is the closing time on the school day after the
-// seventh day (due.go). The message names it, so a client that sent later can
-// say why.
-func checkDueAt(dueAt, now time.Time, dueTime string) error {
+// checkDueAt bounds the due date and returns the due time to store. Both ends
+// matter: a date in the past would be overdue the moment it was written, and
+// the seven-day cap is the whole point of asking for a date at all. The cap is
+// on the last day of use, so the latest due time is the closing time on the
+// school day after the seventh day (due.go). The message names it, so a
+// client that sent later can say why.
+//
+// The server decides the rule, not the date picker (CLAUDE.md §7): whatever
+// instant arrives is moved forward to the first closing time on a school day
+// at or after it. The picker already sends one, which this leaves alone; a
+// client sending Saturday 02:00 gets Monday's closing time rather than a loan
+// that falls overdue before anybody could bring it back.
+func checkDueAt(dueAt, now time.Time, dueTime string) (time.Time, error) {
 	if dueAt.IsZero() {
-		return fmt.Errorf("%w: a due date is required", ErrInvalid)
+		return time.Time{}, fmt.Errorf("%w: a due date is required", ErrInvalid)
 	}
 	if !dueAt.After(now) {
-		return fmt.Errorf("%w: due date must be in the future", ErrInvalid)
+		return time.Time{}, fmt.Errorf("%w: due date must be in the future", ErrInvalid)
 	}
 	h, m, err := parseDueTime(dueTime)
 	if err != nil {
 		h, m, _ = parseDueTime(DefaultDueTime)
 	}
+	due := closingAtOrAfter(dueAt.In(now.Location()), h, m)
 	latest := latestDueAt(now, h, m)
-	if dueAt.After(latest) {
-		return fmt.Errorf("%w: the last day of use must be within %d days, so the latest due time is %s",
+	if due.After(latest) {
+		return time.Time{}, fmt.Errorf("%w: the last day of use must be within %d days, so the latest due time is %s",
 			ErrInvalid, MaxCheckoutDays, latest.Format("Mon Jan 2 15:04"))
 	}
-	return nil
+	return due, nil
 }
 
 // lockCartAssets reads every asset in the cart with FOR UPDATE, in id order
@@ -808,6 +838,13 @@ func listCustody(ctx context.Context, q querier, where, orderBy string, args ...
 // Only a closed event takes one. An open row is ErrConflict rather than a
 // silent no-op, because a note on an item still in someone's bag is either a
 // mis-click or a misunderstanding of what the field is for.
+//
+// A note flags the item for an admin's review, so a student may only add one
+// to a fresh return: within noteWindow of the check-in, never to a loan an
+// admin closed as lost (its note is the admin's), and never to a return an
+// admin has already reviewed. Otherwise any student could reopen any cleared
+// return, months later, and put "Damage reported" back on the item. An admin
+// may annotate any returned event.
 func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEventID string, note string) (CustodyRecord, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return CustodyRecord{}, err
@@ -827,12 +864,13 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 		err := tx.QueryRow(ctx,
 			`update custody_events
 			    set condition_in = $2,
-			        review_reasons = case when 'damage' = any(review_reasons) then review_reasons
-			                              else array_append(review_reasons, 'damage') end,
+			        review_reasons = case when $5 = any(review_reasons) then review_reasons
+			                              else array_append(review_reasons, $5) end,
 			        reviewed_at = null, reviewed_by = null
-			   where id = $1 and checked_in_at is not null
+			   where id = $1 and checked_in_at is not null and outcome = 'returned'
+			     and ($3 or (reviewed_at is null and checked_in_at > now() - make_interval(secs => $4)))
 			   returning asset_id`,
-			custodyEventID, trimmed).Scan(&assetID)
+			custodyEventID, trimmed, actor.IsAdmin, noteWindow.Seconds(), ReviewDamage).Scan(&assetID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -852,9 +890,10 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 		// Nothing was written, and the two reasons need different answers. Read
 		// again to say which: no such row, or a row still open.
 		var closed bool
+		var outcome string
 		err := db.Pool.QueryRow(ctx,
-			`select checked_in_at is not null from custody_events where id = $1`,
-			custodyEventID).Scan(&closed)
+			`select checked_in_at is not null, outcome from custody_events where id = $1`,
+			custodyEventID).Scan(&closed, &outcome)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
 		}
@@ -864,6 +903,13 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 		if !closed {
 			return CustodyRecord{}, fmt.Errorf(
 				"%w: that item is still checked out; the note goes on at check-in", ErrConflict)
+		}
+		if outcome != "returned" {
+			return CustodyRecord{}, fmt.Errorf("%w: that item was marked lost, not returned", ErrConflict)
+		}
+		if !actor.IsAdmin {
+			return CustodyRecord{}, fmt.Errorf(
+				"%w: a note can only be added just after the return. Tell an admin instead", ErrForbidden)
 		}
 		// Closed now but not when the UPDATE ran, or it was deleted and
 		// reinserted: either way the write lost a race it cannot silently win.

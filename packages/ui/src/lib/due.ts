@@ -1,5 +1,5 @@
 /**
- * Turning a picked *date* into a due *instant* (ROADMAP §3.2, decided
+ * Turning a picked *date* into a due *instant* (CLAUDE.md §7, decided
  * 2026-09-26).
  *
  * The borrower picks the last day they will use the item. It is due at the
@@ -13,9 +13,13 @@
  * only keeps the calendar from offering a date the server would refuse.
  */
 
+/** The closing time a fresh install uses; `DefaultDueTime` in due.go. */
+export const DEFAULT_DUE_TIME = "15:30"
+
 function parseTime(dueTime: string): [number, number] {
-  const [h, m] = dueTime.split(":").map((part) => Number.parseInt(part, 10))
-  return [Number.isFinite(h) ? h : 15, Number.isFinite(m) ? m : 30]
+  const valid = /^\d{2}:\d{2}$/.test(dueTime) ? dueTime : DEFAULT_DUE_TIME
+  const [h, m] = valid.split(":").map((part) => Number.parseInt(part, 10))
+  return [h, m]
 }
 
 /** The closing time on the first weekday after the day `lastDay` falls on. */

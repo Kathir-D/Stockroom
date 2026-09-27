@@ -57,7 +57,7 @@
   let error = $state<string | null>(null)
   let search = $state("")
   /**
-   * Retired items are out of browse for good (ROADMAP §3.4); this table shows
+   * Retired items are out of browse for good (CLAUDE.md §7); this table shows
    * them only when asked, so an admin can bring one back.
    */
   let showRetired = $state(false)
@@ -202,7 +202,7 @@
 
   /**
    * Retire is how an item leaves the catalogue once it has a history: delete
-   * is refused then, because the custody trail is the point (ROADMAP §3.4).
+   * is refused then, because the custody trail is the point (CLAUDE.md §7).
    */
   async function toggleRetired(unit: AssetListItem) {
     try {

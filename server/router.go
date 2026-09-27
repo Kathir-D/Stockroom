@@ -43,7 +43,7 @@ func newRouter(d deps) http.Handler {
 	})
 
 	// Sign-in. No session needed, so both routes share one rate limit
-	// (ROADMAP §3.1): a scan login answers differently for a number that
+	// (CLAUDE.md §7): a scan login answers differently for a number that
 	// exists, and without a cap a loop could walk the number space and sign
 	// in as whoever it found. 30 at once, then one a second, is faster than
 	// a queue of students at the counter and hopeless for that loop. The
@@ -104,7 +104,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /custody/active", d.withSession(d.handleActiveCustody, fullOnly))
 	mux.Handle("GET /custody/overdue", d.withSession(d.handleOverdueCustody, fullOnly))
 	// What an admin has to look at: returns with a damage note or no scan
-	// behind them, and closing a loan whose item is lost (ROADMAP §3.2).
+	// behind them, and closing a loan whose item is lost (CLAUDE.md §7).
 	mux.Handle("GET /custody/review", d.withSession(d.handleNeedsReview, fullOnly))
 	mux.Handle("POST /custody/{id}/reviewed", d.withSession(d.handleResolveReview, fullOnly))
 	mux.Handle("POST /assets/{id}/lost", d.withSession(d.handleMarkLost, fullOnly))
@@ -387,7 +387,7 @@ func logRequests(next http.Handler) http.Handler {
 }
 
 // withHostCheck refuses a request addressed to any host but this machine's
-// loopback names (ROADMAP §3.1).
+// loopback names (CLAUDE.md §7).
 //
 // The server listens on 127.0.0.1, but a listening address is not the same
 // as a host name. A web page open in the closet browser can point a domain it

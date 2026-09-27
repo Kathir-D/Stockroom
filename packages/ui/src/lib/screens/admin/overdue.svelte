@@ -4,12 +4,12 @@
    *
    * Two views of the roster of *who has what*: what is overdue, most late
    * first (`ListOverdueCustody`), and everything out, soonest due first
-   * (`ListActiveCustody`, ROADMAP §3.3). CLAUDE.md §1.6 promised both lists;
+   * (`ListActiveCustody`, CLAUDE.md §7). CLAUDE.md §1.6 promised both lists;
    * only the first had a screen.
    *
    * Two row actions. **Check in** turns a row back into a shelved item without
    * hunting for it in the browse list. **Mark lost** closes a loan whose item
-   * is not coming back (ROADMAP §3.2): before it, the only way out was to
+   * is not coming back (CLAUDE.md §7): before it, the only way out was to
    * record a return that never happened.
    *
    * This roster is admin-only, as distinct from the current holder of a

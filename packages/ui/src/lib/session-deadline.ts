@@ -5,7 +5,7 @@
  * but the UI only finds out on its next request, and `keep-alive.ts` only
  * sends one after somebody touches the machine. Until then the last person's
  * name, cart and browse list stay on screen for whoever walks up next
- * (ROADMAP §3.1).
+ * (CLAUDE.md §7).
  *
  * So this watches the same clock the server does, the time of the last
  * request, and once it is past the idle length by a margin it asks the

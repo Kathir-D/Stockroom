@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// What an admin has to look at (ROADMAP §3.2, §3.3): returns that carry a
+// What an admin has to look at (CLAUDE.md §7): returns that carry a
 // damage note or that no scan backs up, and items that were lost while out.
 // None of it blocks anyone. It is a list, a badge and a sign-in line, so the
 // closet keeps working while somebody catches up with it.
@@ -86,7 +86,7 @@ func reviewWords(reasons []string) []string {
 	return out
 }
 
-// MarkAssetLost closes an item's open loan without the item (ROADMAP §3.2).
+// MarkAssetLost closes an item's open loan without the item (CLAUDE.md §7).
 // Before this an admin could only record a return that never happened and
 // then mark the item unavailable, which left the history claiming it came
 // back. The loan closes with outcome "lost" and the note, the item becomes
@@ -147,7 +147,7 @@ func (db *DB) MarkAssetLost(ctx context.Context, actor Actor, assetID string, no
 }
 
 // adminNoticeFor is the sign-in line that tells an admin what is waiting:
-// items overdue and returns to review (ROADMAP §3.3). An overdue student may
+// items overdue and returns to review (CLAUDE.md §7). An overdue student may
 // never sign in again, so without this the Overdue tab was the only place
 // anybody would find out. Nil for a student, and when there is nothing.
 func (db *DB) adminNoticeFor(ctx context.Context, isAdmin bool) *string {

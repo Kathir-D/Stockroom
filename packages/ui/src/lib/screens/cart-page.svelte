@@ -83,7 +83,7 @@
     api
       .listUsers()
       .then((list) => {
-        // An archived account cannot hold anything (ROADMAP §3.4).
+        // An archived account cannot hold anything (CLAUDE.md §7).
         if (!cancelled) users = list.filter((u) => !u.archived_at)
       })
       .catch(() => {

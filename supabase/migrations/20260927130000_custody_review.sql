@@ -1,5 +1,5 @@
 -- Returns an admin should look at, lost items, and how each return happened
--- (ROADMAP §3.2).
+-- (CLAUDE.md §7).
 
 alter table custody_events
   -- How the item came back. scan = its barcode at scanner speed; typed = a
@@ -24,7 +24,7 @@ create index idx_custody_needs_review on custody_events (checked_in_at desc)
   where reviewed_at is null and review_reasons <> '{}';
 
 -- When a loan is due: the closing time on the next school day after the last
--- day of use the borrower picks (ROADMAP §3.2, decided 2026-09-26). 'HH:MM',
+-- day of use the borrower picks (CLAUDE.md §7, decided 2026-09-26). 'HH:MM',
 -- 24-hour, in this machine's time zone.
 alter table app_settings
   add column due_time text not null default '15:30'

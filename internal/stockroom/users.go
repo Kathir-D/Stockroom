@@ -253,7 +253,7 @@ func userLogEntry(actor Actor, action, verb string, p Profile) LogEntry {
 	}
 }
 
-// SetUserArchived archives or restores an account (ROADMAP §3.4). An
+// SetUserArchived archives or restores an account (CLAUDE.md §7). An
 // archived account cannot sign in, its sessions end now, and it drops out of
 // the pickers, while every custody row naming it stays: that is the point,
 // since custody history is what makes an account impossible to delete.
@@ -269,6 +269,13 @@ func (db *DB) SetUserArchived(ctx context.Context, actor Actor, id string, archi
 	}
 	var p Profile
 	err := db.withLoggedTx(ctx, actorLogID(actor), "archive user", func(tx pgx.Tx) error {
+		// Locked first, so a checkout to this account (which reads the row
+		// under a share lock) cannot commit between the check below and the
+		// update: it either finished already and is counted, or waits and
+		// then finds the account archived.
+		if _, err := tx.Exec(ctx, `select 1 from profiles where id = $1 for update`, id); err != nil {
+			return mapPgError("archive user", err)
+		}
 		if archived {
 			var open bool
 			if err := tx.QueryRow(ctx,

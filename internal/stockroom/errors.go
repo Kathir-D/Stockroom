@@ -15,7 +15,7 @@ var (
 	ErrBadCredentials = errors.New("bad credentials")
 	// ErrPasswordRequired is a card scan by an admin account. A scan proves
 	// someone holds the number, and an admin's number opens the whole admin
-	// panel, so an admin always finishes with a password (ROADMAP §3.1).
+	// panel, so an admin always finishes with a password (CLAUDE.md §7).
 	// server/ answers 401 with password_required so the sign-in screen can
 	// move straight to the password field with the number kept.
 	ErrPasswordRequired = errors.New("admin accounts sign in with a password")

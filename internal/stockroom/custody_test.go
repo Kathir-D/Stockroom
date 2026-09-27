@@ -78,8 +78,10 @@ func TestCheckOutAssetsToSelf(t *testing.T) {
 	if res.CustodianID != student.ID || res.CustodianName != "Test User" {
 		t.Fatalf("custodian: got %s / %q", res.CustodianID, res.CustodianName)
 	}
-	if !res.DueAt.Equal(due) {
-		t.Fatalf("due at: got %v, want %v", res.DueAt, due)
+	// The server moves the due time to the closing time on a school day.
+	h, m, _ := parseDueTime(db.dueTime(ctx))
+	if want := closingAtOrAfter(due.Local(), h, m); !res.DueAt.Equal(want) {
+		t.Fatalf("due at: got %v, want %v", res.DueAt, want)
 	}
 	// The cart order is what the confirmation lists, not the id order the
 	// row lock needed.

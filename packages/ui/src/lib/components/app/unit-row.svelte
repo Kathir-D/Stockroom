@@ -15,6 +15,7 @@
   import PlusIcon from "@lucide/svelte/icons/plus"
   import CheckIcon from "@lucide/svelte/icons/check"
   import XIcon from "@lucide/svelte/icons/x"
+  import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert"
   import type { Snippet } from "svelte"
   import { Button } from "@stockroom/ui/components/ui/button"
   import * as Tooltip from "@stockroom/ui/components/ui/tooltip"
@@ -154,12 +155,15 @@
     {/if}
 
     <!-- A damage report no admin has reviewed yet. The unit stays available
-         (ROADMAP §3.2), so the row says so before anyone takes it. -->
+         (CLAUDE.md §7), so the row says so before anyone takes it. No status
+         hue: those mean the five asset states and nothing else
+         (design-system.md rule 2), so the words and the icon carry it. -->
     {#if unit.damage_report}
       <span
-        class="shrink-0 rounded-sm bg-status-due-soon-bg px-1.5 text-xs font-medium text-status-due-soon"
+        class="inline-flex shrink-0 items-center gap-1 rounded-sm bg-raised px-1.5 text-xs font-medium text-fg"
         title={`Reported damaged: ${unit.damage_report}`}
       >
+        <TriangleAlertIcon class="size-3" aria-hidden="true" />
         Damage reported
       </span>
     {/if}

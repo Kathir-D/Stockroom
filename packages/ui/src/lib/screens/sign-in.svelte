@@ -48,7 +48,7 @@
     /**
      * Where to open instead of the number field: a card scanned on another
      * screen that has to finish here, an admin's at the password and an
-     * account with no password at setting one (ROADMAP §3.1).
+     * account with no password at setting one (CLAUDE.md §7).
      */
     start?: { number: string; step: "password" | "set-password"; message?: string } | null
   } = $props()
@@ -270,7 +270,7 @@
     } catch (err) {
       if (err instanceof api.ApiError && err.body.password_required === true) {
         // An admin's card identifies them; the password finishes it
-        // (ROADMAP §3.1). Keep the number so only the password is typed.
+        // (CLAUDE.md §7). Keep the number so only the password is typed.
         studentNumber = number
         step = "password"
         error = "Admin accounts sign in with a password."

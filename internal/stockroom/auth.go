@@ -80,7 +80,7 @@ func RequireFullSession(a Actor) error {
 	return nil
 }
 
-// errArchived refuses a sign-in by an archived account (ROADMAP §3.4).
+// errArchived refuses a sign-in by an archived account (CLAUDE.md §7).
 var errArchived = fmt.Errorf("%w: this account is archived. Ask an admin to restore it", ErrForbidden)
 
 // LoginResult is what both login paths return. NeedsPassword is true for a
@@ -137,7 +137,7 @@ func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResul
 	}
 	limited := p.PasswordHash == nil || *p.PasswordHash == ""
 	if p.IsAdmin {
-		// An admin's card identifies them and nothing more (ROADMAP §3.1,
+		// An admin's card identifies them and nothing more (CLAUDE.md §7,
 		// decided 2026-09-26). The number is printed on the card and any
 		// page on this machine can post it, and an admin session opens every
 		// account, every setting and the restore. So a scan never opens one:
@@ -188,6 +188,7 @@ func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password strin
 		return LoginResult{}, ErrBadCredentials
 	}
 	if err != nil {
+		guard.release(sn)
 		return LoginResult{}, err
 	}
 	if err := CheckPassword(p.PasswordHash, password); err != nil {

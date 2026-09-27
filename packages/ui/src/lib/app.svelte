@@ -124,7 +124,7 @@
       probe: () => api.me(),
     })
     // The student-number rule tells a card scanned on any screen from an
-    // item (ROADMAP §3.1); the idle length and the due time come with it.
+    // item (CLAUDE.md §7); the idle length and the due time come with it.
     void rules.load()
     void session.restore()
     return () => {
@@ -211,7 +211,7 @@
   }
 
   /**
-   * A student card scanned while somebody is signed in (ROADMAP §3.1,
+   * A student card scanned while somebody is signed in (CLAUDE.md §7,
    * decided 2026-09-26). It signs the current person out, dropping their
    * cart, and the card's owner in, the way scanning it at the sign-in screen
    * would. Before this the scan answered "not a Stockroom item", and the
@@ -350,14 +350,14 @@
    */
   async function saveDamageNote(custodyEventId: string, note: string) {
     await api.annotateCustody(custodyEventId, note)
-    // The note flags the item on every screen (ROADMAP §3.2), so the list
+    // The note flags the item on every screen (CLAUDE.md §7), so the list
     // behind the surface has to hear about it.
     void catalog.reload()
   }
 
   /**
    * "Return it" on a scan that asked first, because the person had checked the
-   * item out a few minutes before (ROADMAP §3.2). The item was scanned, so
+   * item out a few minutes before (CLAUDE.md §7). The item was scanned, so
    * the return counts as a scan and needs no admin's review.
    */
   async function confirmReturn(asset: AssetDetail) {

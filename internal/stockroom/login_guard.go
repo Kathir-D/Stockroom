@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// The typed-password lockout (ROADMAP §3.1). bcrypt makes each guess cost a
+// The typed-password lockout (CLAUDE.md §7). bcrypt makes each guess cost a
 // few tens of milliseconds, which is nothing against a loop on the closet PC,
 // so a number that fails too often is refused outright for a while. The
 // HTTP layer separately caps how fast the sign-in routes answer at all; this
@@ -25,11 +25,17 @@ const (
 
 // loginGuard counts recent failures per student number. In memory, like the
 // sessions: a restart forgets the counts, and so does everything else.
+//
+// An attempt is reserved by check and settled by fail, succeed or release.
+// Reserving counts it before bcrypt runs, so thirty guesses sent at once are
+// not all let through while none of them has failed yet: the attempts still
+// in flight count toward the limit alongside the failures already recorded.
 type loginGuard struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	fails map[string][]time.Time
-	until map[string]time.Time
+	mu      sync.Mutex
+	now     func() time.Time
+	fails   map[string][]time.Time
+	until   map[string]time.Time
+	pending map[string]int
 }
 
 // logins is the DB's guard, built on first use so a DB literal in a test
@@ -40,29 +46,62 @@ func (db *DB) logins() *loginGuard {
 }
 
 func newLoginGuard() *loginGuard {
-	return &loginGuard{now: time.Now, fails: map[string][]time.Time{}, until: map[string]time.Time{}}
+	return &loginGuard{now: time.Now, fails: map[string][]time.Time{}, until: map[string]time.Time{},
+		pending: map[string]int{}}
 }
 
-// check refuses a number that is locked, naming how long is left.
+// check refuses a number that is locked, naming how long is left, and
+// otherwise reserves an attempt the caller must settle with fail, succeed or
+// release.
 func (g *loginGuard) check(sn string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
 	if until, ok := g.until[sn]; ok {
 		if now.Before(until) {
-			mins := int(until.Sub(now).Minutes()) + 1
-			return fmt.Errorf("%w: too many wrong passwords for this number. Try again in %s",
-				ErrTooManyAttempts, plural(mins, "minute", "minutes"))
+			return lockedError(until.Sub(now))
 		}
 		delete(g.until, sn)
 	}
+	g.pruneLocked(now)
+	if len(g.fails[sn])+g.pending[sn] >= loginFailLimit {
+		// Enough guesses are already in flight to lock the number if they
+		// all fail. Refused rather than queued; the next try after they
+		// settle gets an answer.
+		return lockedError(loginLockout)
+	}
+	g.pending[sn]++
 	return nil
+}
+
+func lockedError(left time.Duration) error {
+	mins := int(left.Minutes()) + 1
+	return fmt.Errorf("%w: too many wrong passwords for this number. Try again in %s",
+		ErrTooManyAttempts, plural(mins, "minute", "minutes"))
+}
+
+// release settles a reserved attempt that neither failed nor succeeded, such
+// as one the database could not answer.
+func (g *loginGuard) release(sn string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.settleLocked(sn)
+}
+
+// settleLocked ends one reserved attempt. Caller holds mu.
+func (g *loginGuard) settleLocked(sn string) {
+	if g.pending[sn] <= 1 {
+		delete(g.pending, sn)
+	} else {
+		g.pending[sn]--
+	}
 }
 
 // fail records a wrong password and reports whether it locked the number.
 func (g *loginGuard) fail(sn string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.settleLocked(sn)
 	now := g.now()
 	g.pruneLocked(now)
 	recent := append(g.fails[sn], now)
@@ -79,6 +118,7 @@ func (g *loginGuard) fail(sn string) bool {
 func (g *loginGuard) succeed(sn string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.settleLocked(sn)
 	delete(g.fails, sn)
 	delete(g.until, sn)
 }

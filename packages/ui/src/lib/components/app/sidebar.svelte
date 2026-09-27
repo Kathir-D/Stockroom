@@ -51,7 +51,7 @@
     { tab: "categories", label: "Categories", icon: FolderTreeIcon },
     { tab: "users", label: "Users", icon: UsersIcon },
     { tab: "overdue", label: "Out and overdue", icon: AlertTriangleIcon },
-    // Damage reports and returns no scan backs up (ROADMAP §3.2).
+    // Damage reports and returns no scan backs up (CLAUDE.md §7).
     { tab: "attention", label: "Needs attention", icon: FlagIcon },
     { tab: "backup", label: "Backup", icon: DatabaseBackupIcon },
     { tab: "settings", label: "Settings", icon: SettingsIcon },

@@ -58,7 +58,7 @@
     onSignOut?: () => void
     /**
      * Return an item the scanner checked out a few minutes ago, after the
-     * surface asked (ROADMAP §3.2). Resolves when the return has committed.
+     * surface asked (CLAUDE.md §7). Resolves when the return has committed.
      */
     onConfirmReturn?: (asset: AssetDetail) => Promise<void>
   } = $props()
@@ -102,7 +102,7 @@
   let dismissButton = $state<HTMLElement | null>(null)
 
   /**
-   * Seconds until a finished checkout signs the person out (ROADMAP §3.1,
+   * Seconds until a finished checkout signs the person out (CLAUDE.md §7,
    * decided 2026-09-26). The closet PC is shared, and a prompt the student
    * walks away from left their session open for the whole idle timeout, so
    * the next person at the machine borrowed under their name. Keep going
@@ -197,7 +197,16 @@
   }
 
   function close() {
+    // Escape during the checkout countdown is the person finishing, not
+    // staying: only Keep going stops the sign-out (CLAUDE.md §7). Without
+    // this, closing the surface cleared the timer and left the session open
+    // for the whole idle timeout.
+    const signOutNow = signOutIn !== null
     scanStore.close()
+    if (signOutNow) {
+      signOutIn = null
+      onSignOut?.()
+    }
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -279,7 +288,7 @@
             {:else if surface.result.action === "confirm_return"}
               <!-- A scan of something this person checked out a few minutes ago.
                    Nothing has happened: somebody scanning their pile again on
-                   the way out must not return it all (ROADMAP §3.2). -->
+                   the way out must not return it all (CLAUDE.md §7). -->
               <p class="font-semibold text-fg-muted">
                 You checked this out {sinceCheckout(surface.result.returned_from?.checked_out_at)} ago.
               </p>
@@ -305,8 +314,8 @@
               {/if}
               {#if asset.damage_report}
                 <!-- Still available, by decision: the next person can take it,
-                     but should look it over first (ROADMAP §3.2). -->
-                <p class="text-status-due-soon">
+                     but should look it over first (CLAUDE.md §7). -->
+                <p class="text-fg">
                   Reported damaged: "{asset.damage_report}". Look it over before you take it.
                 </p>
               {/if}

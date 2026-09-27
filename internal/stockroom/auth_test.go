@@ -64,7 +64,7 @@ func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	}
 }
 
-// An admin's card never opens a session (ROADMAP §3.1): with a password it
+// An admin's card never opens a session (CLAUDE.md §7): with a password it
 // asks for the password, and without one it is refused outright, because the
 // first scan would otherwise choose the admin's password.
 func TestAdminScanNeedsPassword(t *testing.T) {
@@ -161,5 +161,31 @@ func TestRequireAdmin(t *testing.T) {
 		if err := RequireAdmin(c.a); !errors.Is(err, c.want) {
 			t.Errorf("%s: RequireAdmin = %v, want %v", name, err, c.want)
 		}
+	}
+}
+
+// Guesses sent at once are counted before bcrypt answers any of them, so a
+// burst gets no more tries than one at a time.
+func TestLoginGuardCountsAttemptsInFlight(t *testing.T) {
+	g := newLoginGuard()
+	for i := range loginFailLimit {
+		if err := g.check("123456"); err != nil {
+			t.Fatalf("reservation %d = %v, want nil", i+1, err)
+		}
+	}
+	if err := g.check("123456"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("a sixth guess in flight = %v, want ErrTooManyAttempts", err)
+	}
+	if err := g.check("654321"); err != nil {
+		t.Errorf("another number = %v, want nil", err)
+	}
+	// Released attempts free their places; a success clears the number.
+	g.release("123456")
+	if err := g.check("123456"); err != nil {
+		t.Errorf("after a release = %v, want nil", err)
+	}
+	g.succeed("123456")
+	if g.pending["123456"] != loginFailLimit-1 {
+		t.Errorf("pending after one success = %d, want %d", g.pending["123456"], loginFailLimit-1)
 	}
 }

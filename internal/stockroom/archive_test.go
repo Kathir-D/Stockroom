@@ -10,7 +10,7 @@ import (
 
 // An archived account keeps its history, cannot sign in, loses its open
 // sessions and cannot be a custodian; restoring it undoes all of that
-// (ROADMAP §3.4).
+// (CLAUDE.md §7).
 func TestArchivedAccount(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
@@ -142,7 +142,7 @@ func TestRosterArchivesMissingStudents(t *testing.T) {
 }
 
 // A retired item keeps its history, leaves browse and its kit, cannot be
-// made available or put in a kit, and comes back available (ROADMAP §3.4).
+// made available or put in a kit, and comes back available (CLAUDE.md §7).
 func TestRetiredAsset(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()

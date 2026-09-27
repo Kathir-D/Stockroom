@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // RosterAction is what an import did with one CSV line. It is a named type
@@ -62,7 +64,7 @@ type RosterOptions struct {
 	// PhotoDir is where relative photo_path values are read from.
 	PhotoDir string
 	// ArchiveMissing archives every student account the file does not name
-	// (ROADMAP §3.4): the new year's roster retires last year's graduates.
+	// (CLAUDE.md §7): the new year's roster retires last year's graduates.
 	// Admins are never archived this way, nor anyone holding an item.
 	ArchiveMissing bool
 }
@@ -225,27 +227,52 @@ func (db *DB) archiveMissing(ctx context.Context, actor Actor, named []string, r
 	if len(ids) == 0 {
 		return nil
 	}
-	// The custody check is repeated here: an item checked out since the
-	// select above must still keep its borrower active.
-	archived, err := db.Pool.Query(ctx, `
-		update profiles p set archived_at = now()
-		 where p.id = any($1::uuid[]) and p.archived_at is null
-		   and not exists (select 1 from active_custody ac where ac.custodian_id = p.id)
-		returning p.id::text`, ids)
-	if err != nil {
-		return mapPgError("archive accounts", err)
-	}
-	defer archived.Close()
-	for archived.Next() {
-		var id string
-		if err := archived.Scan(&id); err != nil {
-			return err
+	// One transaction: lock the rows first, so a checkout to one of these
+	// accounts (which reads the row under a share lock) either committed
+	// already and is seen by the custody check below, or waits and then finds
+	// the account archived. Each archived account gets its own log row, in
+	// the transaction that archived it.
+	var archivedIDs []string
+	err = db.withLoggedTx(ctx, actorLogID(actor), "archive accounts", func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select 1 from profiles where id = any($1::uuid[]) for update`, ids); err != nil {
+			return mapPgError("archive accounts", err)
 		}
-		res.Archived++
-		db.Sessions.DeleteForProfile(id)
+		rows, err := tx.Query(ctx, `
+			update profiles p set archived_at = now()
+			 where p.id = any($1::uuid[]) and p.archived_at is null
+			   and not exists (select 1 from active_custody ac where ac.custodian_id = p.id)
+			returning `+profileColumns, ids)
+		if err != nil {
+			return mapPgError("archive accounts", err)
+		}
+		var archived []Profile
+		for rows.Next() {
+			p, err := scanProfile(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			archived = append(archived, p)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return mapPgError("archive accounts", err)
+		}
+		for _, p := range archived {
+			entry := userLogEntry(actor, "user_archived", "Archived (not on the new roster)", p)
+			if err := writeLog(ctx, tx, entry); err != nil {
+				return err
+			}
+			archivedIDs = append(archivedIDs, p.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	if err := archived.Err(); err != nil {
-		return mapPgError("archive accounts", err)
+	res.Archived = len(archivedIDs)
+	for _, id := range archivedIDs {
+		db.Sessions.DeleteForProfile(id)
 	}
 	return nil
 }
@@ -279,7 +306,7 @@ func (db *DB) upsertRosterRow(ctx context.Context, first, last, studentNumber, p
 	// after that would leave the row naming a path that is already gone.
 	// The file is named by the profile's id, not the student number. /files/
 	// needs no session, so a file named by number would answer 200 or 404 for
-	// any number anybody tried, and the number is a sign-in (ROADMAP §3.1).
+	// any number anybody tried, and the number is a sign-in (CLAUDE.md §7).
 	// A new account's id is chosen here so the file can be named before the
 	// row exists.
 	var id string
@@ -309,6 +336,7 @@ func (db *DB) upsertProfileRow(ctx context.Context, sn, first, last string, phot
 // a photo named after it matches. Blank lets the database choose.
 func (db *DB) upsertProfileRowWithID(ctx context.Context, id, sn, first, last string, photoPath *string) (RosterAction, error) {
 	var inserted bool
+	var gotID string
 	err := db.Pool.QueryRow(ctx, `
 		insert into profiles (id, student_number, first_name, last_name, full_name, photo_path)
 		values (coalesce(nullif($6, '')::uuid, gen_random_uuid()), $1, $2, $3, $4, $5)
@@ -318,8 +346,16 @@ func (db *DB) upsertProfileRowWithID(ctx context.Context, id, sn, first, last st
 		    full_name  = excluded.full_name,
 		    photo_path = coalesce(excluded.photo_path, profiles.photo_path),
 		    archived_at = null
-		returning (xmax = 0)`,
-		sn, first, last, fullName(first, last), photoPath, id).Scan(&inserted)
+		where $6 = '' or profiles.id = nullif($6, '')::uuid
+		returning (xmax = 0), id::text`,
+		sn, first, last, fullName(first, last), photoPath, id).Scan(&inserted, &gotID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && id != "" && gotID != id) {
+		// Another import created this number between choosing the id and
+		// this insert, so the photo is named after an id the row does not
+		// have. The update's where clause left the row alone, and returning
+		// an error rolls the photo back (storePhoto).
+		return "", fmt.Errorf("%w: student number %s was added by another import at the same time; import this row again", ErrConflict, sn)
+	}
 	if err != nil {
 		return "", mapPgError("import roster row", err)
 	}
@@ -362,7 +398,7 @@ func (ps photoStore) openFor(src string) (*os.File, string, error) {
 
 // RenameProfilePhotosByID moves every profile photo still named by student
 // number to its profile id, and points the row at the new name. Profile
-// photos were named by number until 2026-09-26 (ROADMAP §3.1), and /files/
+// photos were named by number until 2026-09-26 (CLAUDE.md §7), and /files/
 // serves them without a session. Run at every start; after the first it
 // finds nothing. Best effort: a file it cannot move keeps working under its
 // old name, and the failure is returned for the log.
@@ -396,12 +432,20 @@ func (db *DB) RenameProfilePhotosByID(ctx context.Context) error {
 		to := "profiles/" + m.id + strings.ToLower(filepath.Ext(m.from))
 		src := filepath.Join(db.UploadsDir, filepath.FromSlash(m.from))
 		dst := filepath.Join(db.UploadsDir, filepath.FromSlash(to))
-		if err := os.Rename(src, dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+		err := os.Rename(src, dst)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 			continue
 		}
+		moved := err == nil
 		if _, err := db.Pool.Exec(ctx, `update profiles set photo_path = $2 where id = $1`, m.id, to); err != nil {
 			errs = append(errs, err)
+			// The row still names the old file, so put it back.
+			if moved {
+				if err := os.Rename(dst, src); err != nil {
+					errs = append(errs, err)
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
