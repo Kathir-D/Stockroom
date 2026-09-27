@@ -27,6 +27,13 @@ func writeError(w http.ResponseWriter, err error) {
 	msg := "internal error"
 
 	switch {
+	case errors.Is(err, stockroom.ErrPasswordRequired):
+		// The one 401 the sign-in screen answers by asking for a password
+		// rather than by saying the number is wrong.
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": err.Error(), "password_required": true})
+		return
+	case errors.Is(err, stockroom.ErrTooManyAttempts):
+		status, msg = http.StatusTooManyRequests, err.Error()
 	case errors.Is(err, stockroom.ErrNotFound):
 		status, msg = http.StatusNotFound, err.Error()
 	case errors.Is(err, stockroom.ErrUnauthorized),

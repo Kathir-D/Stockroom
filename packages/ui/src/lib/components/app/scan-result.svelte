@@ -44,6 +44,7 @@
     onRemove,
     onSaveNote,
     onSignOut,
+    onConfirmReturn,
   }: {
     canAdd?: boolean
     inCart?: boolean
@@ -55,7 +56,36 @@
     /** Persists the damage note against the custody event the scan just closed. */
     onSaveNote?: (custodyEventId: string, note: string) => Promise<void>
     onSignOut?: () => void
+    /**
+     * Return an item the scanner checked out a few minutes ago, after the
+     * surface asked (CLAUDE.md §7). Resolves when the return has committed.
+     */
+    onConfirmReturn?: (asset: AssetDetail) => Promise<void>
   } = $props()
+
+  let returning = $state(false)
+  let returnError = $state<string | null>(null)
+
+  async function confirmReturn(asset: AssetDetail) {
+    if (!onConfirmReturn) return
+    returning = true
+    returnError = null
+    try {
+      await onConfirmReturn(asset)
+    } catch (err) {
+      returnError = err instanceof Error ? err.message : String(err)
+    } finally {
+      returning = false
+    }
+  }
+
+  /** "3 minutes", for the question about a loan this person just made. */
+  function sinceCheckout(iso: string | undefined): string {
+    if (!iso) return "a moment"
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+    if (minutes < 1) return "less than a minute"
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`
+  }
 
   const surface = $derived(scanStore.surface)
 
@@ -70,6 +100,48 @@
   let primaryButton = $state<HTMLElement | null>(null)
   /** The branch's always-pressable way out — Close, Cancel, Done. */
   let dismissButton = $state<HTMLElement | null>(null)
+
+  /**
+   * Seconds until a finished checkout signs the person out (CLAUDE.md §7,
+   * decided 2026-09-26). The closet PC is shared, and a prompt the student
+   * walks away from left their session open for the whole idle timeout, so
+   * the next person at the machine borrowed under their name. Keep going
+   * stops it; so does any scan, because a fresh scan replaces the surface.
+   *
+   * Not for an admin checking out to somebody else: that is counter work,
+   * and signing the admin out after every student's cart would mean typing
+   * the admin password between each one.
+   */
+  const SIGN_OUT_AFTER_CHECKOUT_S = 10
+  let signOutIn = $state<number | null>(null)
+
+  $effect(() => {
+    const current = surface
+    if (current?.kind !== "checkout" || !onSignOut) {
+      signOutIn = null
+      return
+    }
+    if (viewerId !== null && current.result.custodian_id !== viewerId) {
+      signOutIn = null
+      return
+    }
+    signOutIn = SIGN_OUT_AFTER_CHECKOUT_S
+    const timer = setInterval(() => {
+      if (signOutIn === null) return
+      signOutIn -= 1
+      if (signOutIn <= 0) {
+        clearInterval(timer)
+        signOutIn = null
+        onSignOut?.()
+      }
+    }, 1000)
+    return () => clearInterval(timer)
+  })
+
+  function keepGoing() {
+    signOutIn = null
+    close()
+  }
 
   // A fresh surface resets the note field, because a new scan replaces the
   // contents outright rather than layering on the previous one.
@@ -125,7 +197,16 @@
   }
 
   function close() {
+    // Escape during the checkout countdown is the person finishing, not
+    // staying: only Keep going stops the sign-out (CLAUDE.md §7). Without
+    // this, closing the surface cleared the timer and left the session open
+    // for the whole idle timeout.
+    const signOutNow = signOutIn !== null
     scanStore.close()
+    if (signOutNow) {
+      signOutIn = null
+      onSignOut?.()
+    }
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -204,6 +285,19 @@
                 </p>
               {/if}
               <p class="text-fg-faint">Put it back on the shelf.</p>
+            {:else if surface.result.action === "confirm_return"}
+              <!-- A scan of something this person checked out a few minutes ago.
+                   Nothing has happened: somebody scanning their pile again on
+                   the way out must not return it all (CLAUDE.md §7). -->
+              <p class="font-semibold text-fg-muted">
+                You checked this out {sinceCheckout(surface.result.returned_from?.checked_out_at)} ago.
+              </p>
+              <h2 class="truncate text-2xl font-semibold text-fg">{asset.name}</h2>
+              <Serial value={asset.serial_number} class="text-lg" />
+              <p class="text-fg">Are you returning it now?</p>
+              {#if returnError}
+                <p class="text-status-overdue" role="alert">{returnError}</p>
+              {/if}
             {:else}
               <h2 class="truncate text-2xl font-semibold text-fg">{asset.name}</h2>
               <Serial value={asset.serial_number} class="text-lg" />
@@ -216,6 +310,13 @@
               {#if asset.status === "unavailable"}
                 <p class="text-fg-muted">
                   {asset.condition ?? "Marked unavailable — ask an admin before taking it."}
+                </p>
+              {/if}
+              {#if asset.damage_report}
+                <!-- Still available, by decision: the next person can take it,
+                     but should look it over first (CLAUDE.md §7). -->
+                <p class="text-fg">
+                  Reported damaged: "{asset.damage_report}". Look it over before you take it.
                 </p>
               {/if}
             {/if}
@@ -259,7 +360,14 @@
         {/if}
 
         <div class="mt-(--gutter) flex justify-end gap-2">
-          {#if surface.result.checkable && onAdd}
+          {#if surface.result.action === "confirm_return"}
+            <!-- Keep it takes focus: a stray Enter, or the next scan in a pile,
+                 must not return what the person is carrying out. -->
+            <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={close}>Keep it</Button>
+            <Button size="tap" disabled={returning || !onConfirmReturn} onclick={() => confirmReturn(asset)}>
+              {returning ? "Returning…" : "Return it"}
+            </Button>
+          {:else if surface.result.checkable && onAdd}
             <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={close}>
               Cancel
             </Button>
@@ -335,12 +443,20 @@
             </li>
           {/each}
         </ul>
-        <!-- The sign-out prompt is required by CLAUDE.md §7: the closet PC is
-             shared, so the next person must not inherit this session. -->
+        <!-- The closet PC is shared, so the next person must not inherit this
+             session (CLAUDE.md §7): it signs itself out unless stopped. -->
+        {#if signOutIn !== null}
+          <p class="mt-(--gutter) text-fg-muted" aria-live="polite">
+            Signing you out in {signOutIn} {signOutIn === 1 ? "second" : "seconds"}.
+          </p>
+        {/if}
         <div class="mt-(--gutter) flex justify-end gap-2">
-          <!-- Done takes focus rather than Sign out: a stray Enter — a scanner
-               burst arriving as this opens — must not end the session. -->
-          <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={close}>Done</Button>
+          <!-- Keep going takes focus rather than Sign out: a stray Enter, such as
+               a scanner burst arriving as this opens, must not end the session
+               early. Letting the countdown run is the sign-out. -->
+          <Button bind:ref={dismissButton} size="tap" variant="ghost" onclick={keepGoing}>
+            {signOutIn !== null ? "Keep going" : "Done"}
+          </Button>
           <Button size="tap" onclick={() => onSignOut?.()}>
             <LogOutIcon aria-hidden="true" />
             Sign out

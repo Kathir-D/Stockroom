@@ -38,6 +38,7 @@
   import AdminBackup from "@stockroom/ui/screens/admin/backup.svelte"
   import AdminCategories from "@stockroom/ui/screens/admin/categories.svelte"
   import AdminOverdue from "@stockroom/ui/screens/admin/overdue.svelte"
+  import AdminAttention from "@stockroom/ui/screens/admin/attention.svelte"
   import AdminPhotoWall from "@stockroom/ui/screens/admin/photo-wall.svelte"
   import AdminActivity from "@stockroom/ui/screens/admin/activity.svelte"
   import AdminSettings from "@stockroom/ui/screens/admin/settings.svelte"
@@ -52,6 +53,9 @@
   import type { AssetDetail, AssetListItem, CheckoutResult, KitCheckInResult } from "./api/types"
   import { attachKeepAlive } from "./keep-alive"
   import { normalizeSerial } from "./scanner"
+  import { attachSessionDeadline } from "./session-deadline"
+  import { looksLikeStudentNumber } from "./student-number"
+  import { rules } from "./stores/rules.svelte"
   import { cart } from "./stores/cart.svelte"
   import { cartItems } from "./stores/cart-items.svelte"
   import { catalog } from "./stores/catalog.svelte"
@@ -81,13 +85,25 @@
     onUnauthorized: () => {
       if (!session.signedIn) return
       session.clear()
-      scanStore.clear()
-      catalog.reset()
-      kits.reset()
-      cartItems.clear()
-      toast.info("Signed out after ten minutes idle.")
+      resetScreens()
+      const minutes = Math.round(rules.idleSeconds / 60)
+      toast.info(`Signed out after ${minutes} ${minutes === 1 ? "minute" : "minutes"} idle.`)
     },
   })
+
+  /**
+   * Where the sign-in screen opens after a card switch it has to finish: an
+   * admin's card asks for the password, and an account with none sets one.
+   */
+  let signInStart = $state<{ number: string; step: "password" | "set-password"; message?: string } | null>(null)
+
+  /** Everything on screen that belongs to whoever was signed in. */
+  function resetScreens() {
+    scanStore.clear()
+    catalog.reset()
+    kits.reset()
+    cartItems.clear()
+  }
 
   onMount(() => {
     const stopRouter = router.start()
@@ -99,10 +115,22 @@
       lastRequestAt: api.lastRequestAt,
       ping: () => api.me(),
     })
+    // Back to sign-in once the server has dropped an idle session, rather
+    // than when somebody next touches the machine.
+    const stopDeadline = attachSessionDeadline({
+      isSignedIn: () => session.signedIn,
+      lastRequestAt: api.lastRequestAt,
+      idleMs: () => rules.idleSeconds * 1000,
+      probe: () => api.me(),
+    })
+    // The student-number rule tells a card scanned on any screen from an
+    // item (CLAUDE.md §7); the idle length and the due time come with it.
+    void rules.load()
     void session.restore()
     return () => {
       stopRouter()
       stopKeepAlive()
+      stopDeadline()
     }
   })
 
@@ -159,6 +187,7 @@
   }
 
   function onSignedIn() {
+    void rules.load(true)
     // The overdue warning is blocking and comes before the browse screen (§8.1).
     overdueOpen = session.hasOverdue
     router.go({ name: "browse", category: catalog.category })
@@ -177,11 +206,51 @@
 
   async function signOut() {
     await session.signOut()
-    scanStore.clear()
-    catalog.reset()
-    kits.reset()
-    cartItems.clear()
+    resetScreens()
     router.go({ name: "browse" })
+  }
+
+  /**
+   * A student card scanned while somebody is signed in (CLAUDE.md §7,
+   * decided 2026-09-26). It signs the current person out, dropping their
+   * cart, and the card's owner in, the way scanning it at the sign-in screen
+   * would. Before this the scan answered "not a Stockroom item", and the
+   * easy way out was to carry on as the last person.
+   *
+   * The new session is opened first and the old one ended after, so an
+   * unknown number leaves the current person signed in and gets the usual
+   * "not a Stockroom item". Returns false for that case.
+   */
+  async function switchAccount(number: string): Promise<boolean> {
+    const previous = api.getToken()
+    let result: Awaited<ReturnType<typeof api.loginByScan>>
+    try {
+      result = await api.loginByScan(number)
+    } catch (error) {
+      if (!(error instanceof api.ApiError) || error.status === 404 || error.status === 400) return false
+      if (error.body.password_required === true) {
+        // An admin's card: whoever was here is signed out, and the admin
+        // finishes at the password field.
+        await api.logoutToken(previous)
+        session.clear()
+        resetScreens()
+        signInStart = { number, step: "password", message: "Admin accounts sign in with a password." }
+        return true
+      }
+      scanStore.show({ kind: "error", code: number, message: error.message })
+      return true
+    }
+    await api.logoutToken(previous)
+    session.forget()
+    resetScreens()
+    await session.adopt(result)
+    if (result.needs_password) {
+      signInStart = { number, step: "set-password" }
+      return true
+    }
+    toast.info(`Signed in as ${session.displayName}.`)
+    onSignedIn()
+    return true
   }
 
   /**
@@ -191,11 +260,11 @@
    * before this resolves, an available one comes back as the detail payload. The
    * frontend never branches on the code itself (CLAUDE.md §10).
    */
-  async function onBurst({ code }: { code: string }) {
+  async function onBurst({ code, fast = true }: { code: string; fast?: boolean }) {
     const serial = normalizeSerial(code)
     if (!serial) return
     try {
-      const result = await api.scan(serial)
+      const result = await api.scan(serial, fast)
       scanStore.show({ kind: "scan", result })
       if (result.action === "checked_in") {
         // The list and the viewer's own overdue flag both just changed.
@@ -206,6 +275,10 @@
       }
     } catch (error) {
       if (error instanceof api.ApiError && error.status === 404) {
+        // No item has this code. At scanner speed, and shaped like a student
+        // number, it is somebody's card. A serial can never equal a student
+        // number (the database refuses it), so this is a lookup, not a guess.
+        if (fast && looksLikeStudentNumber(serial, rules.studentNumber) && (await switchAccount(serial))) return
         scanStore.show({ kind: "unknown", code: serial })
         return
       }
@@ -277,6 +350,24 @@
    */
   async function saveDamageNote(custodyEventId: string, note: string) {
     await api.annotateCustody(custodyEventId, note)
+    // The note flags the item on every screen (CLAUDE.md §7), so the list
+    // behind the surface has to hear about it.
+    void catalog.reload()
+  }
+
+  /**
+   * "Return it" on a scan that asked first, because the person had checked the
+   * item out a few minutes before (CLAUDE.md §7). The item was scanned, so
+   * the return counts as a scan and needs no admin's review.
+   */
+  async function confirmReturn(asset: AssetDetail) {
+    const result = await api.checkIn(asset.id, undefined, true)
+    scanStore.show({
+      kind: "scan",
+      result: { action: "checked_in", asset: result.asset, checkable: false, returned_from: result.returned_from },
+    })
+    catalog.patchUnit(result.asset)
+    await session.refresh()
   }
 
   function onCheckedOut(result: CheckoutResult) {
@@ -301,7 +392,13 @@
        and a flash of loading state is worse than a beat of nothing. -->
   <div class="min-h-screen bg-ground"></div>
 {:else if !signedIn}
-  <SignIn {onSignedIn} />
+  <SignIn
+    start={signInStart}
+    onSignedIn={() => {
+      signInStart = null
+      onSignedIn()
+    }}
+  />
 {:else}
   <ScanListener onBurst={(burst) => onBurst(burst)} />
 
@@ -386,6 +483,16 @@
             />
           {/if}
 
+          {#if session.visibleAdminNotice && route.name !== "setup"}
+            <BackupNotice
+              warning={{ message: session.visibleAdminNotice, admins: [] }}
+              isAdmin={session.isAdmin}
+              actionLabel="Open Needs attention"
+              onOpenBackup={() => router.go({ name: "admin", tab: "attention" })}
+              onDismiss={() => session.dismissAdminNotice()}
+            />
+          {/if}
+
           {#if route.name === "cart"}
             <CartPage onBack={() => router.backToBrowse()} {onCheckedOut} />
           {:else if route.name === "kits"}
@@ -403,6 +510,8 @@
               <AdminUsers />
             {:else if route.tab === "overdue"}
               <AdminOverdue />
+            {:else if route.tab === "attention"}
+              <AdminAttention />
             {:else if route.tab === "settings"}
               <AdminSettings />
             {:else if route.tab === "photo-wall"}
@@ -440,6 +549,7 @@
     onRemove={removeFromCart}
     onSaveNote={saveDamageNote}
     onSignOut={signOut}
+    onConfirmReturn={confirmReturn}
   />
 
   <OverdueNotice

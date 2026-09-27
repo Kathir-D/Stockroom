@@ -44,6 +44,16 @@ export interface Profile {
   created_at: string;
   /** photo_path under `/files/`, derived server-side. Never built by hand. */
   photo_url: string | null;
+  /** Whether the account has a password yet. */
+  has_password?: boolean;
+  /**
+   * Who chose the current password: `owner` at the first scan sign-in,
+   * `admin` by a reset, `failsafe` from .env. Null when unknown or unset.
+   */
+  password_set_by?: "owner" | "admin" | "failsafe" | null;
+  password_set_at?: string | null;
+  /** Set on an account that can no longer sign in, kept for its history. */
+  archived_at?: string | null;
 }
 
 export interface Category {
@@ -86,6 +96,14 @@ export interface Asset {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Set on an item taken out of the catalogue for good; browse never lists it. */
+  retired_at?: string | null;
+  /**
+   * The damage note on the item's latest return that no admin has reviewed.
+   * The item stays available; every screen shows the report.
+   */
+  damage_report?: string | null;
+  damage_reported_at?: string | null;
 }
 
 /**
@@ -121,7 +139,11 @@ export interface AssetListItem extends Asset {
 
 export type AssetDetail = AssetListItem;
 
-export type ScanAction = "checked_in" | "detail";
+/**
+ * `confirm_return` is a scan of an item the scanner checked out a few minutes
+ * ago: nothing happened yet, and the screen asks before returning it.
+ */
+export type ScanAction = "checked_in" | "detail" | "confirm_return";
 
 export interface ScanResult {
   action: ScanAction;
@@ -132,7 +154,7 @@ export interface ScanResult {
    * was just checked in gets a confirmation, not an add screen.
    */
   checkable: boolean;
-  /** Who held the item, set only when `action` is `checked_in`. */
+  /** Who held the item: set when `action` is `checked_in` or `confirm_return`. */
   returned_from: AssetCustody | null;
 }
 
@@ -195,6 +217,13 @@ export interface CustodyRecord {
   overdue: boolean;
   /** Whole days past due, to the return for a closed event, to now for an open one. */
   days_overdue: number;
+  /** `lost` when an admin closed the loan without the item. */
+  outcome?: "returned" | "lost";
+  /** How it came back: scan, typed, button, kit or lost. */
+  returned_via?: string | null;
+  /** Why an admin should look at this return (`damage`, `not_scanned`). */
+  review_reasons?: string[];
+  reviewed_at?: string | null;
 }
 
 /**
@@ -220,6 +249,8 @@ export interface LoginResult {
   backup_warning: BackupWarning | null;
   /** An admin's closet-camera problem (offline, disk low). Never a student's. */
   camera_warning?: string | null;
+  /** What is waiting for an admin: overdue items, returns to check. */
+  admin_notice?: string | null;
 }
 
 export interface MeResult {
@@ -227,6 +258,7 @@ export interface MeResult {
   has_overdue: boolean;
   backup_warning: BackupWarning | null;
   camera_warning?: string | null;
+  admin_notice?: string | null;
 }
 
 export interface UserInput {
@@ -343,6 +375,12 @@ export interface RosterResult {
   updated: number;
   failed: number;
   rows: RosterRow[];
+  /** Students archived because the file no longer names them. */
+  archived?: number;
+  /** Students left active because they still hold an item. */
+  archive_skipped?: string[];
+  /** Why nobody was archived, when archiving was asked for and refused. */
+  archive_refused?: string;
 }
 
 export interface TableExport {
@@ -423,6 +461,8 @@ export interface Settings {
   student_number_format: "digits" | "alphanumeric" | "custom";
   /** Only meaningful when the format is custom; kept when switching away. */
   student_number_pattern: string;
+  /** "HH:MM": a loan is due at this time on the next school day after its last day of use. */
+  due_time: string;
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;

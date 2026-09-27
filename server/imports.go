@@ -135,5 +135,12 @@ func (d deps) handleSignInConfig(w http.ResponseWriter, r *http.Request) {
 		"student_number_format": string(format),
 		"student_number_filter": stockroom.StudentNumberFilterPattern(),
 		"needs_setup":           needs,
+		// How long a session lasts without a request, so the UI can go back
+		// to this screen when the server has dropped one (CLAUDE.md §7)
+		// instead of showing the last person's name until somebody touches it.
+		"session_idle_seconds": int(d.db.Sessions.Idle().Seconds()),
+		// The checkout rules, so the date picker offers what the server
+		// accepts (CLAUDE.md §7).
+		"checkout": d.db.CheckoutRules(r.Context()),
 	})
 }

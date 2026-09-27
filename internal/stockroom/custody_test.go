@@ -78,8 +78,10 @@ func TestCheckOutAssetsToSelf(t *testing.T) {
 	if res.CustodianID != student.ID || res.CustodianName != "Test User" {
 		t.Fatalf("custodian: got %s / %q", res.CustodianID, res.CustodianName)
 	}
-	if !res.DueAt.Equal(due) {
-		t.Fatalf("due at: got %v, want %v", res.DueAt, due)
+	// The server moves the due time to the closing time on a school day.
+	h, m, _ := parseDueTime(db.dueTime(ctx))
+	if want := closingAtOrAfter(due.Local(), h, m); !res.DueAt.Equal(want) {
+		t.Fatalf("due at: got %v, want %v", res.DueAt, want)
 	}
 	// The cart order is what the confirmation lists, not the id order the
 	// row lock needed.
@@ -180,7 +182,9 @@ func TestAnnotateCustodyEvent(t *testing.T) {
 		t.Fatalf("annotate an open event: got %v, want ErrConflict", err)
 	}
 
-	// Closed by the scan, then annotated.
+	// Closed by the scan, then annotated. Backdated first: a scan straight
+	// after your own checkout asks rather than returning.
+	backdate(t, db, asset)
 	res, err := db.ScanItem(ctx, actor, serial)
 	if err != nil {
 		t.Fatalf("scan: %v", err)

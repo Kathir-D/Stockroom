@@ -187,6 +187,16 @@ func (db *DB) AddAssetToKit(ctx context.Context, actor Actor, kitID, assetID str
 	}
 
 	err := db.withLoggedTx(ctx, actorLogID(actor), "add to kit", func(tx pgx.Tx) error {
+		var retired bool
+		// No row falls through to the insert, whose foreign key names the
+		// missing asset (explainKitInsert).
+		err := tx.QueryRow(ctx, `select retired_at is not null from assets where id = $1`, assetID).Scan(&retired)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return mapPgError("add to kit", err)
+		}
+		if retired {
+			return fmt.Errorf("%w: that item is retired", ErrConflict)
+		}
 		if _, err := tx.Exec(ctx,
 			`insert into kit_items (kit_id, asset_id) values ($1, $2)`, kitID, assetID); err != nil {
 			return err
@@ -310,7 +320,7 @@ func (db *DB) CheckInKit(ctx context.Context, actor Actor, kitID string) (KitChe
 		// there is no unit for a note to be about. A note goes on the unit
 		// through AnnotateCustodyEvent afterwards, which is where the scan
 		// flow already puts it (CLAUDE.md §13, 2026-09-14).
-		done, err := db.CheckInAsset(ctx, actor, item.ID, nil)
+		done, err := db.CheckInAssetVia(ctx, actor, item.ID, nil, ReturnedByKit)
 		if err != nil {
 			out.Failed = append(out.Failed, KitReturnProblem{KitItemRef: ref, Reason: err.Error()})
 			continue

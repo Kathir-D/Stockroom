@@ -405,6 +405,14 @@ func (db *DB) restoreLocked(ctx context.Context, actor Actor, archive *openArchi
 		return res, err
 	}
 	res.Warnings = append(res.Warnings, warnings...)
+	// Not a refusal: a backup taken before the rule existed may hold a
+	// collision, and restoring it is still better than not. The load ran in
+	// replica mode, which skips the triggers that would have caught it.
+	clashes, err := scanCodeCollisions(ctx, tx)
+	if err != nil {
+		return res, err
+	}
+	res.Warnings = append(res.Warnings, clashes...)
 
 	// ---- only now, the one non-transactional write ------------------------
 
@@ -849,4 +857,36 @@ func (db *DB) RestoreFromTarget(ctx context.Context, actor Actor, target, id str
 
 	opts.Source = target
 	return db.RestoreFromReader(ctx, actor, body, opts)
+}
+
+// scanCodeCollisions names every serial that equals a student number, ignoring
+// case. The triggers from 20260927090000 refuse new ones, but they check
+// nothing already in the table, and a restore loads with triggers off. A
+// collision makes the card unusable anywhere but the sign-in screen: a scan
+// of it finds the item first, so the card never switches accounts.
+func scanCodeCollisions(ctx context.Context, q querier) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		select a.serial_number, coalesce(nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), ''), p.full_name, 'an account')
+		  from assets a join profiles p on lower(p.student_number) = lower(a.serial_number)
+		 order by a.serial_number`)
+	if err != nil {
+		return nil, fmt.Errorf("check serials against student numbers: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var serial, name string
+		if err := rows.Scan(&serial, &name); err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf(
+			"Serial %s is also the student number of %s, so scanning that card finds the item. Change one of them.", serial, name))
+	}
+	return out, rows.Err()
+}
+
+// ScanCodeCollisions is scanCodeCollisions against the live database, for the
+// start-up log: an install upgraded past 20260927090000 may already hold one.
+func (db *DB) ScanCodeCollisions(ctx context.Context) ([]string, error) {
+	return scanCodeCollisions(ctx, db.Pool)
 }

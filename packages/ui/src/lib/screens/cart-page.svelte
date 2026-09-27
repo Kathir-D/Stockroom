@@ -83,7 +83,8 @@
     api
       .listUsers()
       .then((list) => {
-        if (!cancelled) users = list
+        // An archived account cannot hold anything (CLAUDE.md §7).
+        if (!cancelled) users = list.filter((u) => !u.archived_at)
       })
       .catch(() => {
         // Not fatal: without the list, an admin checks out to themselves, which

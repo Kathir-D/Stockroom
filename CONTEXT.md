@@ -28,7 +28,7 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Kit.** A named bundle of units that goes out and comes back together — `kits` plus `kit_items` — "Kit #1 = this camera, this lens, this bag". A kit is a *label over assets* and never holds custody itself: adding one to the cart expands it into its asset ids, and checkout commits them like any other cart, one custody event per asset. An asset belongs to **at most one kit**, so a shared unit cannot make a second kit quietly incomplete. A kit is added to a cart whole or not at all; it is returned unit by unit, because the units come back to the counter one at a time.
 
-**Photo.** A file under `UPLOADS_DIR`, either `profiles/<student number>.<ext>` or `assets/<asset id>.<ext>`. The row stores the relative path (`photo_path`); the API hands out the URL (`photo_url`, under `/files/`). Each table's `photo_path` has exactly one writer: `SetAssetPhoto` for assets, the roster import for profiles.
+**Photo.** A file under `UPLOADS_DIR`, either `profiles/<profile id>.<ext>` or `assets/<asset id>.<ext>` (never the student number, which `/files/` would confirm to anyone who asked). The row stores the relative path (`photo_path`); the API hands out the URL (`photo_url`, under `/files/`). Each table's `photo_path` has exactly one writer: `SetAssetPhoto` for assets, the roster import for profiles.
 
 ## Custody
 
@@ -42,13 +42,23 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Cart.** The frontend's pending set of asset ids. Never sent to the server until **checkout**, which commits the whole cart in one transaction or none of it. A cart is a set: the same id twice is one item. It only ever holds items being borrowed; returns never touch it.
 
-**Due date / due at.** The instant a checkout must be returned by, chosen by the user, at most seven days (7 × 24 h, exact) after the request.
+**Due date / due at.** The instant a checkout must be returned by: the closing time on the next school day after the borrower's last day of use.
+
+**Last day of use.** The date a borrower picks at checkout, at most seven days out. The item is **due** at the closing time (`due_time`, 15:30 unless changed) on the next weekday after it.
 
 **Overdue.** An open custody event whose `due_at` has passed. Defined once, by the `overdue_custody` view; the sign-in warning, the checkout block and the admin list all read it. An **overdue block** refuses a checkout to a custodian with anything overdue; an admin may **override** it per checkout.
 
 **Check-in / return.** Closing an open custody event. Any signed-in user may return any item. An optional **damage note** lands on the event's `condition_in`.
 
 **Scan.** A barcode arriving as a keystroke burst. Two decisions, made in two places. The frontend decides what the code *is* from which screen is active: on the sign-in screen it is a student number and goes to the login endpoint; anywhere else it is an asset serial and goes to `POST /scan`. The server then decides what a serial scan *does* from the open custody row: an item that is out is checked in, an item on the shelf comes back as the detail popup.
+
+**Needs attention.** A return an admin should look at: one with a **damage report** (the item stays available and shows the report everywhere until reviewed), or a student's return no scan backs up. Cleared by an admin marking it **reviewed**.
+
+**Lost.** A loan an admin closed without the item. The item becomes unavailable and the borrower is no longer overdue on it.
+
+**Archived account.** An account that can no longer sign in, kept for its custody history. How a graduate leaves, since an account with history cannot be deleted.
+
+**Retired item.** An item out of the catalogue for good: unavailable, hidden from browse, out of its kit, history kept.
 
 ## Operations
 

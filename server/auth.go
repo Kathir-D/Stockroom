@@ -66,7 +66,12 @@ func (d deps) handleSetInitialPassword(w http.ResponseWriter, r *http.Request, a
 // POST /auth/logout
 func (d deps) handleLogout(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	d.db.Logout(r.Context(), actor)
-	clearSessionCookie(w)
+	// Only when the cookie holds the session that just ended. A card scanned
+	// on another screen signs the new person in first and then ends the old
+	// session by its bearer token, and by then the cookie is the new one's.
+	if c, err := r.Cookie(sessionCookie); err != nil || c.Value == tokenFrom(r) {
+		clearSessionCookie(w)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

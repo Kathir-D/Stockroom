@@ -163,6 +163,17 @@
             <dd class="truncate text-fg">{asset.condition}</dd>
           {/if}
 
+          {#if asset.damage_report}
+            <!-- Unreviewed; still available by decision (CLAUDE.md §7). -->
+            <dt class="text-xs text-fg-muted">Damage reported</dt>
+            <dd class="text-fg">{asset.damage_report}</dd>
+          {/if}
+
+          {#if asset.retired_at}
+            <dt class="text-xs text-fg-muted">Retired</dt>
+            <dd class="text-fg">No longer in the catalogue</dd>
+          {/if}
+
           {#if asset.custody}
             {@const held = asset.custody}
             {@const who = held.custodian_id === viewerId ? "You" : held.custodian_name}
@@ -237,7 +248,7 @@
                   <span class="truncate text-fg">{row.custodian_name}</span>
                   <span class="shrink-0 text-xs text-fg-faint">
                     {dateTime(row.checked_out_at)} →
-                    {row.checked_in_at ? dateTime(row.checked_in_at) : "still out"}
+                    {row.outcome === "lost" ? `lost ${dateTime(row.checked_in_at)}` : row.checked_in_at ? dateTime(row.checked_in_at) : "still out"}
                     {#if row.days_overdue > 0}
                       <span class="text-status-overdue">· {row.days_overdue}d late</span>
                     {/if}

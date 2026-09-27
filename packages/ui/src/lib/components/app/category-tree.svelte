@@ -39,11 +39,12 @@
     depth?: number
   } = $props()
 
-  // Expansion is local per level. Seeded from openPath so arriving at
-  // #/browse/<model-id> by URL reveals where that model lives.
-  let expanded = $state<Record<string, boolean>>(
-    Object.fromEntries(openPath.map((id) => [id, true]))
-  )
+  // Expansion is local per level, and only holds what somebody toggled. A
+  // node nobody touched falls back to openPath (below), so arriving at
+  // #/browse/<model-id> by URL reveals where that model lives, and so does a
+  // later change of selection. Seeding this from openPath instead only ever
+  // read its first value.
+  let expanded = $state<Record<string, boolean>>({})
 
   function toggle(id: string) {
     expanded = { ...expanded, [id]: !expanded[id] }

@@ -38,9 +38,20 @@
   } from "../student-number"
   import { session } from "../stores/session.svelte"
 
-  let { onSignedIn }: { onSignedIn: () => void } = $props()
-
   type Step = "number" | "password" | "set-password"
+
+  let {
+    onSignedIn,
+    start = null,
+  }: {
+    onSignedIn: () => void
+    /**
+     * Where to open instead of the number field: a card scanned on another
+     * screen that has to finish here, an admin's at the password and an
+     * account with no password at setting one (CLAUDE.md §7).
+     */
+    start?: { number: string; step: "password" | "set-password"; message?: string } | null
+  } = $props()
 
   let step = $state<Step>("number")
   let numberInput = $state<HTMLInputElement | null>(null)
@@ -53,6 +64,13 @@
 
   let error = $state<string | null>(null)
   let busy = $state(false)
+
+  $effect(() => {
+    if (!start) return
+    studentNumber = start.number
+    step = start.step
+    error = start.message ?? null
+  })
 
   /**
    * The install's student-number rule, served by `GET /signin/config`. Digits
@@ -250,6 +268,14 @@
       if (result.needs_password) step = "set-password"
       else onSignedIn()
     } catch (err) {
+      if (err instanceof api.ApiError && err.body.password_required === true) {
+        // An admin's card identifies them; the password finishes it
+        // (CLAUDE.md §7). Keep the number so only the password is typed.
+        studentNumber = number
+        step = "password"
+        error = "Admin accounts sign in with a password."
+        return
+      }
       error = messageFor(err)
       studentNumber = ""
     } finally {

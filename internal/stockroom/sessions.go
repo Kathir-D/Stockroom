@@ -107,6 +107,11 @@ func (s *SessionStore) Get(token string) (Session, bool) {
 	return *sess, true
 }
 
+// Idle is the timeout a session gets; zero means sessions never expire.
+func (s *SessionStore) Idle() time.Duration {
+	return s.idle
+}
+
 // Upgrade clears the Limited flag after the account sets its first password.
 // Unknown tokens are ignored.
 func (s *SessionStore) Upgrade(token string) {

@@ -200,7 +200,7 @@ func (db *DB) DeleteAsset(ctx context.Context, actor Actor, id string) error {
 	case open:
 		return fmt.Errorf("%w: item is checked out; check it in first", ErrConflict)
 	case everHeld:
-		return fmt.Errorf("%w: item has custody history; mark it unavailable instead of deleting it", ErrConflict)
+		return fmt.Errorf("%w: item has custody history, so deleting it would delete that history. Retire it instead", ErrConflict)
 	}
 
 	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "asset_deleted", ActorID: actorLogID(actor), AssetID: id,
@@ -253,13 +253,16 @@ func (db *DB) SetAssetStatus(ctx context.Context, actor Actor, id string, status
 		return AssetDetail{}, mapPgError("set asset status", err)
 	}
 
-	var open bool
-	err = tx.QueryRow(ctx, `select `+openCustodySQL("$1::uuid"), id).Scan(&open)
+	var open, retired bool
+	err = tx.QueryRow(ctx, `select `+openCustodySQL("$1::uuid")+`, retired_at is not null from assets where id = $1`, id).Scan(&open, &retired)
 	if err != nil {
 		return AssetDetail{}, mapPgError("set asset status", err)
 	}
 	if open {
 		return AssetDetail{}, fmt.Errorf("%w: item is checked out; check it in first", ErrConflict)
+	}
+	if retired && status == StatusAvailable {
+		return AssetDetail{}, fmt.Errorf("%w: item is retired; bring it back first", ErrConflict)
 	}
 
 	if _, err := tx.Exec(ctx, `update assets set status = $2 where id = $1`, id, string(status)); err != nil {
@@ -369,4 +372,70 @@ func assetLabel(ctx context.Context, q querier, id string) string {
 		return "an item"
 	}
 	return label
+}
+
+// SetAssetRetired takes an item out of the catalogue for good, or brings it
+// back (CLAUDE.md §7). Retiring is what an admin does instead of deleting an
+// item with custody history: it becomes unavailable, disappears from browse
+// and from its kit, and keeps every custody row. Bringing it back makes it
+// available again. Refused while the item is out.
+func (db *DB) SetAssetRetired(ctx context.Context, actor Actor, id string, retired bool) (AssetDetail, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return AssetDetail{}, err
+	}
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return AssetDetail{}, fmt.Errorf("retire asset: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := markLogged(ctx, tx, actorLogID(actor)); err != nil {
+		return AssetDetail{}, err
+	}
+
+	var was bool
+	err = tx.QueryRow(ctx, `select retired_at is not null from assets where id = $1 for update`, id).Scan(&was)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AssetDetail{}, fmt.Errorf("%w: no asset %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return AssetDetail{}, mapPgError("retire asset", err)
+	}
+	var open bool
+	if err := tx.QueryRow(ctx, `select `+openCustodySQL("$1::uuid"), id).Scan(&open); err != nil {
+		return AssetDetail{}, mapPgError("retire asset", err)
+	}
+	if open {
+		return AssetDetail{}, fmt.Errorf("%w: item is checked out; check it in or mark it lost first", ErrConflict)
+	}
+	if was == retired {
+		if err := tx.Commit(ctx); err != nil {
+			return AssetDetail{}, err
+		}
+		return db.GetAsset(ctx, actor, id)
+	}
+
+	label := assetLabel(ctx, tx, id)
+	if retired {
+		// A retired unit left in a kit would make the kit incomplete for good,
+		// found at the shelf by a student who cannot fix it (ADR 0002).
+		if _, err := tx.Exec(ctx, `delete from kit_items where asset_id = $1`, id); err != nil {
+			return AssetDetail{}, mapPgError("retire asset", err)
+		}
+		if _, err := tx.Exec(ctx, `update assets set retired_at = now(), status = 'unavailable' where id = $1`, id); err != nil {
+			return AssetDetail{}, mapPgError("retire asset", err)
+		}
+	} else if _, err := tx.Exec(ctx, `update assets set retired_at = null, status = 'available' where id = $1`, id); err != nil {
+		return AssetDetail{}, mapPgError("retire asset", err)
+	}
+	action, summary := "asset_retired", "Retired "+label
+	if !retired {
+		action, summary = "asset_unretired", "Brought back retired item "+label
+	}
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: action, ActorID: actorLogID(actor), AssetID: id, Summary: summary}); err != nil {
+		return AssetDetail{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AssetDetail{}, fmt.Errorf("retire asset: %w", err)
+	}
+	return db.GetAsset(ctx, actor, id)
 }

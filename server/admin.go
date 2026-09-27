@@ -78,6 +78,23 @@ func (d deps) handleSetAssetStatus(w http.ResponseWriter, r *http.Request, actor
 	writeJSON(w, http.StatusOK, asset)
 }
 
+// POST /assets/{id}/retire {"retired": true|false}
+func (d deps) handleRetireAsset(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in struct {
+		Retired bool `json:"retired"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	asset, err := d.db.SetAssetRetired(r.Context(), actor, r.PathValue("id"), in.Retired)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, asset)
+}
+
 // POST /assets/{id}/photo
 // A multipart form with the picture in a "photo" part. The response is the
 // asset, whose photo_url points at the copy just written under /files/.

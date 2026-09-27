@@ -71,6 +71,23 @@ func (d deps) handleDeleteUser(w http.ResponseWriter, r *http.Request, actor sto
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// POST /users/{id}/archive {"archived": true|false}
+func (d deps) handleArchiveUser(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in struct {
+		Archived bool `json:"archived"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	p, err := d.db.SetUserArchived(r.Context(), actor, r.PathValue("id"), in.Archived)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
 // POST /users/{id}/password {"password": "..."}
 // Admin reset. SetUserPassword drops that user's sessions itself, so an old
 // password cannot keep one alive.
@@ -104,6 +121,9 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 
 	var csvBody io.Reader
 	photoDir := ""
+	// archive_missing archives every student the file does not name
+	// (CLAUDE.md §7). A form field, or ?archive_missing=1 on a text/csv body.
+	archiveMissing := r.URL.Query().Get("archive_missing") == "1"
 
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	switch {
@@ -120,6 +140,7 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 		defer f.Close()
 		csvBody = f
 		photoDir = strings.TrimSpace(r.FormValue("photo_dir"))
+		archiveMissing = archiveMissing || r.FormValue("archive_missing") == "1"
 	case ct == "text/csv":
 		csvBody = r.Body
 	default:
@@ -127,7 +148,8 @@ func (d deps) handleImportRoster(w http.ResponseWriter, r *http.Request, actor s
 		return
 	}
 
-	res, err := d.db.ImportRoster(r.Context(), actor, csvBody, photoDir)
+	res, err := d.db.ImportRosterWith(r.Context(), actor, csvBody,
+		stockroom.RosterOptions{PhotoDir: photoDir, ArchiveMissing: archiveMissing})
 	if err != nil {
 		writeError(w, err)
 		return

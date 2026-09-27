@@ -28,6 +28,9 @@ type AssetFilter struct {
 	// Search is free text over name, description, serial number and asset
 	// tag.
 	Search string
+	// IncludeRetired lists retired items too. Only an admin's list honours
+	// it; browse never shows them (CLAUDE.md §7).
+	IncludeRetired bool
 }
 
 // AssetListItem is an asset as the browse list shows it: the row plus the
@@ -109,6 +112,9 @@ func (db *DB) ListAssets(ctx context.Context, actor Actor, filter AssetFilter) (
 	tree, err := loadCategoryTree(ctx, db.Pool)
 	if err != nil {
 		return nil, err
+	}
+	if !actor.IsAdmin {
+		filter.IncludeRetired = false
 	}
 	where, args, err := assetFilterSQL(tree, filter)
 	if err != nil {
@@ -226,6 +232,9 @@ func (db *DB) GetAsset(ctx context.Context, actor Actor, id string) (AssetDetail
 func assetFilterSQL(tree categoryTree, filter AssetFilter) (string, []any, error) {
 	conds := []string{"true"}
 	var args []any
+	if !filter.IncludeRetired {
+		conds = append(conds, "a.retired_at is null")
+	}
 
 	if id := strings.TrimSpace(filter.CategoryID); id != "" {
 		if _, err := tree.require(id); err != nil {
@@ -381,13 +390,24 @@ func deref(s *string) string {
 // table.
 const assetColumns = `a.id, a.asset_tag, a.name, a.description, a.category_id, a.location_id,
 	a.status, a.condition, a.serial_number, a.purchase_date, a.purchase_price,
-	a.warranty_expiration, a.custom_fields, a.photo_path, a.created_by, a.created_at, a.updated_at`
+	a.warranty_expiration, a.custom_fields, a.photo_path, a.created_by, a.created_at, a.updated_at,
+	a.retired_at,
+	(select coalesce(nullif(dr.condition_in, ''), 'Reported damaged') ` + unreviewedDamageSQL + `),
+	(select dr.checked_in_at ` + unreviewedDamageSQL + `)`
+
+// unreviewedDamageSQL finds an asset's latest return that carries a damage
+// report no admin has cleared. The two subqueries in assetColumns share it so
+// the note and its time cannot come from different returns.
+const unreviewedDamageSQL = `from custody_events dr
+	where dr.asset_id = a.id and '` + ReviewDamage + `' = any(dr.review_reasons) and dr.reviewed_at is null
+	order by dr.checked_in_at desc nulls last, dr.id desc limit 1`
 
 func scanAsset(row pgx.Row) (Asset, error) {
 	var a Asset
 	err := row.Scan(&a.ID, &a.AssetTag, &a.Name, &a.Description, &a.CategoryID, &a.LocationID,
 		&a.Status, &a.Condition, &a.SerialNumber, &a.PurchaseDate, &a.PurchasePrice,
-		&a.WarrantyExpiration, &a.CustomFields, &a.PhotoPath, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt)
+		&a.WarrantyExpiration, &a.CustomFields, &a.PhotoPath, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
+		&a.RetiredAt, &a.DamageReport, &a.DamageReportedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Asset{}, ErrNotFound
 	}

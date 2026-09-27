@@ -31,7 +31,7 @@ func TestMapPgError(t *testing.T) {
 			name:       "foreign key violation is a conflict",
 			err:        &pgconn.PgError{Code: "23503", ConstraintName: "custody_events_custodian_id_fkey"},
 			want:       ErrConflict,
-			wantSubstr: "user has custody history",
+			wantSubstr: "custody history",
 		},
 		{
 			name:       "malformed uuid or enum is invalid input",

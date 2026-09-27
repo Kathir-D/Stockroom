@@ -45,6 +45,7 @@
 
   /** Open, returned, or open-and-late. The word, never the colour alone (§1.3). */
   function rowState(row: CustodyRecord): { label: string; class: string } {
+    if (row.outcome === "lost") return { label: "Lost", class: "text-status-overdue" }
     if (row.checked_in_at) return { label: "Returned", class: "text-fg-muted" }
     if (row.overdue)
       return {

@@ -75,7 +75,8 @@
     { label: "Admin · Assets", keywords: "add edit serial photo", route: { name: "admin", tab: "assets" }, adminOnly: true },
     { label: "Admin · Categories", keywords: "tree type model", route: { name: "admin", tab: "categories" }, adminOnly: true },
     { label: "Admin · Users", keywords: "accounts roster import password", route: { name: "admin", tab: "users" }, adminOnly: true },
-    { label: "Admin · Overdue", keywords: "late who has what", route: { name: "admin", tab: "overdue" }, adminOnly: true },
+    { label: "Admin · Out and overdue", keywords: "late who has what lost", route: { name: "admin", tab: "overdue" }, adminOnly: true },
+    { label: "Admin · Needs attention", keywords: "damage review returns", route: { name: "admin", tab: "attention" }, adminOnly: true },
     { label: "Admin · Backup", keywords: "restore archive drive github photos", route: { name: "admin", tab: "backup" }, adminOnly: true },
     { label: "Admin · Settings", keywords: "schedule retention token folder", route: { name: "admin", tab: "settings" }, adminOnly: true },
   ]

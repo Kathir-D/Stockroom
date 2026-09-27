@@ -80,6 +80,9 @@ func RequireFullSession(a Actor) error {
 	return nil
 }
 
+// errArchived refuses a sign-in by an archived account (CLAUDE.md §7).
+var errArchived = fmt.Errorf("%w: this account is archived. Ask an admin to restore it", ErrForbidden)
+
 // LoginResult is what both login paths return. NeedsPassword is true for a
 // scan login by an account with no password: the token is a limited session
 // whose only permitted call is SetInitialPassword.
@@ -96,6 +99,9 @@ type LoginResult struct {
 	// CameraWarning is set for an admin when the closet camera is on and
 	// needs attention (camera_watch.go). Never for a student.
 	CameraWarning *string `json:"camera_warning"`
+	// AdminNotice counts what is waiting for an admin: overdue items and
+	// returns to review (review.go). Never for a student.
+	AdminNotice *string `json:"admin_notice"`
 }
 
 // LoginByScan signs in from an ID-card scan: student number only, no
@@ -125,7 +131,32 @@ func (db *DB) LoginByScan(ctx context.Context, studentNumber string) (LoginResul
 	// An empty hash counts as no password, the same way CheckPassword and
 	// SetInitialPassword read it, so a blank column can still be set from
 	// the first scan login instead of locking the account out.
+	if p.ArchivedAt != nil {
+		db.logFailedSignInFor(ctx, p, sn, "scan", "the account is archived")
+		return LoginResult{}, errArchived
+	}
 	limited := p.PasswordHash == nil || *p.PasswordHash == ""
+	if p.IsAdmin {
+		// An admin's card identifies them and nothing more (CLAUDE.md §7,
+		// decided 2026-09-26). The number is printed on the card and any
+		// page on this machine can post it, and an admin session opens every
+		// account, every setting and the restore. So a scan never opens one:
+		// the screen moves to the password field with the number kept.
+		//
+		// An admin with no password yet cannot take the first-scan path a
+		// student takes either, because whoever scanned first would choose
+		// the admin's password. Another admin sets it from Admin -> Users.
+		if limited {
+			db.logFailedSignInFor(ctx, p, sn, "scan", "admin account has no password yet")
+			return LoginResult{}, fmt.Errorf("%w: this admin account has no password yet. Ask another admin to set one in Admin, Users", ErrPasswordNotSet)
+		}
+		db.logBestEffort(ctx, LogEntry{
+			Category: LogAccount, Action: "signin_password_required", ActorID: p.ID,
+			Summary: fmt.Sprintf("%s scanned an admin card: asked for the password", profileLabel(p)),
+			Details: map[string]any{"method": "scan", "code": sn},
+		})
+		return LoginResult{}, ErrPasswordRequired
+	}
 	return db.openSession(ctx, p, limited, "scan")
 }
 
@@ -143,21 +174,42 @@ func (db *DB) LoginByPassword(ctx context.Context, studentNumber, password strin
 		db.logFailedSignIn(ctx, "", "password", "not a valid student number")
 		return LoginResult{}, err
 	}
+	guard := db.logins()
+	if err := guard.check(sn); err != nil {
+		db.logFailedSignIn(ctx, sn, "password", "locked after too many wrong passwords")
+		return LoginResult{}, err
+	}
 	p, err := db.profileByStudentNumber(ctx, sn)
 	if errors.Is(err, ErrNotFound) {
+		// Counted like a wrong password, so guessing numbers through this
+		// route is as slow as guessing passwords.
+		guard.fail(sn)
 		db.logFailedSignIn(ctx, sn, "password", "no account has that number")
 		return LoginResult{}, ErrBadCredentials
 	}
 	if err != nil {
+		guard.release(sn)
 		return LoginResult{}, err
 	}
 	if err := CheckPassword(p.PasswordHash, password); err != nil {
+		// Counted whatever the reason, so probing numbers for "no password
+		// yet" is as slow as guessing passwords.
+		locked := guard.fail(sn)
 		reason := "wrong password"
 		if errors.Is(err, ErrPasswordNotSet) {
 			reason = "the account has no password yet"
+		} else if locked {
+			reason = "wrong password; the number is locked for a few minutes"
 		}
 		db.logFailedSignInFor(ctx, p, sn, "password", reason)
 		return LoginResult{}, err
+	}
+	guard.succeed(sn)
+	// Checked after the password, so a wrong guess cannot learn which
+	// numbers belong to archived accounts.
+	if p.ArchivedAt != nil {
+		db.logFailedSignInFor(ctx, p, sn, "password", "the account is archived")
+		return LoginResult{}, errArchived
 	}
 	return db.openSession(ctx, p, false, "password")
 }
@@ -221,6 +273,7 @@ func (db *DB) openSession(ctx context.Context, p Profile, limited bool, method s
 	if !limited {
 		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
 		out.CameraWarning = db.cameraWarningFor(ctx, p.IsAdmin)
+		out.AdminNotice = db.adminNoticeFor(ctx, p.IsAdmin)
 	}
 	return out, nil
 }
@@ -237,7 +290,7 @@ func (db *DB) SetInitialPassword(ctx context.Context, actor Actor, password stri
 	}
 	err = db.withLoggedTx(ctx, actor.ID, "set initial password", func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
-			`update profiles set password_hash = $2
+			`update profiles set password_hash = $2, password_set_at = now(), password_set_by = 'owner'
 			 where id = $1 and (password_hash is null or password_hash = '')`,
 			actor.ID, hash)
 		if err != nil {
@@ -291,7 +344,7 @@ func (db *DB) Resolve(ctx context.Context, token string) (Actor, error) {
 		return Actor{}, ErrUnauthorized
 	}
 	p, err := db.profileByID(ctx, sess.ProfileID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, ErrNotFound) || (err == nil && p.ArchivedAt != nil) {
 		db.Sessions.Delete(token)
 		return Actor{}, ErrUnauthorized
 	}
@@ -312,6 +365,7 @@ type MeResult struct {
 	HasOverdue    bool           `json:"has_overdue"`
 	BackupWarning *BackupWarning `json:"backup_warning"`
 	CameraWarning *string        `json:"camera_warning"`
+	AdminNotice   *string        `json:"admin_notice"`
 }
 
 // Me returns the actor's own profile. Any session, including a limited one,
@@ -329,6 +383,7 @@ func (db *DB) Me(ctx context.Context, actor Actor) (MeResult, error) {
 	if !actor.Limited {
 		out.BackupWarning = db.backupWarningFor(ctx, p.IsAdmin)
 		out.CameraWarning = db.cameraWarningFor(ctx, p.IsAdmin)
+		out.AdminNotice = db.adminNoticeFor(ctx, p.IsAdmin)
 	}
 	return out, nil
 }
@@ -347,12 +402,13 @@ func (db *DB) hasOverdue(ctx context.Context, profileID string) (bool, error) {
 // profileColumns is the select list every profile query uses, in the order
 // scanProfile expects.
 const profileColumns = `id, email, password_hash, full_name, role, student_number,
-	first_name, last_name, photo_path, is_admin, created_at`
+	first_name, last_name, photo_path, is_admin, created_at, password_set_at, password_set_by, archived_at`
 
 func scanProfile(row pgx.Row) (Profile, error) {
 	var p Profile
 	err := row.Scan(&p.ID, &p.Email, &p.PasswordHash, &p.FullName, &p.Role, &p.StudentNumber,
-		&p.FirstName, &p.LastName, &p.PhotoPath, &p.IsAdmin, &p.CreatedAt)
+		&p.FirstName, &p.LastName, &p.PhotoPath, &p.IsAdmin, &p.CreatedAt,
+		&p.PasswordSetAt, &p.PasswordSetBy, &p.ArchivedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Profile{}, ErrNotFound
 	}
@@ -360,6 +416,7 @@ func scanProfile(row pgx.Row) (Profile, error) {
 		return Profile{}, fmt.Errorf("scan profile: %w", err)
 	}
 	p.PhotoURL = photoURL(p.PhotoPath)
+	p.HasPassword = p.PasswordHash != nil && *p.PasswordHash != ""
 	return p, nil
 }
 

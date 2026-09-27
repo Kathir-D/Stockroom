@@ -57,14 +57,17 @@ func fullName(first, last string) string {
 	return strings.TrimSpace(first + " " + last)
 }
 
-// ListUsers returns every account, admins first, then by name. Admin only.
+// ListUsers returns every account, archived ones last, then admins first,
+// then by name. Admin only. Archived accounts are included, flagged by
+// archived_at, because the Users screen shows them behind a toggle; the
+// pickers leave them out.
 func (db *DB) ListUsers(ctx context.Context, actor Actor) ([]Profile, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err
 	}
 	rows, err := db.Pool.Query(ctx,
 		`select `+profileColumns+` from profiles
-		 order by is_admin desc, last_name nulls last, first_name nulls last, student_number nulls last`)
+		 order by archived_at is not null, is_admin desc, last_name nulls last, first_name nulls last, student_number nulls last`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -226,7 +229,8 @@ func (db *DB) SetUserPassword(ctx context.Context, actor Actor, id, password str
 	}
 	err = db.withLoggedTx(ctx, actorLogID(actor), "set user password", func(tx pgx.Tx) error {
 		p, err := scanProfile(tx.QueryRow(ctx,
-			`update profiles set password_hash = $2 where id = $1 returning `+profileColumns, id, hash))
+			`update profiles set password_hash = $2, password_set_at = now(), password_set_by = 'admin'
+			 where id = $1 returning `+profileColumns, id, hash))
 		if err != nil {
 			return mapPgError("set user password", err)
 		}
@@ -247,4 +251,61 @@ func userLogEntry(actor Actor, action, verb string, p Profile) LogEntry {
 		Summary: fmt.Sprintf("%s %s", verb, profileLabel(p)),
 		Details: map[string]any{"user_id": p.ID, "user": profileLabel(p), "student_number": deref(p.StudentNumber)},
 	}
+}
+
+// SetUserArchived archives or restores an account (CLAUDE.md §7). An
+// archived account cannot sign in, its sessions end now, and it drops out of
+// the pickers, while every custody row naming it stays: that is the point,
+// since custody history is what makes an account impossible to delete.
+//
+// Refused for your own account, and while the account holds anything, which
+// would leave an item out to somebody who can no longer bring it back.
+func (db *DB) SetUserArchived(ctx context.Context, actor Actor, id string, archived bool) (Profile, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return Profile{}, err
+	}
+	if archived && id == actor.ID {
+		return Profile{}, fmt.Errorf("%w: cannot archive your own account", ErrConflict)
+	}
+	var p Profile
+	err := db.withLoggedTx(ctx, actorLogID(actor), "archive user", func(tx pgx.Tx) error {
+		// Locked first, so a checkout to this account (which reads the row
+		// under a share lock) cannot commit between the check below and the
+		// update: it either finished already and is counted, or waits and
+		// then finds the account archived.
+		if _, err := tx.Exec(ctx, `select 1 from profiles where id = $1 for update`, id); err != nil {
+			return mapPgError("archive user", err)
+		}
+		if archived {
+			var open bool
+			if err := tx.QueryRow(ctx,
+				`select exists (select 1 from active_custody where custodian_id = $1)`, id).Scan(&open); err != nil {
+				return mapPgError("archive user", err)
+			}
+			if open {
+				return fmt.Errorf("%w: this account has items checked out. Check them in or mark them lost first", ErrConflict)
+			}
+		}
+		var err error
+		p, err = scanProfile(tx.QueryRow(ctx, `
+			update profiles
+			   set archived_at = case when $2 then coalesce(archived_at, now()) else null end
+			 where id = $1
+			returning `+profileColumns, id, archived))
+		if err != nil {
+			return mapPgError("archive user", err)
+		}
+		action, verb := "user_archived", "Archived account for"
+		if !archived {
+			action, verb = "user_unarchived", "Restored archived account for"
+		}
+		return writeLog(ctx, tx, userLogEntry(actor, action, verb, p))
+	})
+	if err != nil {
+		return Profile{}, err
+	}
+	if archived {
+		db.Sessions.DeleteForProfile(id)
+	}
+	return p, nil
 }
