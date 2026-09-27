@@ -140,3 +140,60 @@ func TestScanLoginThenSetPassword(t *testing.T) {
 		t.Error("typed login after set-password failed")
 	}
 }
+
+// An admin's card answers 401 with password_required, which is what moves
+// the sign-in screen to the password field (ROADMAP §3.1).
+func TestAdminScanAsksForPassword(t *testing.T) {
+	h, d := testDeps(t)
+	_, sn := seedUser(t, d, true, "admin password")
+	code, body := call(t, h, http.MethodPost, "/auth/scan", "", map[string]string{"student_number": sn})
+	if code != http.StatusUnauthorized || body["password_required"] != true || body["token"] != nil {
+		t.Fatalf("admin scan = %d %v, want 401 password_required and no token", code, body)
+	}
+}
+
+// The logins refuse a non-JSON body, so another site's form cannot post at
+// them, and share a rate limit.
+func TestSignInRoutesAreGuarded(t *testing.T) {
+	h, _ := testDeps(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/scan", bytes.NewReader([]byte(`{"student_number":"1"}`)))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("text/plain login = %d, want 415", rec.Code)
+	}
+
+	limited := 0
+	for range 40 {
+		code, _ := call(t, h, http.MethodPost, "/auth/scan", "", map[string]string{"student_number": "999999999999"})
+		if code == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Error("40 scan logins in a row were never rate limited")
+	}
+}
+
+// A request addressed to a foreign host name is refused, which is what stops
+// a DNS-rebinding page using the API as its own origin.
+func TestHostCheck(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	h := withHostCheck(ok, "127.0.0.1:8080")
+	for host, want := range map[string]int{
+		"127.0.0.1:8080":    http.StatusNoContent,
+		"localhost:8080":    http.StatusNoContent,
+		"[::1]:8080":        http.StatusNoContent,
+		"evil.example:8080": http.StatusMisdirectedRequest,
+		"127.0.0.1.nip.io":  http.StatusMisdirectedRequest,
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Host %s = %d, want %d", host, rec.Code, want)
+		}
+	}
+}

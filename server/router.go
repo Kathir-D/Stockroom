@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"mime"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,9 +42,15 @@ func newRouter(d deps) http.Handler {
 		})
 	})
 
-	// Sign-in. No session needed.
-	mux.HandleFunc("POST /auth/scan", d.handleLoginByScan)
-	mux.HandleFunc("POST /auth/password", d.handleLoginByPassword)
+	// Sign-in. No session needed, so both routes share one rate limit
+	// (ROADMAP §3.1): a scan login answers differently for a number that
+	// exists, and without a cap a loop could walk the number space and sign
+	// in as whoever it found. 30 at once, then one a second, is faster than
+	// a queue of students at the counter and hopeless for that loop. The
+	// per-account password lockout lives in the package (login_guard.go).
+	logins := &tokenBucket{capacity: 30, refill: time.Second}
+	mux.HandleFunc("POST /auth/scan", signInRoute(logins, d.handleLoginByScan))
+	mux.HandleFunc("POST /auth/password", signInRoute(logins, d.handleLoginByPassword))
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §5). No
 	// session: this is what the sign-in screen renders behind the card, and
@@ -93,6 +103,11 @@ func newRouter(d deps) http.Handler {
 	// enforced inside internal/stockroom; a user's own history is not.
 	mux.Handle("GET /custody/active", d.withSession(d.handleActiveCustody, fullOnly))
 	mux.Handle("GET /custody/overdue", d.withSession(d.handleOverdueCustody, fullOnly))
+	// What an admin has to look at: returns with a damage note or no scan
+	// behind them, and closing a loan whose item is lost (ROADMAP §3.2).
+	mux.Handle("GET /custody/review", d.withSession(d.handleNeedsReview, fullOnly))
+	mux.Handle("POST /custody/{id}/reviewed", d.withSession(d.handleResolveReview, fullOnly))
+	mux.Handle("POST /assets/{id}/lost", d.withSession(d.handleMarkLost, fullOnly))
 	mux.Handle("GET /assets/{id}/history", d.withSession(d.handleAssetHistory, fullOnly))
 	mux.Handle("GET /users/{id}/history", d.withSession(d.handleUserHistory, fullOnly))
 
@@ -106,6 +121,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("PUT /assets/{id}", d.withSession(d.handleUpdateAsset, fullOnly))
 	mux.Handle("DELETE /assets/{id}", d.withSession(d.handleDeleteAsset, fullOnly))
 	mux.Handle("POST /assets/{id}/status", d.withSession(d.handleSetAssetStatus, fullOnly))
+	mux.Handle("POST /assets/{id}/retire", d.withSession(d.handleRetireAsset, fullOnly))
 	mux.Handle("POST /assets/{id}/photo", d.withSession(d.handleSetAssetPhoto, fullOnly))
 	// Barcodes and printable sheets (CLAUDE.md §13, Phase B). Admin-only,
 	// enforced inside internal/stockroom. `labels.pdf` and `cards.pdf` are
@@ -189,6 +205,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("PUT /users/{id}", d.withSession(d.handleUpdateUser, fullOnly))
 	mux.Handle("DELETE /users/{id}", d.withSession(d.handleDeleteUser, fullOnly))
 	mux.Handle("POST /users/{id}/password", d.withSession(d.handleSetUserPassword, fullOnly))
+	mux.Handle("POST /users/{id}/archive", d.withSession(d.handleArchiveUser, fullOnly))
 
 	// The web UI, last and least specific. Go's ServeMux prefers the most
 	// specific pattern, so every route above still wins over this one and the
@@ -204,6 +221,23 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /", ui)
 
 	return logRequests(withCORS(withScreen(mux)))
+}
+
+// signInRoute guards an unauthenticated login: JSON only, so a page on
+// another site cannot post a form at it without a preflight, and under the
+// shared rate limit.
+func signInRoute(limit *tokenBucket, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+			writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "send application/json"})
+			return
+		}
+		if !limit.allow() {
+			writeError(w, fmt.Errorf("%w: too many sign-in attempts. Wait a few seconds and try again", stockroom.ErrTooManyAttempts))
+			return
+		}
+		next(w, r)
+	}
 }
 
 // localOrigins are the browser origins allowed to call this server.
@@ -349,5 +383,38 @@ func logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+// withHostCheck refuses a request addressed to any host but this machine's
+// loopback names (ROADMAP §3.1).
+//
+// The server listens on 127.0.0.1, but a listening address is not the same
+// as a host name. A web page open in the closet browser can point a domain it
+// controls at 127.0.0.1 (DNS rebinding), and the browser then treats this API
+// as that page's own origin: CORS no longer applies and every response is
+// readable. The Host header still carries the attacker's domain, so checking
+// it is what closes the gap.
+//
+// The allowed names are the loopback ones plus whatever host SERVER_ADDR
+// names, so an install that binds a specific address still answers on it.
+// The Wails window calls 127.0.0.1:8080 like any other client, so it is
+// covered by the loopback names.
+func withHostCheck(next http.Handler, serverAddr string) http.Handler {
+	allowed := map[string]bool{"127.0.0.1": true, "localhost": true, "::1": true}
+	if host, _, err := net.SplitHostPort(serverAddr); err == nil && host != "" && host != "0.0.0.0" && host != "::" {
+		allowed[strings.ToLower(host)] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.ToLower(strings.Trim(host, "[]"))
+		if !allowed[host] {
+			writeJSON(w, http.StatusMisdirectedRequest, map[string]any{"error": "this server only answers requests addressed to this machine"})
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }

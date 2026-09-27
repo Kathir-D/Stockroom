@@ -171,8 +171,9 @@ func (db *DB) CreateFirstAdmin(ctx context.Context, in FirstAdminInput) (LoginRe
 	}
 	full := strings.TrimSpace(first + " " + last)
 	p, err := scanProfile(tx.QueryRow(ctx, `
-		insert into profiles (student_number, first_name, last_name, full_name, is_admin, password_hash)
-		values ($1, $2, $3, $4, true, $5)
+		insert into profiles (student_number, first_name, last_name, full_name, is_admin, password_hash,
+		                      password_set_at, password_set_by)
+		values ($1, $2, $3, $4, true, $5, now(), 'owner')
 		returning `+profileColumns, number, first, nullable(last), full, hash))
 	if err != nil {
 		return LoginResult{}, mapPgError("create first admin", err)
@@ -254,7 +255,7 @@ func (db *DB) ConfigureFailsafe(ctx context.Context, actor Actor, number, passwo
 	// number back and retire nothing. Demoted and password cleared rather
 	// than deleted, so any custody history naming it survives.
 	rows, err := db.Pool.Query(ctx, `
-		update profiles set is_admin = false, password_hash = null
+		update profiles set is_admin = false, password_hash = null, password_set_at = null, password_set_by = null
 		 where full_name = 'Failsafe Admin' and is_admin and student_number <> $1
 		returning id`, sn)
 	if err != nil {

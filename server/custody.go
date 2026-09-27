@@ -18,12 +18,16 @@ import (
 func (d deps) handleScan(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var body struct {
 		Serial string `json:"serial"`
+		// ViaScanner says the code arrived at scanner speed. Missing means
+		// yes, which is what every client sent before it existed. False marks
+		// a student's return for review (ROADMAP §3.2).
+		ViaScanner *bool `json:"via_scanner"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, err)
 		return
 	}
-	result, err := d.db.ScanItem(r.Context(), actor, body.Serial)
+	result, err := d.db.ScanItemVia(r.Context(), actor, body.Serial, body.ViaScanner == nil || *body.ViaScanner)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -55,6 +59,10 @@ func (d deps) handleCheckout(w http.ResponseWriter, r *http.Request, actor stock
 func (d deps) handleCheckIn(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var body struct {
 		Note *string `json:"note"`
+		// Scanned is true when this confirms a scan that asked "Return it?"
+		// (ScanConfirmReturn): the item was scanned, so the return is not
+		// marked as unscanned.
+		Scanned bool `json:"scanned"`
 	}
 	// An empty body is a check-in with no damage note, which is the common
 	// case, so it is allowed rather than a 400.
@@ -64,7 +72,11 @@ func (d deps) handleCheckIn(w http.ResponseWriter, r *http.Request, actor stockr
 			return
 		}
 	}
-	result, err := d.db.CheckInAsset(r.Context(), actor, r.PathValue("id"), body.Note)
+	via := stockroom.ReturnedByButton
+	if body.Scanned {
+		via = stockroom.ReturnedByScan
+	}
+	result, err := d.db.CheckInAssetVia(r.Context(), actor, r.PathValue("id"), body.Note, via)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -136,4 +148,45 @@ func (d deps) handleUserHistory(w http.ResponseWriter, r *http.Request, actor st
 		return
 	}
 	writeJSON(w, http.StatusOK, records)
+}
+
+// POST /assets/{id}/lost {"note": "..."}
+// An admin closes a loan without the item (ROADMAP §3.2).
+func (d deps) handleMarkLost(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var body struct {
+		Note *string `json:"note"`
+	}
+	if r.ContentLength != 0 {
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+	result, err := d.db.MarkAssetLost(r.Context(), actor, r.PathValue("id"), body.Note)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GET /custody/review
+// Returns an admin has not looked at yet (ROADMAP §3.2).
+func (d deps) handleNeedsReview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	rows, err := d.db.ListNeedsReview(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+// POST /custody/{id}/reviewed
+func (d deps) handleResolveReview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	rec, err := d.db.ResolveReview(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
 }

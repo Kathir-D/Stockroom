@@ -86,6 +86,10 @@ type DB struct {
 	cameraW         *cameraWatcher
 	detectorFactory func(baseURL string) Detector
 
+	// loginGuard is the typed-password lockout (login_guard.go).
+	loginGuardOnce sync.Once
+	loginGuard     *loginGuard
+
 	photoWallStart sync.Mutex
 	photoWallCfg   *PhotoWallConfig
 	photoWallCtx   context.Context

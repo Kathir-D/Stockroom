@@ -153,6 +153,17 @@
       <span class="hidden w-28 shrink-0 truncate text-fg-faint xl:inline">{unit.condition}</span>
     {/if}
 
+    <!-- A damage report no admin has reviewed yet. The unit stays available
+         (ROADMAP §3.2), so the row says so before anyone takes it. -->
+    {#if unit.damage_report}
+      <span
+        class="shrink-0 rounded-sm bg-status-due-soon-bg px-1.5 text-xs font-medium text-status-due-soon"
+        title={`Reported damaged: ${unit.damage_report}`}
+      >
+        Damage reported
+      </span>
+    {/if}
+
   </button>
 
   <!--

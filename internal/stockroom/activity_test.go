@@ -62,6 +62,9 @@ func TestEachActionWritesExactlyOneRow(t *testing.T) {
 	if _, err := db.CheckOutAssets(ctx, sa, CheckoutInput{AssetIDs: []string{asset}, DueAt: due}); err != nil {
 		t.Fatal(err)
 	}
+	// Scanned straight back by the person who took it is a question, not a
+	// return (ScanConfirmReturn), so move the loan out of that window.
+	backdate(t, db, asset)
 	res, err := db.ScanItem(ctx, sa, serial)
 	if err != nil || res.Action != ScanCheckedIn {
 		t.Fatalf("scan to return = %+v, %v", res, err)

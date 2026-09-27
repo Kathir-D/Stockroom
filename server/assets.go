@@ -18,6 +18,8 @@ func (d deps) handleListAssets(w http.ResponseWriter, r *http.Request, actor sto
 		CategoryID: q.Get("category"),
 		Status:     stockroom.AssetStatus(q.Get("status")),
 		Search:     q.Get("q"),
+		// Admin only; the package ignores it for anyone else.
+		IncludeRetired: q.Get("retired") == "1",
 	})
 	if err != nil {
 		writeError(w, err)

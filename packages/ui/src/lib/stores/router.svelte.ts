@@ -22,6 +22,7 @@ export type AdminTab =
   | "categories"
   | "users"
   | "overdue"
+  | "attention"
   | "backup"
   | "settings"
   | "photo-wall"
@@ -32,6 +33,7 @@ const ADMIN_TABS: AdminTab[] = [
   "categories",
   "users",
   "overdue",
+  "attention",
   "backup",
   "settings",
   "photo-wall",

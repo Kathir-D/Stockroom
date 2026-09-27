@@ -118,7 +118,7 @@
                       ? "text-status-overdue"
                       : "text-status-out"}
                 >
-                  {row.checked_in_at ? dateTime(row.checked_in_at) : row.overdue ? "Overdue" : "Out"}
+                  {row.outcome === "lost" ? "Lost" : row.checked_in_at ? dateTime(row.checked_in_at) : row.overdue ? "Overdue" : "Out"}
                 </Table.Cell>
               </Table.Row>
             {/each}

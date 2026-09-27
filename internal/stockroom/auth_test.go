@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // The roster-import case: scanning in with no password gives a limited
@@ -11,7 +12,7 @@ import (
 func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
-	p := insertTestProfile(t, db, true, "") // admin flag on purpose: must not count while limited
+	p := insertTestProfile(t, db, false, "")
 
 	res, err := db.LoginByScan(ctx, *p.StudentNumber)
 	if err != nil {
@@ -31,11 +32,8 @@ func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	if !actor.Limited {
 		t.Fatal("actor is not limited")
 	}
-	if err := RequireAdmin(actor); !errors.Is(err, ErrForbidden) {
-		t.Errorf("RequireAdmin(limited admin) = %v, want ErrForbidden", err)
-	}
-	if _, err := db.ListUsers(ctx, actor); !errors.Is(err, ErrForbidden) {
-		t.Errorf("ListUsers with a limited session = %v, want ErrForbidden", err)
+	if _, err := db.ListAssets(ctx, actor, AssetFilter{}); !errors.Is(err, ErrForbidden) {
+		t.Errorf("ListAssets with a limited session = %v, want ErrForbidden", err)
 	}
 
 	if err := db.SetInitialPassword(ctx, actor, "short"); !errors.Is(err, ErrInvalid) {
@@ -51,8 +49,8 @@ func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	if actor.Limited {
 		t.Error("session still limited after setting a password")
 	}
-	if err := RequireAdmin(actor); err != nil {
-		t.Errorf("RequireAdmin after upgrade = %v, want nil", err)
+	if _, err := db.ListAssets(ctx, actor, AssetFilter{}); err != nil {
+		t.Errorf("ListAssets after upgrade = %v, want nil", err)
 	}
 
 	// Only valid once.
@@ -63,6 +61,57 @@ func TestScanLoginWithoutPasswordIsLimitedUntilSet(t *testing.T) {
 	// And the typed path now works.
 	if _, err := db.LoginByPassword(ctx, *p.StudentNumber, "my first password"); err != nil {
 		t.Errorf("LoginByPassword after set = %v, want nil", err)
+	}
+}
+
+// An admin's card never opens a session (ROADMAP §3.1): with a password it
+// asks for the password, and without one it is refused outright, because the
+// first scan would otherwise choose the admin's password.
+func TestAdminScanNeedsPassword(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	withPw := insertTestProfile(t, db, true, "admin-password")
+	noPw := insertTestProfile(t, db, true, "")
+
+	before := db.Sessions.Len()
+	if _, err := db.LoginByScan(ctx, *withPw.StudentNumber); !errors.Is(err, ErrPasswordRequired) {
+		t.Errorf("scan by admin = %v, want ErrPasswordRequired", err)
+	}
+	if _, err := db.LoginByScan(ctx, *noPw.StudentNumber); !errors.Is(err, ErrPasswordNotSet) {
+		t.Errorf("scan by admin with no password = %v, want ErrPasswordNotSet", err)
+	}
+	if after := db.Sessions.Len(); after != before {
+		t.Errorf("sessions went from %d to %d: an admin scan opened one", before, after)
+	}
+	if _, err := db.LoginByPassword(ctx, *withPw.StudentNumber, "admin-password"); err != nil {
+		t.Errorf("typed admin login = %v, want nil", err)
+	}
+}
+
+// Five wrong passwords lock the number for a while, and the lock holds even
+// against the right password until it runs out.
+func TestPasswordLockout(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	p := insertTestProfile(t, db, false, "right-password")
+	clock := time.Now()
+	db.logins().now = func() time.Time { return clock }
+
+	for i := range loginFailLimit {
+		if _, err := db.LoginByPassword(ctx, *p.StudentNumber, "wrong-password"); !errors.Is(err, ErrBadCredentials) {
+			t.Fatalf("attempt %d = %v, want ErrBadCredentials", i+1, err)
+		}
+	}
+	if _, err := db.LoginByPassword(ctx, *p.StudentNumber, "right-password"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("right password while locked = %v, want ErrTooManyAttempts", err)
+	}
+	// A card scan is not a password guess and still works.
+	if _, err := db.LoginByScan(ctx, *p.StudentNumber); err != nil {
+		t.Errorf("scan while locked = %v, want nil", err)
+	}
+	clock = clock.Add(loginLockout + time.Second)
+	if _, err := db.LoginByPassword(ctx, *p.StudentNumber, "right-password"); err != nil {
+		t.Errorf("right password after the lockout = %v, want nil", err)
 	}
 }
 

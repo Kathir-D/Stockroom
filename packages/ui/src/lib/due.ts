@@ -1,71 +1,57 @@
 /**
- * Turning a picked *date* into a due *instant*.
+ * Turning a picked *date* into a due *instant* (ROADMAP §3.2, decided
+ * 2026-09-26).
  *
- * The 7-day cap is an exact instant — `now + 7 × 24h` at the moment the server
- * handles the request, not "the end of the seventh day" (CLAUDE.md §13,
- * 2026-09-12). A date picker offers a date, so something has to bridge the two,
- * and getting it wrong looks like this: a student picks "seven days out" at
- * 4 p.m., the UI sends 23:59 on that day, and the server refuses a checkout that
- * the calendar plainly offered.
+ * The borrower picks the last day they will use the item. It is due at the
+ * closing time (`rules.dueTime`, 15:30 unless an admin changed it) on the
+ * next school day after that, so an item brought back first thing the next
+ * morning is never already overdue. A school day is a weekday; holidays are
+ * not known to the app.
  *
- * So: a picked date means the end of that day, clamped to the cap with a margin
- * for the round trip. The margin is why `SUBMIT_MARGIN_MS` exists — without it,
- * a request that takes 200ms to arrive is 200ms over the line.
+ * The cap is on the last day of use: today plus `maxCheckoutDays`. The server
+ * holds the same rule (`internal/stockroom/due.go`) and decides; this file
+ * only keeps the calendar from offering a date the server would refuse.
  */
 
-import { MAX_CHECKOUT_DAYS } from "./api/index"
-
-const DAY_MS = 24 * 60 * 60 * 1000
-
-/**
- * Slack left between the due instant and the cap, so the clamped case survives
- * the time the request spends in flight. Five minutes is far longer than
- * localhost needs and far shorter than anyone would notice on a 7-day loan.
- */
-export const SUBMIT_MARGIN_MS = 5 * 60 * 1000
-
-/** The latest instant the server will accept, as of now. */
-export function latestDueInstant(now = new Date()): Date {
-  return new Date(now.getTime() + MAX_CHECKOUT_DAYS * DAY_MS)
+function parseTime(dueTime: string): [number, number] {
+  const [h, m] = dueTime.split(":").map((part) => Number.parseInt(part, 10))
+  return [Number.isFinite(h) ? h : 15, Number.isFinite(m) ? m : 30]
 }
 
-/** The last date a picker may offer, in the viewer's own timezone. */
-export function latestDueDate(now = new Date()): Date {
-  return latestDueInstant(now)
+/** The closing time on the first weekday after the day `lastDay` falls on. */
+export function dueFor(lastDay: Date, dueTime: string): Date {
+  const [h, m] = parseTime(dueTime)
+  const next = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1, h, m, 0, 0)
+  while (next.getDay() === 0 || next.getDay() === 6) next.setDate(next.getDate() + 1)
+  return next
 }
 
-/** Local-midnight-to-23:59:59.999 of whatever day `date` falls on. */
-function endOfLocalDay(date: Date): Date {
-  const end = new Date(date)
-  end.setHours(23, 59, 59, 999)
-  return end
+/** The RFC 3339 instant to send for a picked last day of use. */
+export function dueInstantFor(lastDay: Date, dueTime: string): string {
+  return dueFor(lastDay, dueTime).toISOString()
 }
 
-/**
- * The RFC 3339 instant to send for a picked calendar date.
- *
- * End of the picked day, pulled back to the cap when that would overshoot, which
- * is the ordinary case for the last selectable day.
- */
-export function dueInstantFor(date: Date, now = new Date()): string {
-  const cap = latestDueInstant(now).getTime() - SUBMIT_MARGIN_MS
-  const wanted = endOfLocalDay(date).getTime()
-  return new Date(Math.min(wanted, cap)).toISOString()
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
-/** Whether a date is inside the window a checkout may use. */
-export function isSelectableDueDate(date: Date, now = new Date()): boolean {
-  const endOfDay = endOfLocalDay(date).getTime()
-  if (endOfDay <= now.getTime()) return false
-  const startOfDay = new Date(date)
-  startOfDay.setHours(0, 0, 0, 0)
-  return startOfDay.getTime() <= latestDueInstant(now).getTime()
+/** Whether a date may be picked as the last day of use. */
+export function isSelectableLastDay(date: Date, maxDays: number, now = new Date()): boolean {
+  const day = startOfDay(date).getTime()
+  const today = startOfDay(now)
+  const last = new Date(today.getFullYear(), today.getMonth(), today.getDate() + maxDays).getTime()
+  return day >= today.getTime() && day <= last
 }
 
-/** `Sep 21` — the hint under the picker that names the cap. */
-export function capHint(now = new Date()): string {
-  return latestDueInstant(now).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
+/** The latest due instant a checkout made now may have. */
+export function latestDue(maxDays: number, dueTime: string, now = new Date()): Date {
+  return dueFor(new Date(now.getFullYear(), now.getMonth(), now.getDate() + maxDays), dueTime)
+}
+
+/** `Tue 6 Oct, 15:30`, for the hint and the picker's button. */
+export function dueLabel(due: Date | string): string {
+  const date = typeof due === "string" ? new Date(due) : due
+  const day = date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  return `${day}, ${time}`
 }

@@ -3,6 +3,10 @@
    * The due-date picker: `popover` + `calendar`, hard-capped at seven days
    * (design-system.md §5.1).
    *
+   * The person picks the **last day they need the item**. It is due at the
+   * closing time on the next school day after that (ROADMAP §3.2, `due.ts`),
+   * and the button says exactly when.
+   *
    * Everything beyond the cap is *disabled* rather than validated after the
    * fact, and the hint names the last acceptable date. The server refuses a
    * late `due_at` regardless — the cap is enforced in both places, like the
@@ -10,13 +14,12 @@
    * calendar nobody trusts.
    */
   import CalendarIcon from "@lucide/svelte/icons/calendar"
-  import { CalendarDate, type DateValue, getLocalTimeZone, today } from "@internationalized/date"
+  import { type DateValue, getLocalTimeZone, today } from "@internationalized/date"
   import { Calendar } from "@stockroom/ui/components/ui/calendar"
   import { Button } from "@stockroom/ui/components/ui/button"
   import * as Popover from "@stockroom/ui/components/ui/popover"
-  import { MAX_CHECKOUT_DAYS } from "../../api/index"
-  import { capHint, dueInstantFor, isSelectableDueDate } from "../../due"
-  import { shortDate } from "../../status"
+  import { dueInstantFor, dueLabel, isSelectableLastDay, latestDue } from "../../due"
+  import { rules } from "../../stores/rules.svelte"
 
   let {
     /** RFC 3339, or null until a date is picked. Read-only. */
@@ -36,26 +39,25 @@
 
   const zone = getLocalTimeZone()
 
-  function toCalendarDate(iso: string | null): DateValue | undefined {
-    if (!iso) return undefined
-    const date = new Date(iso)
-    if (Number.isNaN(date.getTime())) return undefined
-    return new CalendarDate(date.getFullYear(), date.getMonth() + 1, date.getDate())
-  }
-
-  // Derived, not $state seeded once: the cart store owns `value` and can change
-  // it while this is mounted (a cleared cart resets the due date), and a local
-  // copy left the calendar highlighting a day the button no longer named.
-  const selected = $derived(toCalendarDate(value))
+  /**
+   * The day picked, kept here because the due instant cannot be turned back
+   * into it: a Friday, a Saturday and a Sunday are all due on Monday. Cleared
+   * when the cart clears the due date.
+   */
+  let picked = $state<DateValue | undefined>(undefined)
+  $effect(() => {
+    if (value === null) picked = undefined
+  })
   let open = $state(false)
 
   const minDate = $derived(today(zone))
-  const maxDate = $derived(today(zone).add({ days: MAX_CHECKOUT_DAYS }))
+  const maxDate = $derived(today(zone).add({ days: rules.maxCheckoutDays }))
 
   function onSelect(next: DateValue | undefined) {
+    picked = next
     // The selection travels out through `onValueChange` and comes back in as
-    // `value`; there is nothing to assign here.
-    onValueChange(next ? dueInstantFor(next.toDate(zone)) : null)
+    // `value`; there is nothing else to assign here.
+    onValueChange(next ? dueInstantFor(next.toDate(zone), rules.dueTime) : null)
     if (next) open = false
   }
 </script>
@@ -66,23 +68,25 @@
       {#snippet child({ props })}
         <Button {...props} variant="secondary" {disabled} class="w-full justify-start">
           <CalendarIcon aria-hidden="true" />
-          {value ? `Due ${shortDate(value)}` : "Pick a due date"}
+          {value ? `Due back ${dueLabel(value)}` : "Pick the last day you need it"}
         </Button>
       {/snippet}
     </Popover.Trigger>
     <Popover.Content class="w-auto p-0">
       <Calendar
         type="single"
-        value={selected}
+        value={picked}
         onValueChange={onSelect}
         minValue={minDate}
         maxValue={maxDate}
-        isDateUnavailable={(date: DateValue) => !isSelectableDueDate(date.toDate(zone))}
+        isDateUnavailable={(date: DateValue) =>
+          !isSelectableLastDay(date.toDate(zone), rules.maxCheckoutDays)}
       />
     </Popover.Content>
   </Popover.Root>
 
   <p class="text-xs text-fg-faint">
-    {MAX_CHECKOUT_DAYS} days maximum — latest is {capHint()}.
+    Due back at {rules.dueTime} on the next school day after the day you pick. Up to
+    {rules.maxCheckoutDays} days; the latest is {dueLabel(latestDue(rules.maxCheckoutDays, rules.dueTime))}.
   </p>
 </div>

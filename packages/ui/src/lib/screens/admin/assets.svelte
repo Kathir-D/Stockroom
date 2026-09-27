@@ -22,6 +22,9 @@
   import PrinterIcon from "@lucide/svelte/icons/printer"
   import UploadIcon from "@lucide/svelte/icons/upload"
   import CopyPlusIcon from "@lucide/svelte/icons/copy-plus"
+  import ArchiveIcon from "@lucide/svelte/icons/archive"
+  import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore"
+  import { Checkbox } from "@stockroom/ui/components/ui/checkbox"
   import BarcodeDialog from "@stockroom/ui/components/app/barcode-dialog.svelte"
   import BulkAddDialog from "@stockroom/ui/components/app/bulk-add-dialog.svelte"
   import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
@@ -53,6 +56,11 @@
   let loading = $state(true)
   let error = $state<string | null>(null)
   let search = $state("")
+  /**
+   * Retired items are out of browse for good (ROADMAP §3.4); this table shows
+   * them only when asked, so an admin can bring one back.
+   */
+  let showRetired = $state(false)
 
   let formOpen = $state(false)
   let editing = $state<AssetListItem | null>(null)
@@ -109,7 +117,10 @@
     loading = true
     error = null
     try {
-      units = await api.listAssets({ q: search.trim() || undefined }, controller.signal)
+      units = await api.listAssets(
+        { q: search.trim() || undefined, retired: showRetired ? "1" : undefined },
+        controller.signal,
+      )
     } catch (err) {
       if (controller.signal.aborted) return
       error = err instanceof Error ? err.message : String(err)
@@ -123,6 +134,7 @@
 
   $effect(() => {
     void search
+    void showRetired
     load()
     return () => inflight?.abort()
   })
@@ -184,6 +196,21 @@
       await load()
     } catch (err) {
       // "cannot touch checked_out" arrives here; show it as written.
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /**
+   * Retire is how an item leaves the catalogue once it has a history: delete
+   * is refused then, because the custody trail is the point (ROADMAP §3.4).
+   */
+  async function toggleRetired(unit: AssetListItem) {
+    try {
+      await api.setAssetRetired(unit.id, !unit.retired_at)
+      toast.success(unit.retired_at ? `${unit.name} is back in the catalogue` : `${unit.name} retired`)
+      await load()
+      void catalog.reload()
+    } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
@@ -292,6 +319,10 @@
 <div data-density="compact" class="flex flex-col gap-3">
   <div class="flex items-center gap-3">
     <Input bind:value={search} placeholder="Search name, serial, tag…" class="max-w-xs" />
+    <Label class="flex items-center gap-2 text-fg-muted">
+      <Checkbox bind:checked={showRetired} />
+      Show retired
+    </Label>
     <span class="flex-1"></span>
     <Button variant="ghost" onclick={() => (importOpen = true)}>
       <UploadIcon aria-hidden="true" />
@@ -438,6 +469,29 @@
                       {...props}
                       variant="ghost"
                       size="icon-sm"
+                      aria-label={row.retired_at ? `Bring ${row.name} back` : `Retire ${row.name}`}
+                      onclick={() => toggleRetired(row)}
+                    >
+                      {#if row.retired_at}
+                        <ArchiveRestoreIcon aria-hidden="true" />
+                      {:else}
+                        <ArchiveIcon aria-hidden="true" />
+                      {/if}
+                    </Button>
+                  {/snippet}
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {row.retired_at ? "Bring back into the catalogue" : "Retire: gone from browse, history kept"}
+                </Tooltip.Content>
+              </Tooltip.Root>
+
+              <Tooltip.Root>
+                <Tooltip.Trigger>
+                  {#snippet child({ props })}
+                    <Button
+                      {...props}
+                      variant="ghost"
+                      size="icon-sm"
                       aria-label={`Delete ${row.name}`}
                       onclick={() => {
                         deleteTarget = row
@@ -536,8 +590,8 @@
     <AlertDialog.Header>
       <AlertDialog.Title>Delete {deleteTarget?.name}?</AlertDialog.Title>
       <AlertDialog.Description>
-        This can't be undone. Anything with custody history is refused by the server, because the
-        trail is the point — mark it unavailable instead.
+        This can't be undone. Anything that has ever been checked out is refused, because the trail is
+        the point. Retire it instead: it leaves the catalogue and keeps its history.
       </AlertDialog.Description>
     </AlertDialog.Header>
     {#if deleteError}

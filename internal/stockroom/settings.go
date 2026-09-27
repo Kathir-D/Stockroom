@@ -66,6 +66,10 @@ type Settings struct {
 	StudentNumberFormat  string `json:"student_number_format"`
 	StudentNumberPattern string `json:"student_number_pattern"`
 
+	// DueTime is when a loan is due, "HH:MM", on the next school day after
+	// the last day of use the borrower picks (due.go).
+	DueTime string `json:"due_time"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// GitHubTokenSet and ArchivePassphraseSet are the only thing the API says
@@ -131,13 +135,15 @@ type SettingsInput struct {
 
 	StudentNumberFormat  *string `json:"student_number_format"`
 	StudentNumberPattern *string `json:"student_number_pattern"`
+
+	DueTime *string `json:"due_time"`
 }
 
 const settingsColumns = `backup_dir, photo_backup_dir, keep_days, stale_hours, schedule_hour,
 	drive_enabled, drive_remote, drive_path, google_client_id, google_client_secret,
 	github_enabled, github_repo, github_token, archive_passphrase,
 	photo_min_free_gb, photo_max_generations,
-	student_number_format, student_number_pattern, updated_at`
+	student_number_format, student_number_pattern, due_time, updated_at`
 
 func scanSettings(row pgx.Row) (Settings, error) {
 	var s Settings
@@ -150,7 +156,7 @@ func scanSettings(row pgx.Row) (Settings, error) {
 		&s.DriveEnabled, &driveRemote, &drivePath, &clientID, &clientSecret,
 		&s.GitHubEnabled, &repo, &token, &passphrase,
 		&s.PhotoMinFreeGB, &s.PhotoMaxGenerations,
-		&s.StudentNumberFormat, &snPattern, &s.UpdatedAt)
+		&s.StudentNumberFormat, &snPattern, &s.DueTime, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, ErrNotFound
 	}
@@ -306,6 +312,12 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 	if in.StudentNumberPattern != nil {
 		next.StudentNumberPattern = strings.TrimSpace(*in.StudentNumberPattern)
 	}
+	if in.DueTime != nil {
+		next.DueTime = strings.TrimSpace(*in.DueTime)
+		if _, _, err := parseDueTime(next.DueTime); err != nil {
+			return Settings{}, err
+		}
+	}
 
 	// Compiled and checked before the write; *installed* after the commit.
 	// A pattern that does not compile locks every account out of sign-in, and
@@ -377,6 +389,7 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			photo_min_free_gb = $13, photo_max_generations = $14,
 			student_number_format = $15, student_number_pattern = $16,
 			google_client_id = $17, google_client_secret = $18,
+			due_time = $19,
 			updated_at = now()
 		where id = true`,
 		nullable(next.BackupDir), nullable(next.PhotoBackupDir),
@@ -386,7 +399,8 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		nullable(next.ArchivePassphrase),
 		next.PhotoMinFreeGB, next.PhotoMaxGenerations,
 		next.StudentNumberFormat, nullable(next.StudentNumberPattern),
-		nullable(next.GoogleClientID), nullable(next.GoogleClientSecret))
+		nullable(next.GoogleClientID), nullable(next.GoogleClientSecret),
+		next.DueTime)
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}

@@ -73,6 +73,17 @@ type Profile struct {
 	PhotoPath     *string   `json:"photo_path"`     // v1
 	IsAdmin       bool      `json:"is_admin"`       // v1
 	CreatedAt     time.Time `json:"created_at"`
+	// PasswordSetAt and PasswordSetBy record who chose the current password:
+	// "owner" at the first scan sign-in, "admin" by a reset, "failsafe" for
+	// the .env account. Nil for a password set before this was recorded, or
+	// no password at all (ROADMAP §3.1).
+	PasswordSetAt *time.Time `json:"password_set_at"`
+	PasswordSetBy *string    `json:"password_set_by"`
+	// HasPassword is PasswordHash as a flag, for the admin's user list.
+	HasPassword bool `json:"has_password"`
+	// ArchivedAt is set on an account that can no longer sign in, kept for
+	// its custody history (ROADMAP §3.4).
+	ArchivedAt *time.Time `json:"archived_at"`
 	// PhotoURL is PhotoPath as the frontend fetches it, under FilesPrefix.
 	// Derived by scanProfile, never stored.
 	PhotoURL *string `json:"photo_url"`
@@ -122,6 +133,16 @@ type Asset struct {
 	CreatedBy          *string        `json:"created_by"`
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
+	// RetiredAt is set on an item taken out of the catalogue for good. It
+	// keeps its custody history, is unavailable, and is hidden from browse
+	// (ROADMAP §3.4).
+	RetiredAt *time.Time `json:"retired_at"`
+	// DamageReport is the damage note on the item's latest return that no
+	// admin has reviewed yet, and DamageReportedAt when it came back. The item
+	// stays available, but every screen shows the report (ROADMAP §3.2,
+	// decided 2026-09-26). Read from custody_events, never stored here.
+	DamageReport     *string    `json:"damage_report"`
+	DamageReportedAt *time.Time `json:"damage_reported_at"`
 }
 
 type AssetTag struct {

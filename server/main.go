@@ -120,6 +120,14 @@ func main() {
 	// when the machine is available" is met on a closet PC that gets unplugged.
 	db.StartBackupScheduler(ctx)
 
+	// Profile photos used to be named by student number, which /files/ would
+	// confirm for anybody who asked (ROADMAP §3.1). Renaming is a one-off
+	// that finds nothing after the first start; a failure only means the
+	// old names keep working.
+	if err := db.RenameProfilePhotosByID(ctx); err != nil {
+		log.Printf("warning: could not rename every profile photo: %v", err)
+	}
+
 	// Idle sessions are swept on a timer so each idle timeout lands in the
 	// activity log when it happens, not at the next sign-in.
 	db.StartSessionSweeper(ctx)
@@ -154,7 +162,7 @@ func main() {
 	// picture needs over loopback and far shorter than forever.
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
-		Handler:           newRouter(deps{db: db}),
+		Handler:           withHostCheck(newRouter(deps{db: db}), cfg.ServerAddr),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       60 * time.Second,
 	}

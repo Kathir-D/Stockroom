@@ -74,16 +74,20 @@ func TestImportRosterCreatesUpdatesAndReportsRows(t *testing.T) {
 		t.Errorf("no-name error = %q", res.Rows[4].Error)
 	}
 
-	// The new account: photo copied under uploads/profiles/<sn>.jpg, path
-	// stored relative to uploads, no password, not admin.
+	// The new account: photo copied under uploads/profiles/<id>.jpg, never
+	// under the student number, path stored relative to uploads, no
+	// password, not admin.
 	p, err := db.profileByStudentNumber(ctx, fresh)
 	if err != nil {
 		t.Fatalf("created user missing: %v", err)
 	}
-	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+fresh+".jpg" {
-		t.Errorf("photo_path = %v, want profiles/%s.jpg", p.PhotoPath, fresh)
+	if p.PhotoPath == nil || *p.PhotoPath != "profiles/"+p.ID+".jpg" {
+		t.Errorf("photo_path = %v, want profiles/%s.jpg", p.PhotoPath, p.ID)
 	}
-	if b, err := os.ReadFile(filepath.Join(uploads, "profiles", fresh+".jpg")); err != nil || string(b) != "jpeg bytes" {
+	if _, err := os.Stat(filepath.Join(uploads, "profiles", fresh+".jpg")); err == nil {
+		t.Error("a photo file is named by the student number")
+	}
+	if b, err := os.ReadFile(filepath.Join(uploads, "profiles", p.ID+".jpg")); err != nil || string(b) != "jpeg bytes" {
 		t.Errorf("photo not copied into uploads: %v", err)
 	}
 	if p.PasswordHash != nil || p.IsAdmin || *p.FullName != "New Student" {
@@ -161,5 +165,36 @@ func TestOpenForAllowsOnlyPhotoExtensions(t *testing.T) {
 				t.Error("the file was opened despite being rejected")
 			}
 		})
+	}
+}
+
+// A photo stored under the old number-based name is moved to the id and the
+// row follows it.
+func TestRenameProfilePhotosByID(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	uploads := t.TempDir()
+	db.UploadsDir = uploads
+	p := insertTestProfile(t, db, false, "")
+	old := "profiles/" + *p.StudentNumber + ".png"
+	if err := os.MkdirAll(filepath.Join(uploads, "profiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uploads, filepath.FromSlash(old)), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `update profiles set photo_path = $2 where id = $1`, p.ID, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RenameProfilePhotosByID(ctx); err != nil {
+		t.Fatalf("RenameProfilePhotosByID: %v", err)
+	}
+	got, _ := db.profileByID(ctx, p.ID)
+	want := "profiles/" + p.ID + ".png"
+	if got.PhotoPath == nil || *got.PhotoPath != want {
+		t.Errorf("photo_path = %v, want %s", got.PhotoPath, want)
+	}
+	if b, err := os.ReadFile(filepath.Join(uploads, filepath.FromSlash(want))); err != nil || string(b) != "png" {
+		t.Errorf("file not moved: %v", err)
 	}
 }

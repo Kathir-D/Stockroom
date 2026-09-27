@@ -33,8 +33,8 @@
   import FolderOpenIcon from "@lucide/svelte/icons/folder-open"
   import GithubIcon from "@lucide/svelte/icons/git-branch"
   import FolderIcon from "@lucide/svelte/icons/folder"
-  import ClockIcon from "@lucide/svelte/icons/clock"
   import ImageIcon from "@lucide/svelte/icons/image"
+  import ClockIcon from "@lucide/svelte/icons/clock"
   import LockIcon from "@lucide/svelte/icons/lock"
   import RefreshIcon from "@lucide/svelte/icons/refresh-cw"
   import { toast } from "svelte-sonner"
@@ -58,6 +58,7 @@
 
   /** Which card is mid-save, so only that card's button says "Saving…". */
   type Card =
+    | "checkout"
     | "signin"
     | "folders"
     | "schedule"
@@ -108,6 +109,7 @@
     github_repo: "",
     student_number_format: "digits" as Format,
     student_number_pattern: "",
+    due_time: "15:30",
   })
 
   /** Secrets live outside `draft`: blank means unchanged, not blank-it-out. */
@@ -133,6 +135,7 @@
       github_repo: next.github_repo,
       student_number_format: next.student_number_format,
       student_number_pattern: next.student_number_pattern,
+      due_time: next.due_time,
     }
     // The secret fields are cleared on every adopt, including after a save that
     // just stored one. Leaving a token sitting in a text box on a shared closet
@@ -196,6 +199,15 @@
       saving = null
     }
   }
+
+  const saveCheckout = () =>
+    save("checkout", () => {
+      const value = draft.due_time.trim()
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+        throw new Error("The due time must be HH:MM on a 24-hour clock, such as 15:30.")
+      }
+      return { due_time: value }
+    })
 
   const saveSignIn = () =>
     save("signin", () => ({
@@ -364,6 +376,31 @@
       {/each}
     </div>
   {:else}
+    <!-- ------------------------------------------------------ checkout ---- -->
+    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+        <ClockIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        When loans are due
+      </h2>
+      <p class="text-xs text-fg-muted">
+        A student picks the last day they need an item. It is due back at this time on the next school
+        day (Monday to Friday) after that, so something returned first thing the next morning is never
+        already late. Set it to when the closet closes.
+      </p>
+      <div class="flex max-w-40 flex-col gap-1.5">
+        <Label for="due-time">Due back at (24-hour)</Label>
+        <Input id="due-time" bind:value={draft.due_time} inputmode="numeric" placeholder="15:30" />
+      </div>
+      {#if cardError.checkout}
+        <p class="text-sm text-status-overdue" role="alert">{cardError.checkout}</p>
+      {/if}
+      <div>
+        <Button disabled={saving === "checkout"} onclick={saveCheckout}>
+          {saving === "checkout" ? "Saving…" : "Save due time"}
+        </Button>
+      </div>
+    </section>
+
     <!-- ------------------------------------------------------- sign-in ---- -->
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">

@@ -209,11 +209,11 @@ Blocked: waiting on the school to provide the closet PC and the barcode scanner.
 - [ ] Repository description and topics: `school`, `inventory`, `checkout`, `barcode`, `education`, `equipment`, `go`, `svelte`, `self-hosted`.
 - [ ] Screenshots or a short recording in the README, with the example data loaded.
 - [ ] Make `./scripts/dev.sh test` repeatable: a second run without `supabase db reset` fails `080_seed.test.sql`, because the Go suite leaves the database changed.
-- [ ] Fix the `svelte-check` warning in `category-tree.svelte` (`openPath` captured by value).
 
 ## 7. Later
 
-- [ ] Settings for the remaining hardcoded rules: maximum checkout length (7 days, read by both the server and the date picker), whether overdue blocks checkout, the session idle timeout, and the scan threshold.
+- [ ] Settings for the remaining hardcoded rules: the maximum checkout length (7 days, read by both the server and the date picker through `GET /signin/config`), whether overdue blocks checkout, the session idle timeout, and the scan threshold. The due time is already a setting.
+- [ ] School holidays. A loan is due on the next weekday after its last day of use, so one ending before a holiday falls due on the holiday. Needs a calendar an admin maintains.
 - [ ] `docs/HARDWARE.md`: scanner buying guide and physical setup (placement, counter height, sleep settings).
 - [ ] `docs/UPGRADING.md` once there are two versions.
 - [ ] `docs/FAQ.md`.

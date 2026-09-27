@@ -180,7 +180,9 @@ func TestAnnotateCustodyEvent(t *testing.T) {
 		t.Fatalf("annotate an open event: got %v, want ErrConflict", err)
 	}
 
-	// Closed by the scan, then annotated.
+	// Closed by the scan, then annotated. Backdated first: a scan straight
+	// after your own checkout asks rather than returning.
+	backdate(t, db, asset)
 	res, err := db.ScanItem(ctx, actor, serial)
 	if err != nil {
 		t.Fatalf("scan: %v", err)

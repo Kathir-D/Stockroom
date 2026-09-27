@@ -152,6 +152,8 @@ export function setScreen(name: string) {
 }
 
 interface RequestOptions {
+  /** Send this token instead of the current one (signing out a replaced session). */
+  token?: string;
   method?: string;
   /** Serialised as JSON. Mutually exclusive with `form`. */
   body?: unknown;
@@ -173,7 +175,7 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { method = "GET", body, form, query, anonymous, signal, blob } = options;
+  const { method = "GET", body, form, query, anonymous, signal, blob, token: tokenOverride } = options;
 
   let url = config.baseUrl + path;
   if (query) {
@@ -186,10 +188,8 @@ async function request<T>(
   }
 
   const headers: Record<string, string> = {};
-  if (!anonymous) {
-    const tok = getToken();
-    if (tok) headers.Authorization = `Bearer ${tok}`;
-  }
+  const tok = tokenOverride ?? (anonymous ? null : getToken());
+  if (tok) headers.Authorization = `Bearer ${tok}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (currentScreen) headers["X-Stockroom-Screen"] = currentScreen;
 
@@ -219,7 +219,8 @@ async function request<T>(
   // Stamped on any answer, including an error: the server refreshed the
   // session's deadline the moment it resolved the token, whatever it then
   // decided about the request.
-  if (typeof performance !== "undefined") lastRequestMs = performance.now();
+  // An anonymous request carries no token, so it refreshed nothing.
+  if (!anonymous && typeof performance !== "undefined") lastRequestMs = performance.now();
 
   if (blob && response.ok) return (await response.blob()) as T;
 
@@ -245,7 +246,9 @@ async function request<T>(
     const error = new ApiError(response.status, message, objBody);
     // A 401 is the idle timeout in almost every case, and the app has to react
     // to it wherever it happens rather than at each call site.
-    if (error.isUnauthorized) config.onUnauthorized?.();
+    // An anonymous 401 is a login refusing its credentials, which says
+    // nothing about the session somebody else may be holding.
+    if (error.isUnauthorized && !anonymous) config.onUnauthorized?.();
     throw error;
   }
 

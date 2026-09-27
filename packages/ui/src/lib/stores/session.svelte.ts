@@ -68,6 +68,21 @@ class SessionStore {
     this.cameraWarningDismissed = true
   }
 
+  /**
+   * What is waiting for an admin: overdue items and returns to check
+   * (ROADMAP §3.3). The server only sends it to an admin.
+   */
+  adminNotice = $state<string | null>(null)
+  adminNoticeDismissed = $state(false)
+
+  get visibleAdminNotice() {
+    return this.adminNoticeDismissed ? null : this.adminNotice
+  }
+
+  dismissAdminNotice() {
+    this.adminNoticeDismissed = true
+  }
+
   get signedIn() {
     return this.profile !== null
   }
@@ -103,7 +118,7 @@ class SessionStore {
     }
     try {
       const result = await api.me()
-      this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
+      this.adoptProfile(result)
       // `/me` answers for a limited session too, so the token being valid does
       // not by itself mean the session is full. A 403 from the first full-only
       // read is what reveals that; ask for the tree to find out now rather than
@@ -132,29 +147,32 @@ class SessionStore {
     needs_password?: boolean
     backup_warning?: BackupWarning | null
     camera_warning?: string | null
+    admin_notice?: string | null
   }) {
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning ?? null, result.camera_warning ?? null)
+    this.adoptProfile(result)
     this.needsPassword = result.needs_password === true
     if (!this.needsPassword) await this.refreshOverdue()
   }
 
-  private adoptProfile(
-    profile: Profile,
-    hasOverdue: boolean,
-    backupWarning: BackupWarning | null = null,
-    cameraWarning: string | null | undefined = null
-  ) {
-    this.profile = profile
-    this.hasOverdue = hasOverdue
-    this.backupWarning = backupWarning
-    this.cameraWarning = cameraWarning ?? null
+  private adoptProfile(result: {
+    profile: Profile
+    has_overdue: boolean
+    backup_warning?: BackupWarning | null
+    camera_warning?: string | null
+    admin_notice?: string | null
+  }) {
+    this.profile = result.profile
+    this.hasOverdue = result.has_overdue
+    this.backupWarning = result.backup_warning ?? null
+    this.cameraWarning = result.camera_warning ?? null
+    this.adminNotice = result.admin_notice ?? null
   }
 
   /** Called after `setInitialPassword` upgrades a limited token in place. */
   async completePasswordSetup() {
     this.needsPassword = false
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
+    this.adoptProfile(result)
     await this.refreshOverdue()
   }
 
@@ -189,7 +207,7 @@ class SessionStore {
   async refresh() {
     if (!this.signedIn) return
     const result = await api.me()
-    this.adoptProfile(result.profile, result.has_overdue, result.backup_warning, result.camera_warning)
+    this.adoptProfile(result)
     await this.refreshOverdue()
   }
 
@@ -204,6 +222,16 @@ class SessionStore {
    * here.
    */
   clear() {
+    this.forget()
+    api.setToken(null)
+  }
+
+  /**
+   * Everything `clear()` drops except the token. A card scan that switches
+   * accounts has already stored the new person's token by the time the old
+   * person's state has to go (ROADMAP §3.1).
+   */
+  forget() {
     this.profile = null
     this.hasOverdue = false
     this.needsPassword = false
@@ -212,7 +240,8 @@ class SessionStore {
     this.backupWarningDismissed = false
     this.cameraWarning = null
     this.cameraWarningDismissed = false
-    api.setToken(null)
+    this.adminNotice = null
+    this.adminNoticeDismissed = false
     cart.clear()
   }
 }

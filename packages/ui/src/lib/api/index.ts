@@ -173,6 +173,20 @@ export async function logout() {
   }
 }
 
+/**
+ * End a session that is no longer the current one: the account a card scan
+ * just replaced (ROADMAP §3.1). Anonymous, so its answer cannot trip the
+ * idle-timeout hook for the session that replaced it. Best effort.
+ */
+export async function logoutToken(previous: string | null) {
+  if (!previous) return;
+  try {
+    await request<{ ok: boolean }>("/auth/logout", { method: "POST", anonymous: true, token: previous });
+  } catch {
+    // Already expired, or the server is gone: the session ends either way.
+  }
+}
+
 export function me() {
   return request<MeResult>("/me");
 }
@@ -189,6 +203,8 @@ export interface AssetQuery {
   status?: AssetStatus;
   /** Free text over name, description, serial number and asset tag. */
   q?: string;
+  /** "1" lists retired items too. Admin only; ignored for anyone else. */
+  retired?: string;
   /** So the shape satisfies `request`'s query bag without a cast. */
   [key: string]: string | undefined;
 }
@@ -209,8 +225,13 @@ export function getAsset(id: string) {
  * what `getAsset` returns, so the frontend cannot tell a scan from a click
  * (CLAUDE.md §1.5, design-system.md §8.6).
  */
-export function scan(serial: string) {
-  return request<ScanResult>("/scan", { method: "POST", body: { serial } });
+export function scan(serial: string, viaScanner = true) {
+  return request<ScanResult>("/scan", {
+    method: "POST",
+    // False when the serial was typed: a student's typed return is marked for
+    // an admin to check (ROADMAP §3.2).
+    body: { serial, via_scanner: viaScanner },
+  });
 }
 
 /** Called once per checkout. One transaction: the whole cart, or none of it. */
@@ -219,14 +240,15 @@ export function checkout(input: CheckoutInput) {
 }
 
 /** Any signed-in user may return any item. `note` is the damage note. */
-export function checkIn(assetId: string, note?: string) {
+export function checkIn(assetId: string, note?: string, scanned = false) {
   const trimmed = note?.trim();
+  const body: Record<string, unknown> = {};
+  if (trimmed) body.note = trimmed;
+  // True only when confirming a scan that asked "Return it?".
+  if (scanned) body.scanned = true;
   return request<CheckInResult>(
     `/assets/${encodeURIComponent(assetId)}/checkin`,
-    {
-      method: "POST",
-      body: trimmed ? { note: trimmed } : {},
-    },
+    { method: "POST", body },
   );
 }
 
@@ -329,6 +351,28 @@ export function overdueCustody() {
   return request<CustodyRecord[]>("/custody/overdue");
 }
 
+/** Admin. Returns with a damage note or no scan behind them, not yet reviewed. */
+export function needsReview() {
+  return request<CustodyRecord[]>("/custody/review");
+}
+
+/** Admin. Clears one return from the review list. */
+export function resolveReview(custodyEventId: string) {
+  return request<CustodyRecord>(
+    `/custody/${encodeURIComponent(custodyEventId)}/reviewed`,
+    { method: "POST" },
+  );
+}
+
+/** Admin. Closes an item's loan without the item; it becomes unavailable. */
+export function markLost(assetId: string, note?: string) {
+  const trimmed = note?.trim();
+  return request<AssetDetail>(`/assets/${encodeURIComponent(assetId)}/lost`, {
+    method: "POST",
+    body: trimmed ? { note: trimmed } : {},
+  });
+}
+
 /** Admin. The full past-custodian trail for one asset. */
 export function assetHistory(assetId: string) {
   return request<CustodyRecord[]>(
@@ -371,6 +415,14 @@ export function deleteUser(id: string) {
   });
 }
 
+/** Admin. Archive (no sign-in, kept for history) or restore an account. */
+export function setUserArchived(id: string, archived: boolean) {
+  return request<Profile>(`/users/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+    body: { archived },
+  });
+}
+
 /** Admin reset. The server drops that user's sessions itself. */
 export function setUserPassword(id: string, password: string) {
   return request<{ ok: boolean }>(`/users/${encodeURIComponent(id)}/password`, {
@@ -383,10 +435,12 @@ export function setUserPassword(id: string, password: string) {
  * Roster CSV import. Relative `photo_path` values in the CSV resolve against
  * `photoDir`, which is why a roster with photos has to come in as multipart.
  */
-export function importRoster(file: File, photoDir?: string) {
+export function importRoster(file: File, photoDir?: string, archiveMissing = false) {
   const form = new FormData();
   form.set("file", file);
   if (photoDir) form.set("photo_dir", photoDir);
+  // Archive every student the file does not name: the new year's roster.
+  if (archiveMissing) form.set("archive_missing", "1");
   return request<RosterResult>("/users/import", { method: "POST", form });
 }
 
@@ -459,6 +513,14 @@ export function deleteAsset(id: string) {
 }
 
 /** The available/unavailable toggle. `checked_out` is not an accepted value. */
+/** Admin. Retire (unavailable, hidden from browse, history kept) or bring back. */
+export function setAssetRetired(id: string, retired: boolean) {
+  return request<AssetDetail>(`/assets/${encodeURIComponent(id)}/retire`, {
+    method: "POST",
+    body: { retired },
+  });
+}
+
 export function setAssetStatus(
   id: string,
   status: Extract<AssetStatus, "available" | "unavailable">,

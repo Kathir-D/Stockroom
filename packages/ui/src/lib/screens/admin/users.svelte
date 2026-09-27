@@ -21,6 +21,8 @@
   import KeyIcon from "@lucide/svelte/icons/key-round"
   import ClockIcon from "@lucide/svelte/icons/history"
   import TrashIcon from "@lucide/svelte/icons/trash-2"
+  import ArchiveIcon from "@lucide/svelte/icons/archive"
+  import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore"
   import UploadIcon from "@lucide/svelte/icons/upload"
   import IdCardIcon from "@lucide/svelte/icons/id-card"
   import { saveBlob } from "../../download"
@@ -48,6 +50,12 @@
   let loading = $state(true)
   let error = $state<string | null>(null)
   let search = $state("")
+  /**
+   * Archived accounts are hidden until asked for (ROADMAP §3.4): after a few
+   * years they outnumber the students who are actually here.
+   */
+  let showArchived = $state(false)
+  let archiving = $state<string | null>(null)
 
   let formOpen = $state(false)
   let editing = $state<Profile | null>(null)
@@ -71,6 +79,7 @@
   let importOpen = $state(false)
   let importFiles = $state<FileList | undefined>(undefined)
   let importPhotoDir = $state("")
+  let importArchiveMissing = $state(false)
   let importResult = $state<RosterResult | null>(null)
   let importError = $state<string | null>(null)
   let importing = $state(false)
@@ -79,9 +88,12 @@
     return { student_number: "", first_name: "", last_name: "", email: null, is_admin: false }
   }
 
+  const archivedCount = $derived(users.filter((u) => u.archived_at).length)
+  const listed = $derived(showArchived ? users : users.filter((u) => !u.archived_at))
+
   const visible = $derived(
     search.trim()
-      ? users.filter((u) => {
+      ? listed.filter((u) => {
           const needle = search.trim().toLowerCase()
           return (
             (u.student_number ?? "").includes(needle) ||
@@ -89,8 +101,42 @@
             (u.full_name ?? "").toLowerCase().includes(needle)
           )
         })
-      : users
+      : listed
   )
+
+  /**
+   * Who chose the password, for spotting a first-scan takeover (ROADMAP
+   * §3.1): a roster student's password is set by whoever scans the number
+   * first. "Set by the student" on an account whose owner says they never
+   * set one is the sign.
+   */
+  function passwordLabel(user: Profile): string {
+    if (!user.has_password) return "Not set yet"
+    const when = user.password_set_at ? ` ${new Date(user.password_set_at).toLocaleDateString()}` : ""
+    switch (user.password_set_by) {
+      case "owner":
+        return `Set at first sign-in${when}`
+      case "admin":
+        return `Set by an admin${when}`
+      case "failsafe":
+        return "Failsafe (.env)"
+      default:
+        return "Set"
+    }
+  }
+
+  async function toggleArchived(user: Profile) {
+    archiving = user.id
+    try {
+      await api.setUserArchived(user.id, !user.archived_at)
+      toast.success(user.archived_at ? `${displayName(user)} restored` : `${displayName(user)} archived`)
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      archiving = null
+    }
+  }
 
   /**
    * ID cards for whoever the search shows, for schools whose cards carry no
@@ -231,7 +277,7 @@
     importError = null
     importResult = null
     try {
-      importResult = await api.importRoster(file, importPhotoDir.trim() || undefined)
+      importResult = await api.importRoster(file, importPhotoDir.trim() || undefined, importArchiveMissing)
       await load()
     } catch (err) {
       importError = err instanceof Error ? err.message : String(err)
@@ -244,6 +290,12 @@
 <div data-density="compact" class="flex flex-col gap-3">
   <div class="flex items-center gap-3">
     <Input bind:value={search} placeholder="Search name or number…" class="max-w-xs" />
+    {#if archivedCount > 0}
+      <Label class="flex items-center gap-2 text-fg-muted">
+        <Checkbox bind:checked={showArchived} />
+        Show archived ({archivedCount})
+      </Label>
+    {/if}
     <span class="flex-1"></span>
     <Button variant="ghost" disabled={printingCards || visible.length === 0} onclick={printCards}>
       <IdCardIcon aria-hidden="true" />
@@ -291,6 +343,7 @@
             <Table.Head>Name</Table.Head>
             <Table.Head>Student number</Table.Head>
             <Table.Head>Role</Table.Head>
+            <Table.Head>Password</Table.Head>
             <Table.Head>Overdue</Table.Head>
             <Table.Head class="text-right">Actions</Table.Head>
           </Table.Row>
@@ -299,11 +352,15 @@
           {#each visible as user (user.id)}
             {@const overdue = overdueByUser[user.id] ?? 0}
             <Table.Row>
-              <Table.Cell class="text-fg">{displayName(user)}</Table.Cell>
+              <Table.Cell class={user.archived_at ? "text-fg-faint" : "text-fg"}>
+                {displayName(user)}
+                {#if user.archived_at}<span class="ml-1 text-xs">(archived)</span>{/if}
+              </Table.Cell>
               <Table.Cell>
                 <Serial value={user.student_number} label="student number" />
               </Table.Cell>
               <Table.Cell class="text-fg-muted">{user.is_admin ? "Admin" : "Student"}</Table.Cell>
+              <Table.Cell class="text-fg-muted">{passwordLabel(user)}</Table.Cell>
               <Table.Cell class={overdue > 0 ? "text-status-overdue tabular-nums" : "text-fg-faint tabular-nums"}>
                 {overdue > 0 ? `${overdue} overdue` : "—"}
               </Table.Cell>
@@ -364,6 +421,32 @@
                       </Tooltip.Trigger>
                       <Tooltip.Content>History</Tooltip.Content>
                     </Tooltip.Root>
+
+                    {#if user.id !== session.profile?.id}
+                      <Tooltip.Root>
+                        <Tooltip.Trigger>
+                          {#snippet child({ props })}
+                            <Button
+                              {...props}
+                              variant="ghost"
+                              size="icon-sm"
+                              disabled={archiving === user.id}
+                              aria-label={`${user.archived_at ? "Restore" : "Archive"} ${displayName(user)}`}
+                              onclick={() => toggleArchived(user)}
+                            >
+                              {#if user.archived_at}
+                                <ArchiveRestoreIcon aria-hidden="true" />
+                              {:else}
+                                <ArchiveIcon aria-hidden="true" />
+                              {/if}
+                            </Button>
+                          {/snippet}
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>
+                          {user.archived_at ? "Restore: can sign in again" : "Archive: no sign-in, history kept"}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
+                    {/if}
 
                     <Tooltip.Root>
                       <Tooltip.Trigger>
@@ -506,7 +589,8 @@
       <AlertDialog.Title>Delete {deleteTarget ? displayName(deleteTarget) : ""}?</AlertDialog.Title>
       <AlertDialog.Description>
         Anyone who has ever checked something out cannot be deleted: the custody trail is the point.
-        You can't delete yourself either.
+        Archive them instead, which stops them signing in and keeps the trail. You can't delete
+        yourself either.
       </AlertDialog.Description>
     </AlertDialog.Header>
     {#if deleteError}
@@ -546,6 +630,17 @@
         />
       </div>
 
+      <Label class="flex items-start gap-2 text-fg">
+        <Checkbox bind:checked={importArchiveMissing} class="mt-0.5" />
+        <span>
+          Archive students this file does not list
+          <span class="block text-xs text-fg-faint">
+            For the new school year: last year's leavers stop being able to sign in, and their history
+            stays. Admins and anyone holding an item are left alone. Nothing is archived if any row fails.
+          </span>
+        </span>
+      </Label>
+
       {#if importError}
         <p class="text-status-overdue" role="alert">{importError}</p>
       {/if}
@@ -557,7 +652,16 @@
             <span class={importResult.failed > 0 ? "text-status-overdue" : ""}>
               {importResult.failed} failed
             </span>
+            {#if importResult.archived}· {importResult.archived} archived{/if}
           </p>
+          {#if importResult.archive_refused}
+            <p class="mt-1 text-sm text-status-overdue">{importResult.archive_refused}</p>
+          {/if}
+          {#if importResult.archive_skipped?.length}
+            <p class="mt-1 text-sm text-fg-muted">
+              Not archived, because they still hold an item: {importResult.archive_skipped.join(", ")}.
+            </p>
+          {/if}
           <div class="mt-2 max-h-64 overflow-y-auto">
             <Table.Root>
               <Table.Header>

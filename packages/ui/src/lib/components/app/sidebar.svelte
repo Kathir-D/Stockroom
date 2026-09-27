@@ -11,6 +11,7 @@
    * the shell's decision, not this component's: everything here is the same
    * markup either way, so the two can't drift.
    */
+  import FlagIcon from "@lucide/svelte/icons/flag"
   import BoxesIcon from "@lucide/svelte/icons/boxes"
   import PackageIcon from "@lucide/svelte/icons/package"
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree"
@@ -49,7 +50,9 @@
     { tab: "assets", label: "Assets", icon: BoxesIcon },
     { tab: "categories", label: "Categories", icon: FolderTreeIcon },
     { tab: "users", label: "Users", icon: UsersIcon },
-    { tab: "overdue", label: "Overdue", icon: AlertTriangleIcon },
+    { tab: "overdue", label: "Out and overdue", icon: AlertTriangleIcon },
+    // Damage reports and returns no scan backs up (ROADMAP §3.2).
+    { tab: "attention", label: "Needs attention", icon: FlagIcon },
     { tab: "backup", label: "Backup", icon: DatabaseBackupIcon },
     { tab: "settings", label: "Settings", icon: SettingsIcon },
     // Last rather than directly under Backup, which is where

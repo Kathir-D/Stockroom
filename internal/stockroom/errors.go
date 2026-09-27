@@ -13,6 +13,16 @@ var (
 	ErrOverdueBlocked = errors.New("custodian has overdue items")
 	ErrPasswordNotSet = errors.New("password not set")
 	ErrBadCredentials = errors.New("bad credentials")
+	// ErrPasswordRequired is a card scan by an admin account. A scan proves
+	// someone holds the number, and an admin's number opens the whole admin
+	// panel, so an admin always finishes with a password (ROADMAP §3.1).
+	// server/ answers 401 with password_required so the sign-in screen can
+	// move straight to the password field with the number kept.
+	ErrPasswordRequired = errors.New("admin accounts sign in with a password")
+	// ErrTooManyAttempts is a login refused before any check runs, because
+	// the same number has failed too often or the sign-in routes are being
+	// hit faster than a person can (429).
+	ErrTooManyAttempts = errors.New("too many attempts")
 	// ErrNotConfigured is a setting the operator never filled in: UPLOADS_DIR
 	// for a photo, BACKUP_DIR for a backup. Nobody's request is wrong and no
 	// code is broken, so it is neither a 4xx nor a 500; server/ answers 503

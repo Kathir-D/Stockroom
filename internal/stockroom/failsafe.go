@@ -33,11 +33,16 @@ func (db *DB) EnsureFailsafeAdmin(ctx context.Context, studentNumber, password s
 	}
 
 	_, err = db.Pool.Exec(ctx, `
-		insert into profiles (student_number, first_name, last_name, full_name, is_admin, password_hash)
-		values ($1, 'Failsafe', 'Admin', 'Failsafe Admin', true, $2)
+		insert into profiles (student_number, first_name, last_name, full_name, is_admin, password_hash,
+		                      password_set_at, password_set_by)
+		values ($1, 'Failsafe', 'Admin', 'Failsafe Admin', true, $2, now(), 'failsafe')
 		on conflict (student_number) do update
 		set is_admin = true,
-		    password_hash = excluded.password_hash`,
+		    archived_at = null,
+		    password_hash = excluded.password_hash,
+		    password_set_by = 'failsafe',
+		    password_set_at = case when profiles.password_set_by = 'failsafe'
+		                           then coalesce(profiles.password_set_at, now()) else now() end`,
 		sn, hash)
 	if err != nil {
 		return fmt.Errorf("ensure failsafe admin: %w", err)

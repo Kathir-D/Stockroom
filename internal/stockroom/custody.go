@@ -18,9 +18,10 @@ import (
 // who is signed in. Custody history reads sit here too, because they read the
 // same rows these writes produce.
 
-// MaxCheckoutDays bounds how far ahead a due date may be. The frontend caps
-// its date picker at the same number; this is the copy that decides, because
-// a client can send anything (CLAUDE.md §7).
+// MaxCheckoutDays bounds how far ahead the last day of use may be; the due
+// time is the closing time on the school day after it (due.go). The frontend
+// caps its date picker at the same number; this is the copy that decides,
+// because a client can send anything (CLAUDE.md §7).
 const MaxCheckoutDays = 7
 
 // openCustodySQL is the one definition of "this asset is out": an unreturned
@@ -50,6 +51,31 @@ type ScanAction string
 const (
 	ScanCheckedIn ScanAction = "checked_in"
 	ScanDetail    ScanAction = "detail"
+	// ScanConfirmReturn is a scan of an item the person scanning checked out
+	// a few minutes ago. Nothing happened: the screen asks "Return it?",
+	// because a student who scans their pile again on the way out, to be
+	// sure, would otherwise return everything they are carrying (ROADMAP
+	// §3.2). ReturnedFrom names the loan the question is about.
+	ScanConfirmReturn ScanAction = "confirm_return"
+)
+
+// recentCheckoutWindow is how long after a checkout a scan of the same item
+// by the same person asks before returning it.
+const recentCheckoutWindow = 10 * time.Minute
+
+// How a return happened, custody_events.returned_via.
+const (
+	ReturnedByScan   = "scan"
+	ReturnedByTyped  = "typed"
+	ReturnedByButton = "button"
+	ReturnedByKit    = "kit"
+	ReturnedLost     = "lost"
+)
+
+// Why a return needs an admin's look, custody_events.review_reasons.
+const (
+	ReviewDamage     = "damage"
+	ReviewNotScanned = "not_scanned"
 )
 
 // ScanResult is the answer to every item scan.
@@ -143,6 +169,15 @@ type CustodyRecord struct {
 	// a closed event and to now for an open one. Zero when it was on time or
 	// had no due date, which is what the admin list sorts on.
 	DaysOverdue int `json:"days_overdue"`
+
+	// Outcome is "returned", or "lost" when an admin closed the loan without
+	// the item. ReturnedVia is how it came back (the Returned* constants).
+	Outcome     string  `json:"outcome"`
+	ReturnedVia *string `json:"returned_via"`
+	// ReviewReasons say why an admin should look at this return, until
+	// ReviewedAt is set (ROADMAP §3.2).
+	ReviewReasons []string   `json:"review_reasons"`
+	ReviewedAt    *time.Time `json:"reviewed_at"`
 }
 
 // ScanItem is the single action behind every item barcode (CLAUDE.md §1.5).
@@ -155,6 +190,14 @@ type CustodyRecord struct {
 // An unknown serial is ErrNotFound so the UI can say "not a Stockroom item"
 // rather than failing silently.
 func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanResult, error) {
+	return db.ScanItemVia(ctx, actor, serial, true)
+}
+
+// ScanItemVia is ScanItem saying whether the code arrived at scanner speed.
+// A typed serial still returns an item that is out, but the return is marked
+// for an admin to review when a student typed it: nothing shows the item
+// came back (ROADMAP §3.2).
+func (db *DB) ScanItemVia(ctx context.Context, actor Actor, serial string, viaScanner bool) (ScanResult, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return ScanResult{}, err
 	}
@@ -190,9 +233,41 @@ func (db *DB) ScanItem(ctx context.Context, actor Actor, serial string) (ScanRes
 	}
 
 	if open {
-		// No confirmation step: a scanned item that is out is a return, and
-		// the dialog opens already showing that it happened (design doc §8.6).
-		in, err := db.CheckInAsset(ctx, actor, id, nil)
+		// A loan this person made a few minutes ago is asked about rather
+		// than returned (ScanConfirmReturn).
+		var recent bool
+		if err := db.Pool.QueryRow(ctx, `
+			select exists (select 1 from custody_events
+			 where asset_id = $1 and checked_in_at is null
+			   and checked_out_at > now() - make_interval(secs => $3)
+			   and (custodian_id = $2 or checked_out_by = $2))`,
+			id, actor.ID, recentCheckoutWindow.Seconds()).Scan(&recent); err != nil {
+			return ScanResult{}, mapPgError("scan item", err)
+		}
+		held, err := currentCustody(ctx, db.Pool, id, actor)
+		if err != nil {
+			return ScanResult{}, err
+		}
+		if recent && held != nil {
+			asset, err := db.GetAsset(ctx, actor, id)
+			if err != nil {
+				return ScanResult{}, err
+			}
+			db.logBestEffort(ctx, LogEntry{
+				Category: LogScan, Action: "scan_confirm_return", ActorID: actor.ID, AssetID: id,
+				Summary: fmt.Sprintf("Scanned %s just after checking it out: asked before returning it", serial),
+				Details: map[string]any{"result": "confirm_return", "custody_event_id": held.CustodyEventID},
+			})
+			return ScanResult{Action: ScanConfirmReturn, Asset: asset, ReturnedFrom: held}, nil
+		}
+		// Otherwise no confirmation step: a scanned item that is out is a
+		// return, and the dialog opens already showing that it happened
+		// (design doc §8.6).
+		via := ReturnedByScan
+		if !viaScanner {
+			via = ReturnedByTyped
+		}
+		in, err := db.CheckInAssetVia(ctx, actor, id, nil, via)
 		if err != nil {
 			return ScanResult{}, err
 		}
@@ -246,7 +321,7 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	if err != nil {
 		return CheckoutResult{}, err
 	}
-	if err := checkDueAt(in.DueAt, time.Now()); err != nil {
+	if err := checkDueAt(in.DueAt, time.Now(), db.dueTime(ctx)); err != nil {
 		return CheckoutResult{}, err
 	}
 
@@ -256,6 +331,9 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	}
 	if err != nil {
 		return CheckoutResult{}, mapPgError("check out", err)
+	}
+	if custodian.ArchivedAt != nil {
+		return CheckoutResult{}, fmt.Errorf("%w: that account is archived", ErrConflict)
 	}
 
 	tx, err := db.Pool.Begin(ctx)
@@ -347,6 +425,13 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 //
 // An item that is not out is ErrConflict, not a second custody row.
 func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, damageNote *string) (CheckInResult, error) {
+	return db.CheckInAssetVia(ctx, actor, assetID, damageNote, ReturnedByButton)
+}
+
+// CheckInAssetVia is CheckInAsset saying how the item came back (the
+// Returned* constants). A damage note, or a student's return that no scan
+// backs up, marks the return for an admin's review (ROADMAP §3.2).
+func (db *DB) CheckInAssetVia(ctx context.Context, actor Actor, assetID string, damageNote *string, via string) (CheckInResult, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return CheckInResult{}, err
 	}
@@ -382,17 +467,19 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 		return CheckInResult{}, fmt.Errorf("%w: item is not checked out", ErrConflict)
 	}
 
+	reasons := reviewReasonsFor(actor, note, via)
 	if _, err := tx.Exec(ctx, `
 		update custody_events
-		set checked_in_at = now(), checked_in_by = $2, condition_in = $3
-		where id = $1`, held.CustodyEventID, actor.ID, note); err != nil {
+		set checked_in_at = now(), checked_in_by = $2, condition_in = $3,
+		    returned_via = $4, review_reasons = $5
+		where id = $1`, held.CustodyEventID, actor.ID, note, via, reasons); err != nil {
 		return CheckInResult{}, mapPgError("check in", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`update assets set status = 'available' where id = $1`, assetID); err != nil {
 		return CheckInResult{}, mapPgError("check in", err)
 	}
-	if err := writeLog(ctx, tx, checkInEntry(ctx, actor, assetID, held, note)); err != nil {
+	if err := writeLog(ctx, tx, checkInEntry(ctx, actor, assetID, held, note, via, reasons)); err != nil {
 		return CheckInResult{}, err
 	}
 
@@ -408,7 +495,7 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 }
 
 // checkInEntry is the log row for one return.
-func checkInEntry(ctx context.Context, actor Actor, assetID string, held *AssetCustody, note *string) LogEntry {
+func checkInEntry(ctx context.Context, actor Actor, assetID string, held *AssetCustody, note *string, via string, reasons []string) LogEntry {
 	summary := "Checked in"
 	if _, scanned := scanFrom(ctx); scanned {
 		summary = "Checked in by scan"
@@ -428,6 +515,13 @@ func checkInEntry(ctx context.Context, actor Actor, assetID string, held *AssetC
 	}
 	if kit, ok := ctx.Value(ctxKit).(string); ok {
 		details["kit"] = kit
+	}
+	details["returned_via"] = via
+	if len(reasons) > 0 {
+		details["review_reasons"] = reasons
+		if slices.Contains(reasons, ReviewNotScanned) {
+			summary += " (not scanned: needs an admin's check)"
+		}
 	}
 	return LogEntry{Category: LogEquipment, Action: "checkin", ActorID: actor.ID, AssetID: assetID, Summary: summary, Details: details}
 }
@@ -513,20 +607,25 @@ func normalizeCartIDs(ids []string) ([]string, error) {
 
 // checkDueAt bounds the due date. Both ends matter: a date in the past would
 // be overdue the moment it was written, and the seven-day cap is the whole
-// point of asking for a date at all. The message names the latest acceptable
-// instant, because a date picker that offers "seven days out" at end of day
-// is past the cap and its user needs to be told why.
-func checkDueAt(dueAt, now time.Time) error {
+// point of asking for a date at all. The cap is on the last day of use, so
+// the latest due time is the closing time on the school day after the
+// seventh day (due.go). The message names it, so a client that sent later can
+// say why.
+func checkDueAt(dueAt, now time.Time, dueTime string) error {
 	if dueAt.IsZero() {
 		return fmt.Errorf("%w: a due date is required", ErrInvalid)
 	}
 	if !dueAt.After(now) {
 		return fmt.Errorf("%w: due date must be in the future", ErrInvalid)
 	}
-	latest := now.Add(MaxCheckoutDays * 24 * time.Hour)
+	h, m, err := parseDueTime(dueTime)
+	if err != nil {
+		h, m, _ = parseDueTime(DefaultDueTime)
+	}
+	latest := latestDueAt(now, h, m)
 	if dueAt.After(latest) {
-		return fmt.Errorf("%w: due date must be within %d days (on or before %s)",
-			ErrInvalid, MaxCheckoutDays, latest.UTC().Format(time.RFC3339))
+		return fmt.Errorf("%w: the last day of use must be within %d days, so the latest due time is %s",
+			ErrInvalid, MaxCheckoutDays, latest.Format("Mon Jan 2 15:04"))
 	}
 	return nil
 }
@@ -634,6 +733,7 @@ const custodyColumns = `
 	ce.checked_out_at, ce.due_at, ce.checked_in_at,
 	ce.checked_in_by, ib.first_name, ib.last_name, ib.full_name, ib.student_number,
 	ce.condition_out, ce.condition_in, ce.notes,
+	ce.outcome, ce.returned_via, ce.review_reasons, ce.reviewed_at,
 	(ce.checked_in_at is null and ce.due_at is not null and ce.due_at < now()),
 	case when ce.due_at is null then 0 else greatest(0, floor(
 		extract(epoch from (coalesce(ce.checked_in_at, now()) - ce.due_at)) / 86400)::int) end`
@@ -671,6 +771,7 @@ func listCustody(ctx context.Context, q querier, where, orderBy string, args ...
 			&r.CheckedOutAt, &r.DueAt, &r.CheckedInAt,
 			&r.CheckedInBy, &ibFirst, &ibLast, &ibFull, &ibStudent,
 			&r.ConditionOut, &r.ConditionIn, &r.Notes,
+			&r.Outcome, &r.ReturnedVia, &r.ReviewReasons, &r.ReviewedAt,
 			&r.Overdue, &r.DaysOverdue)
 		if err != nil {
 			return nil, fmt.Errorf("scan custody: %w", err)
@@ -724,7 +825,11 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 	var assetID string
 	err := db.withLoggedTx(ctx, actor.ID, "annotate custody", func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx,
-			`update custody_events set condition_in = $2
+			`update custody_events
+			    set condition_in = $2,
+			        review_reasons = case when 'damage' = any(review_reasons) then review_reasons
+			                              else array_append(review_reasons, 'damage') end,
+			        reviewed_at = null, reviewed_by = null
 			   where id = $1 and checked_in_at is not null
 			   returning asset_id`,
 			custodyEventID, trimmed).Scan(&assetID)
@@ -774,4 +879,20 @@ func (db *DB) AnnotateCustodyEvent(ctx context.Context, actor Actor, custodyEven
 		return CustodyRecord{}, fmt.Errorf("%w: no such custody event", ErrNotFound)
 	}
 	return records[0], nil
+}
+
+// reviewReasonsFor decides whether a return needs an admin's look. A damage
+// note always does: the item stays available, so somebody has to decide
+// whether it should (decided 2026-09-26). A student's return that no scan
+// backs up does too, since typing a serial or pressing a button proves
+// nothing came back; an admin's is their own responsibility.
+func reviewReasonsFor(actor Actor, note *string, via string) []string {
+	reasons := []string{}
+	if note != nil && *note != "" {
+		reasons = append(reasons, ReviewDamage)
+	}
+	if !actor.IsAdmin && via != ReturnedByScan {
+		reasons = append(reasons, ReviewNotScanned)
+	}
+	return reasons
 }
