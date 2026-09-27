@@ -4,11 +4,11 @@
    *
    * Recursive rather than three nested loops, because branches legitimately stop
    * short of depth 3: `Primes` is seeded with no models at all, since
-   * `examples/categories.media-department.md` records none in inventory (CLAUDE.md §6.2). A hand-unrolled
+   * `examples/categories.media-department.md` records none in inventory (CLAUDE.md §6). A hand-unrolled
    * three-level render has to special-case that; this doesn't.
    *
    * Sibling order is the server's, which is `sort_order` — `examples/categories.media-department.md`'s
-   * document order, not alphabetical (CLAUDE.md §13, 2026-09-13). Nothing here
+   * document order, not alphabetical (docs/decisions.md, 2026-09-13). Nothing here
    * sorts anything.
    *
    * Deliberately **not** an ARIA `tree`. That role is a contract: one tab stop

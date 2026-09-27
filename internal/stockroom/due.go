@@ -19,7 +19,7 @@ import (
 //
 // MaxCheckoutDays now caps the *last day of use*: it may be at most seven days
 // after today, so the latest possible due time is the closing time on the
-// first weekday after that. CLAUDE.md §13 records why the cap stopped being
+// first weekday after that. docs/decisions.md records why the cap stopped being
 // an exact instant.
 
 // DefaultDueTime is the closing time a fresh install uses.

@@ -732,8 +732,8 @@
         </span>
       </h2>
       <!-- Experimental because it has never pushed to a real account: the REST
-           path is unit-tested and read by hand, nothing more (CLAUDE.md §13,
-           still open). A school picking it is choosing where its records go,
+           path is unit-tested and read by hand, nothing more (CLAUDE.md §12,
+           open questions). A school picking it is choosing where its records go,
            so the screen says so rather than letting the label imply it works. -->
       <p class="text-xs text-fg-muted">
         <strong class="text-fg">Untested against a real GitHub account.</strong> Use it as a

@@ -3,7 +3,7 @@
 // The deliverable for an installed Stockroom is one file: API, UI and
 // migrations in a single executable, started by a service manager, with
 // nothing to serve the frontend separately and nothing to keep in step with it
-// (CLAUDE.md §13, Phase A). The desktop app has always worked this way --
+// (docs/decisions.md, Phase A). The desktop app has always worked this way --
 // `desktop-app/main.go` embeds its own dist the same way -- so this is the
 // existing pattern applied to the other host.
 //
@@ -11,7 +11,7 @@
 // a bad day the bigger one: it makes the CORS allow-list irrelevant for an
 // install, and a blocked preflight is the single most confusing failure this
 // system can produce, because the browser reports it identically to a server
-// that is not running (CLAUDE.md §13, 2026-09-15).
+// that is not running (docs/decisions.md, 2026-09-15).
 //
 // `dist` is a *tracked empty directory* on a fresh clone. `go:embed` fails the
 // build when its directory is absent, and `go build ./...` has to work before

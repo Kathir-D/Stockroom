@@ -231,7 +231,7 @@
    * tempting to add the kit anyway — the cart page refetches a live status per
    * line and `CheckOutAssets` refuses an unavailable unit whatever the client
    * sends, so nothing incorrect would be checked out. But "added whole or not
-   * at all" (§13) is a promise made *at this press*, and the snapshot is the
+   * at all" (docs/decisions.md) is a promise made *at this press*, and the snapshot is the
    * one thing that cannot keep it: it may call a kit complete when a unit went
    * out minutes ago, so falling through turns the all-or-nothing rule into
    * "all, or however much of it is still here" — discovered two screens later,

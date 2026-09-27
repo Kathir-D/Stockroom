@@ -4,7 +4,7 @@
  *
  * The server already returns units in browse order — category position in the
  * tree, then available before checked_out before unavailable, then name, then
- * asset tag (CLAUDE.md §13, 2026-09-13). Nothing here re-sorts them. Grouping
+ * asset tag (docs/decisions.md, 2026-09-13). Nothing here re-sorts them. Grouping
  * preserves first-appearance order, so `examples/categories.media-department.md`'s document order survives
  * into the rendered list without this file knowing what that order is.
  */

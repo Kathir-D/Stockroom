@@ -22,7 +22,7 @@ import { resolveStatus } from "./status"
 export interface KitCartPlan {
   /** Units to add now: available, and not already in the cart. */
   addable: AssetListItem[]
-  /** Already in the cart. Not an error — a cart is a set (CLAUDE.md §13). */
+  /** Already in the cart. Not an error — a cart is a set (docs/decisions.md). */
   alreadyInCart: AssetListItem[]
   /** Out or out of service, so the kit cannot go out whole right now. */
   blocked: AssetListItem[]

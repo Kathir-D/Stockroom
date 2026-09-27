@@ -1,12 +1,12 @@
 /**
  * What a student number may look like, as the sign-in screen needs to know it
- * before anybody has a session (CLAUDE.md §13, Phase B).
+ * before anybody has a session (docs/decisions.md, Phase B).
  *
  * The server is the authority (`internal/stockroom/student_number.go`); this is
  * the copy the field filters keystrokes with. They must agree, and the failure
  * when they do not is specific and bad: the sign-in screen decides "scan or
  * typed" by asking whether the field holds what the keystroke buffer saw, run
- * through this filter (CLAUDE.md §13, 2026-09-15). A filter stricter than the
+ * through this filter (docs/decisions.md, 2026-09-15). A filter stricter than the
  * server's rule strips an `AB12345` card to `12345`, the two never match, and
  * every card scan is demoted to typed -- demanding a password from a
  * roster-imported student who has not got one yet.

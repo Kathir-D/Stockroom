@@ -20,4 +20,4 @@ The conflict moves from checkout time, where a student cannot act on it, to kit-
 
 Two kits that genuinely want to share a tripod cannot both list it. That is the intended trade, and the alternative — showing "also in Kit #2" everywhere and letting the collision happen — is a warning nobody reads at the moment it matters.
 
-The rule lives in the database, not only in Go, for the same reason the asset-tag default does (CLAUDE.md §13, 2026-09-14): every writer is held to it, including `seed.sql`, a hand-written `INSERT` in Studio, and a restore. Relaxing it later is dropping one index plus the branch in `explainKitInsert`; the UI would then need somewhere to say "this unit is in two kits", which is the work the rule avoids.
+The rule lives in the database, not only in Go, for the same reason the asset-tag default does (docs/decisions.md, 2026-09-14): every writer is held to it, including `seed.sql`, a hand-written `INSERT` in Studio, and a restore. Relaxing it later is dropping one index plus the branch in `explainKitInsert`; the UI would then need somewhere to say "this unit is in two kits", which is the work the rule avoids.

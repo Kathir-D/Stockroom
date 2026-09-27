@@ -514,7 +514,7 @@
 
 <!-- Create / edit. No photo field and no status field: SetAssetPhoto is that
      column's only writer and the status toggle is its own endpoint (CLAUDE.md
-     §13, "one writer per table"). -->
+     docs/decisions.md, "one writer per table"). -->
 <Dialog.Root bind:open={formOpen}>
   <Dialog.Content>
     <form onsubmit={save} class="flex flex-col gap-3">

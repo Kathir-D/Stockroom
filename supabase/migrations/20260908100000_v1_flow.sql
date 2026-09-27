@@ -1,4 +1,4 @@
--- v1 flow (CLAUDE.md §6.2). Additive only: nothing is dropped or renamed.
+-- v1 flow (CLAUDE.md §6). Additive only: nothing is dropped or renamed.
 --
 -- profiles gains the student number that the ID-card barcode encodes (the
 -- login key for both scan and typed sign-in), split name fields, a photo path

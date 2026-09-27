@@ -4,7 +4,7 @@ Date: 2026-09-13. Status: accepted.
 
 ## Context
 
-The category tree is three levels deep, Type → Category → Model, and every seeded unit hangs off a Model. The admin panel offers Models when filing a unit. CLAUDE.md §6.2 describes the tree that way, and it would be natural to have `CreateAsset` and `UpdateAsset` refuse a `category_id` that is not at depth 3.
+The category tree is three levels deep, Type → Category → Model, and every seeded unit hangs off a Model. The admin panel offers Models when filing a unit. CLAUDE.md §6 describes the tree that way, and it would be natural to have `CreateAsset` and `UpdateAsset` refuse a `category_id` that is not at depth 3.
 
 Two things argued against the rule. A Type with no Categories under it yet (the seed ships `Primes` as a Category with no Models, and a freshly created Type has nothing) would have nowhere to put a unit at all until the admin builds the branch down. And the browse list already handles a short path: `category_path` is whatever the node's ancestry is, and the sort key compares level by level, so a unit at depth 1 or 2 simply sorts among its siblings' branches.
 

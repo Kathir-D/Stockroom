@@ -471,7 +471,7 @@ func (s Settings) validate() error {
 //
 // It is called from SaveSettings per field rather than from validate(), which
 // re-checks the whole merged row: every card on the settings screen saves on
-// its own (§13, 2026-09-17), so a bad value left in one card must not be able
+// its own (docs/decisions.md, 2026-09-17), so a bad value left in one card must not be able
 // to refuse an unrelated save in another and report it against a field the
 // admin cannot see from there.
 func validateDir(field, dir string) error {

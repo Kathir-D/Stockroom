@@ -1,0 +1,69 @@
+# HTTP endpoints
+
+Every route the Go server answers, who may call it, and what it takes. `server/router.go` is the source; update this table in the same change as a route. `CLAUDE.md` §7 has the permission rules behind the "Who" column.
+
+Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` and the static files needs a session. "Admin" below means `RequireAdmin` inside the package, not the router. A limited session (Section 7) reaches only the three routes marked so.
+
+| Route | Who | Notes |
+|---|---|---|
+| `GET /health` | nobody | pings Postgres |
+| `POST /auth/scan`, `POST /auth/password` | nobody | `{student_number}` / `{student_number, password}`; sets the cookie and returns the token. JSON only, rate limited. An admin's scan answers 401 `{password_required: true}`; an archived account 403 |
+| `POST /auth/set-password`, `POST /auth/logout`, `GET /me` | any, incl. limited | |
+| `GET /categories/tree` | any full | nested `Type -> Category -> Model`, sibling order by `sort_order` |
+| `GET /assets?category=&status=&q=`, `GET /assets/{id}` | any full | rows carry `category_path`, `photo_url`, `custody` (current holder) |
+| `POST /scan` | any full | `{serial, via_scanner?}`; out -> checked in, else -> detail, and `confirm_return` (nothing done) for an item the scanner checked out in the last ten minutes. `via_scanner: false` marks a student's return for review. See Section 1 step 5 |
+| `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
+| `POST /assets/{id}/checkin` | any full | optional `{note, scanned}` (the damage note; `scanned` confirms a `confirm_return`; an empty body is fine). A student's unscanned return, or any note, goes to Needs attention |
+| `POST /assets/{id}/lost` | admin | optional `{note}`; closes the open loan as lost and makes the item unavailable |
+| `GET /custody/review`, `POST /custody/{id}/reviewed` | admin | returns with a damage note or no scan behind them, and clearing one |
+| `POST /custody/{id}/note` | any full | `{note}` onto a **closed** event's `condition_in`. A scan checks an item in before the "Add a note" surface renders, so the note has no check-in call left to ride; an open event or a lost loan is 409. A student gets 403 past 30 minutes or once an admin has reviewed the return |
+| `GET /kits`, `GET /kits/{id}` | any full | the kit with its units as browse rows, plus `available`/`checked_out`/`unavailable` and `checkable` |
+| `POST /kits`, `PUT/DELETE /kits/{id}` | admin | `{name, description?}`; a new kit is empty, and a delete removes the grouping only — no asset, status or custody row moves |
+| `POST /kits/{id}/items`, `DELETE /kits/{id}/items/{assetId}` | admin | `{asset_id}`; a unit already in a kit is 409 **naming that kit**, a non-member is 404 |
+| `POST /kits/{id}/checkin` | any full | returns every unit of the kit that is out. Per unit, never all-or-nothing: `returned`, `already_in`, `failed` |
+| `GET /users/{id}/history` | own, or admin | |
+| `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
+| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo. The list includes archived accounts, flagged, last |
+| `POST /users/{id}/archive` | admin | `{archived}`; refused for yourself and while the account holds anything |
+| `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`, `archive_missing=1`) or a `text/csv` body (`?archive_missing=1`). Archiving is refused if any row failed |
+| `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}`. Delete is refused for anything ever checked out |
+| `POST /assets/{id}/retire` | admin | `{retired}`; retired items are unavailable, out of browse and out of their kit, history kept. `GET /assets?retired=1` lists them, for an admin |
+| `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
+| `POST /users/cards.pdf` | admin | `{user_ids}`; a sheet of ID cards with a scannable barcode, for schools whose own cards carry none |
+| `POST /categories/import` | admin | multipart `file` or a raw `text/plain`/`text/csv` body. Indented text, Markdown (headings and list items only) or `type,category,model` CSV, sniffed. One transaction with a savepoint per row, idempotent, so re-running a corrected file only adds what is new |
+| `POST /assets/import` | admin | multipart `file` or a raw CSV body. Upserts by `serial_number`; per-row errors with line numbers; an update names what it replaced; status and custody are never touched |
+| `POST /assets/bulk-preview`, `POST /assets/bulk` | admin | `{name, prefix, count, category_id?}`. The preview writes nothing and returns the exact serials; numbering continues from the highest already in use under that prefix |
+| `GET /labels/layouts` | any full | the label sheets, named by what they go on, each with its paper and an approximate `max_serial_chars` |
+| `POST /assets/labels.pdf` | admin | `{asset_ids, layout}`; a PDF to print at 100%. A serial too long for the layout is refused here, whatever the dialog warned |
+| `GET /assets/{id}/barcode.png` | any full | `?width=`, `?download=1`. One barcode, big enough to scan off the monitor — the recovery path when a sticker falls off. Fetched by the UI rather than put in an `<img src>`, which cannot carry the token |
+| `GET /setup`, `PUT /setup` | admin | the wizard's state: `{needs_admin, step, completed}`; PUT takes `{step, completed}` |
+| `POST /setup/failsafe` | admin | `{student_number, password}`, written into the `.env` the server started from and ensured immediately. Refused if it is the caller's own number or an ordinary account's |
+| `POST /setup/examples`, `DELETE /setup/examples` | admin | load `examples/` through the real importers, or remove exactly those rows. A half whose serials or numbers a real row already holds is skipped, not merged |
+| `POST /categories`, `PUT/DELETE /categories/{id}` | admin | `{name, parent_id?, sort_order?}`; depth capped at 3, delete refused with children or assets |
+| `POST /admin/backup` | admin | the whole run: archive, photo mirror, every enabled target. A failed push is in `targets`, not an error |
+| `GET /admin/export` | admin | the backup's zip as a download (`stockroom-export-<date>.zip`), `no-store`. Needs no backup folder, takes no lock, is **never** encrypted, pushes nowhere. It restores through `POST /admin/restore` like any backup |
+| `GET /admin/backup/status` | admin | the backup screen's one read: warnings (already worded), per-target state, photo generations, log tail |
+| `GET /admin/backup/versions?target=` | admin | `local` / `drive` / `github`; `id` is opaque to the UI |
+| `GET/PUT /admin/settings` | admin | secrets come back **blank** with a `_set` boolean, never masked; PUT is a partial update |
+| `POST /admin/settings/test` | admin | `{target}`; runs that target's own connection check |
+| `GET /admin/google` | admin | the one Google connection: `connected`, the `account` email, `own_client`, the Drive backup's on/off and folder, whether this server has a photo wall. Never a token |
+| `POST /admin/google/connect`, `POST /admin/google/finish` | admin | the one sign-in, from any screen. Connect starts `rclone authorize` and returns Google's page, which the UI opens itself; finish `{id, code?}` answers `{done: false}` until Google calls back (the UI polls) and then writes the remote, records the account, and starts the photo wall. It does **not** turn Drive backups on — choosing a backup folder does. Uses the school's own Google client when set (in the environment for `rclone authorize`; `config create` takes it, and the token, as arguments for the second it runs, having no other input). Replaced `/admin/drive/*` and `/admin/photo-wall/google/*` |
+| `GET /admin/google/folders?in=`, `POST /admin/google/folders` | admin | the Drive picker: folders directly inside `my-drive`, `shared` (Shared with me) or a handle from an earlier list; POST `{in, name}` makes one. **Handles, never Drive ids**, valid for an hour in server memory — a folder id is a key to the folder (the photo wall's rule) |
+| `GET /admin/local-folders?path=`, `POST /admin/local-folders` | admin | the picker for this machine's folders: subfolders of `path` (home when blank), its parent, and places (home, Desktop, Documents, external drives); POST `{parent, name}` makes one |
+| `POST /admin/restore` | admin | multipart `file` + `confirm=RESTORE` (+ `passphrase`, `force`) |
+| `POST /admin/restore/remote` | admin | the same restore, bytes fetched from a target by date |
+| `GET /admin/photos/generations`, `POST /admin/photos/restore`, `DELETE /admin/photos/generations/{name}` | admin | the mirror. Deleting is the only deletion it has, and it is a person pressing a button |
+| `GET /admin/photo-wall`, `PUT /admin/photo-wall`, `POST /admin/photo-wall/rebuild`, `GET /admin/photo-wall/preview` | admin | the sign-in photo wall's Drive folder. **No response ever carries the folder id or a Drive URL** — a share link is a capability, so the field is write-only and the screen gets a typed label, counts and a preview strip instead. `PUT` takes `{link, label?}` or `{folder: handle, label?}` (a folder from the Drive picker, named after itself) and parses → probes Drive → writes → tears the reel down; a folder it cannot reach writes nothing and leaves the previous one live. The preview does not mark tiles served |
+| `GET /admin/activity?from=&to=&before=&before_id=&person=&item=&type=&scans=&q=&limit=` | admin | the timeline, newest first, `{entries, more}`; page back with `before` and `before_id` (the last row's time and id, so rows sharing a timestamp are not skipped). Closet rows carry their `visit` (times, duration, has_clip, keep), never a file path |
+| `GET /admin/activity.csv` | admin | the same filter, oldest first. The export writes its own log row |
+| `GET /admin/camera`, `PUT /admin/camera`, `POST /admin/camera/test` | admin | the camera's settings plus what the watcher last saw; PUT is partial and refuses a detector off loopback, or turning on without a recordings folder; test takes an unsaved `{detector_url, camera_name}` |
+| `GET /admin/visits/{id}/snapshot.jpg`, `GET /admin/visits/{id}/clip.mp4`, `POST /admin/visits/{id}/keep` | admin | a visit's recording by id, with Range for seeking. Watching a clip is logged once per viewing; `{keep}` exempts it from retention and is logged |
+| `POST /signin/scan` | nobody | `application/json` only, so a cross-origin page cannot write rows without a preflight. `{code, result}` with result `not_signed_in`, `item_at_signin` or `invalid`: the scans no signed-in route sees. Rate limited (30, then one a second) |
+| `GET /signin/config` | nobody | the sign-in field's filter for the student-number format, `needs_setup` when there are no accounts yet, `session_idle_seconds`, and `checkout: {max_checkout_days, due_time}`. The sign-in screen works without it: digits stands in until it arrives |
+| `POST /setup/admin` | nobody | `FirstAdminInput` (number, names, password, the student-number format). **Only while `profiles` is empty**, checked and inserted under a table lock, so two browsers racing the form make one admin |
+| `GET /files/...` | nobody | photos off `UPLOADS_DIR`; `<img>` tags cannot send a bearer token |
+| `GET /signin/photos` | nobody | the sign-in photo wall's batch: `{photos: [...], ttl_seconds}`. **Always 200**, with `[]` whenever the wall is off, unconfigured, warming up or drained with nothing left worth repeating — every one of those means "draw no columns" to the only caller, and the sign-in screen must never look broken (`docs/design/signin-photo-wall.html` §5, §9). A reel short of fresh tiles makes the batch up with repeats that keep their expiry, and a ceiling of twice the buffer on tiles on disk stops a caller in a loop from driving Drive downloads (§2, "Draining") |
+| `GET /`, `GET /static/...` | nobody | the embedded web UI (`server/ui.go`, `web-app/embed.go`). `GET /` is the **least specific pattern on the mux**, so every route above still wins and the catch-all only ever sees paths no endpoint claims; a path that is not a file in `dist` answers `index.html`, which is what makes a bookmarked `#/kits` work. The bundle directory is `static`, **not** Vite's default `assets`, because `GET /assets/{id}` is already an endpoint and a default build would have the router answer a JavaScript request with "asset not found". A binary built with an empty `dist` answers 503 in words rather than a blank page |
+| `GET /signin-photos/...` | nobody | the tiles, off `SIGNIN_PHOTOS_DIR/tiles/`. The **subdirectory**, never the cache root: the root holds `manifest.json`, which is a listing of the Drive folder, and `http.FileServer` serves any named file in a directory even though it refuses to list one |
+
+**Statuses.** `ErrNotFound` 404, `ErrInvalid` 400, `ErrUnauthorized`/`ErrBadCredentials`/`ErrPasswordNotSet` 401, `ErrForbidden` 403, `ErrConflict`/`ErrOverdueBlocked` 409, anything else 500 with the detail logged, not sent. **`ErrNotConfigured` is 503** with its message intact: an unset `UPLOADS_DIR` or `BACKUP_DIR` is neither the client's fault nor a bug, and the admin reading the response is the person who edits `.env`.

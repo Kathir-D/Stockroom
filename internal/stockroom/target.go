@@ -195,7 +195,7 @@ func wrapTargetTest(err error) error {
 	if err != nil {
 		// A target that answers "bad credentials" is a *setting* that is
 		// wrong, not a fault in this server -- and naming which is the entire
-		// job of this button (CLAUDE.md §8.1: "so a misconfiguration is found
+		// job of this button (docs/decisions.md, 2026-09-18: "so a misconfiguration is found
 		// by somebody standing at the machine rather than by nothing happening
 		// at 2 a.m."). Without a sentinel the error reaches writeError's
 		// default branch, which logs the reason and answers 500 "internal

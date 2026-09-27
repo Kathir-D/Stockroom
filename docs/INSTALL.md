@@ -4,7 +4,9 @@ This guide covers the production install on the machine that will run Stockroom 
 
 A production install runs one PostgreSQL container and one server binary. It does not use the Supabase CLI.
 
-Supported platforms: macOS and Linux. Windows is not supported by the installer yet.
+Supported platforms: Linux and macOS. Windows will be supported only through WSL 2, and native Windows is not planned.
+
+> This guide describes the current installer, which builds from a checkout and runs PostgreSQL in Docker. It is being replaced by a `.deb` on Linux and a Homebrew formula on macOS, both using the system's PostgreSQL and a `stockroom setup` command ([ROADMAP.md](../ROADMAP.md) sections 2 and 4). This guide will be rewritten when that lands.
 
 ## What gets installed
 

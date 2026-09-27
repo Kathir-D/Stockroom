@@ -491,7 +491,7 @@ var inventoryCSVHeader = []string{
 //
 // It reuses loadCategoryTree and holdersByAsset rather than writing a
 // recursive CTE and a second definition of "out". Two definitions of who holds
-// an item is exactly the drift CLAUDE.md §13 spent a phase removing.
+// an item is exactly the drift docs/decisions.md spent a phase removing.
 func buildInventoryCSV(ctx context.Context, q querier) ([]byte, error) {
 	tree, err := loadCategoryTree(ctx, q)
 	if err != nil {

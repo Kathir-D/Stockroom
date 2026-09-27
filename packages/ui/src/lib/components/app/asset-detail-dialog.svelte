@@ -149,7 +149,7 @@
           <!--
             Internal key, admin-only. The database generates it and nobody types
             it; the serial above is what a student tracks and what the scanner
-            reads (CLAUDE.md §6.2). Not shortened to a unit number the way a
+            reads (CLAUDE.md §6). Not shortened to a unit number the way a
             serial is, because it sits right beside one and two identifiers
             rendering as the same bare digit would say nothing.
           -->

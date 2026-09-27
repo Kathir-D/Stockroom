@@ -1,4 +1,4 @@
--- Browse-list ordering (CLAUDE.md §13, 2026-09-12): the category filters and
+-- Browse-list ordering (docs/decisions.md, 2026-09-12): the category filters and
 -- the asset list follow Catagories.md's document order -- Cameras/Bodies,
 -- Lenses, Lights, Audio Stuff, Physical Bags, Tripods/Monopods, Batteries,
 -- Misc -- not alphabetical order. Nothing in the table recorded that order, so

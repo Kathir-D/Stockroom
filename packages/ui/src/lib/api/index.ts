@@ -1,8 +1,8 @@
 /**
- * One function per endpoint in `CLAUDE.md` §8.1, in the order that table lists
+ * One function per endpoint in `docs/api.md`, in the order that table lists
  * them. Nothing here contains a rule: permission checks, the 7-day cap and the
  * overdue block all live in `internal/stockroom` and are enforced there
- * regardless of what this file sends (CLAUDE.md §7, §13). A wrapper that
+ * regardless of what this file sends (CLAUDE.md §7, docs/decisions.md). A wrapper that
  * "helpfully" pre-checks a rule would be a second definition of it.
  */
 
@@ -76,7 +76,7 @@ export {
 /**
  * How far ahead a due date may be. The server enforces it as an exact instant,
  * `now + 7 * 24h` at the moment of the request, not "the end of the seventh
- * day" (CLAUDE.md §13, 2026-09-12) — which is why `<DueDatePicker>` disables
+ * day" (docs/decisions.md, 2026-09-12) — which is why `<DueDatePicker>` disables
  * dates past the cap instead of validating after the fact.
  */
 export const MAX_CHECKOUT_DAYS = 7;

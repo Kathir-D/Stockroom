@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * One unit's barcode, on screen (CLAUDE.md §13, Phase B).
+   * One unit's barcode, on screen (docs/decisions.md, Phase B).
    *
    * The recovery path for the failure a school actually has: a sticker peels
    * off, somebody finds the item by name, and needs its barcode back. Shown

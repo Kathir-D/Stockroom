@@ -756,7 +756,7 @@ var (
 	// rcloneClientIDNotice is the line rclone 1.7x prints before *every*
 	// command on a remote using its shared client id. Left in, it is the first
 	// thing in every error message and the actual cause is buried behind it.
-	// The retirement it announces is tracked in CLAUDE.md §13, not here.
+	// The retirement it announces is tracked in CLAUDE.md §12, not here.
 	rcloneClientIDNotice = regexp.MustCompile(`NOTICE: \S+: This remote uses rclone's shared Google Drive client_id.*?making-your-own-client-id\s*`)
 	// rcloneRequestURL is a Drive API request rclone quotes when a call fails.
 	// It carries the folder id in its query string, and is reduced to a word.

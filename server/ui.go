@@ -54,7 +54,7 @@ func uiHandlerFor(dist fs.FS, present bool) http.Handler {
 			// 503 rather than 404: the UI is not missing, it was never built
 			// into this binary, and that is a build problem with an operator
 			// who can fix it -- the same reasoning as ErrNotConfigured
-			// (CLAUDE.md §8.1).
+			// (docs/api.md).
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprint(w, uiMissingMessage)

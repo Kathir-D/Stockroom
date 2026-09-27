@@ -1,8 +1,8 @@
 # Closet camera and activity log
 
-ROADMAP section 2, built 2026-09-26 for macOS and Linux. Windows waits on the school choosing the closet PC's operating system.
+Built 2026-09-26 for macOS and Linux. What's left is ROADMAP A1. Native Windows and WSL are not supported, and not planned.
 
-This is the reference for how the camera, the visit recordings and the activity log fit together, what was measured, and why each decision went the way it did. CLAUDE.md §13 has the short version.
+This is the reference for how the camera, the visit recordings and the activity log fit together, what was measured, and why each decision went the way it did. docs/decisions.md has the short version.
 
 ## 1. What it does
 
@@ -10,7 +10,7 @@ A USB webcam sits over the closet door facing in, so the frame is the room and n
 
 Every other action at the closet goes into the same log: sign-ins and failed sign-ins, every barcode scan, checkouts, returns, damage notes, and admin changes. Admin → Activity reads it as one timeline. When an item goes missing, an admin opens its history, presses **Closet activity since its last return**, and sees who was in the room, who signed in and what was scanned in that window, with a play button on each visit.
 
-Nothing links a face to an account. The timeline puts the camera's visits beside the sign-ins, and the admin draws the conclusion (ROADMAP 2.6).
+Nothing links a face to an account. The timeline puts the camera's visits beside the sign-ins, and the admin draws the conclusion (ROADMAP A1).
 
 ## 2. Pieces
 
@@ -76,7 +76,7 @@ Development machine: Apple M3 Pro, Docker Desktop, Frigate 0.18 with the CPU (TF
 | Clip size | about 0.16 MB per second at 640×512, 15 fps. A 125-second visit was 20 MB |
 | Sign-in with the detector stopped | 53 ms |
 
-The CPU numbers include ffmpeg decoding the looping sample file, so the idle figure is higher than a live camera's would be. On the closet PC, ROADMAP 2.1's hardware table still applies. An Intel machine gets the OpenVINO detector, which `camera.sh` picks automatically on Intel Linux.
+The CPU numbers include ffmpeg decoding the looping sample file, so the idle figure is higher than a live camera's would be. On the closet PC, ROADMAP A1's hardware table still applies. An Intel machine gets the OpenVINO detector, which `camera.sh` picks automatically on Intel Linux.
 
 Test footage is the EPFL CVLAB "laboratory" sequence (four people entering a room), padded with 25 seconds of empty room before and 45 after so each loop has walk-ins and walk-outs. Each loop produced the same fourteen visits with scores of 0.81 to 0.84, which makes it a usable regression check. §6 says how to build and run it.
 
@@ -98,7 +98,9 @@ On macOS the webcam path needs `ffmpeg` (Homebrew) and the `go2rtc` binary from 
 ## 7. Still open
 
 - The live webcam has not run through go2rtc on this machine, because macOS's camera permission prompt needs a person to click it. The sample-footage path exercises the same Frigate, the same connector and the same watcher.
-- The QuickCam Pro 9000 and the closet PC are not here yet (ROADMAP §4), so the tuning for them (960×720 MJPEG, 15 fps, OpenVINO) is written but unmeasured.
-- The school's approval and the signage (ROADMAP 2.6).
-- Windows, and Agent DVR as its detector.
+- The QuickCam Pro 9000 and the closet PC are not here yet (ROADMAP A1), so the tuning for them (960×720 MJPEG, 15 fps, OpenVINO) is written but unmeasured.
+- The school's approval and the signage (ROADMAP A1).
+- The live webcam on Linux and through go2rtc on macOS (ROADMAP A1).
+
+Not planned: native Windows, and Agent DVR as its detector. WSL would need `usbipd-win` to pass a webcam through, and the closet PC is expected to run Linux.
 - `dev.ps1` has no `camera` subcommand.

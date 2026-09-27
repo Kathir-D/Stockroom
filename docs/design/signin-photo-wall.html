@@ -996,7 +996,7 @@ capability:</p>
 <p class="sub"><strong>The status says each thing once.</strong> "rclone is not installed" and "this server
 has no Drive source" are the same fact in two wordings — the missing binary is <em>why</em> there is no
 source — and printing both reads as two problems to fix. The second line is therefore suppressed whenever
-the first is showing, which is the correction the backup banner already took (CLAUDE.md §13). The
+the first is showing, which is the correction the backup banner already took (docs/decisions.md). The
 <code>rclone</code> check runs per request rather than at boot, so an admin who installs it in response to
 that line sees the answer change on a reload.</p>
 
@@ -1100,7 +1100,7 @@ sign-in reached Google and was then reported as not having completed. <code>SIGN
 <p><em>Superseded 2026-09-24:</em> <code>SIGNIN_PHOTOS_REMOTE</code> is no longer the switch. The wall is off until an
 admin presses <strong>Sign in with Google</strong> on the Photo wall screen, which runs <code>rclone authorize</code>
 for a <code>drive.readonly</code> token, writes the remote and starts the wall on the running server
-(<code>photowall_google.go</code>, CLAUDE.md §13). The variable survives as the remote's <em>name</em>, blank meaning
+(<code>photowall_google.go</code>, docs/decisions.md). The variable survives as the remote's <em>name</em>, blank meaning
 <code>gdrive-photos</code>. The rest of this section is as it was designed.</p>
 <p><code>SIGNIN_PHOTOS_REMOTE</code> is an install-time value and stays in <code>.env</code>.
 <strong>The folder is seeded from <code>.env</code> on first boot and then owned by <code>app_settings</code></strong>,
@@ -1118,7 +1118,7 @@ invented alongside it. Unset <code>SIGNIN_PHOTOS_REMOTE</code> = feature off, cl
   <code>main.go</code> reads the folder out of that row rather than out of the config. Not the <code>env_seeded</code>
   marker the three backup values share, as this row first said: that marker was already <code>true</code> on every
   database that had started the server before this column existed, so sharing it would have seeded new installs and
-  silently ignored every upgraded one (CLAUDE.md §13) — so a folder an admin pasted is never out-voted by this file on the next restart.
+  silently ignored every upgraded one (docs/decisions.md) — so a folder an admin pasted is never out-voted by this file on the next restart.
   A seeded folder is labelled <code>Folder from .env</code> so it is not nameless on the admin screen. Unset is the normal
   path: the wall is configured, stays empty, and an admin chooses the folder in the panel</td><td>(none)</td></tr>
 <tr><td><code>SIGNIN_PHOTOS_DIR</code></td><td>the reel's cache directory. Wiped on boot, so it must be a directory of its own — one holding files the server did not write is refused and the feature stays off (§2)</td><td><code>./.cache/signin-photos</code></td></tr>
@@ -1223,7 +1223,7 @@ config on every command. Behind a Photo wall save it is a <code>503</code> carry
 <hr />
 
 <h2 id="testing"><span class="num">10</span>Testing</h2>
-<p>Consistent with the suite's "one happy path and one gate per module" shape (CLAUDE.md §13). rclone is stubbed
+<p>Consistent with the suite's "one happy path and one gate per module" shape (docs/decisions.md). rclone is stubbed
 behind a small interface so none of this needs a network or a Google account.</p>
 <p class="sub">Everything down to "backoff" is written and passing, in <code>photowall_test.go</code>,
 <code>photowall_drive_test.go</code> and <code>photowall_image_test.go</code> — forty-one tests, none of which
@@ -1334,7 +1334,7 @@ returns real URLs.</p>
   <code>root_folder_id</code> left blank (§3); confirm <code>rclone lsjson 'gdrive,root_folder_id=&lt;ID&gt;:' -R
   --files-only</code> lists the intended folder. The folder's sharing setting is not checked here or anywhere
   else — §0 closed that question. Done on the development machine 2026-09-22 as <code>gdrive-photos</code>, on
-  rclone's shared client id, whose retirement during 2026 is tracked in CLAUDE.md §13 rather than here. The
+  rclone's shared client id, whose retirement during 2026 is tracked in CLAUDE.md §12 rather than here. The
   closet PC needs the same step.</p></li>
 <li><h3>Manifest build + refresh <span class="pill new">built</span></h3><p>Background, staged write, weekly timer,
   streamed listing with a running count, reload after a restart, and <code>SetFolder</code> so §7's switch has
@@ -1376,7 +1376,7 @@ returns real URLs.</p>
   against a temporary local tile source: the strip draws six 900×600 tiles, the link box is empty on arrival and
   empty again after a successful switch, and three reloads left the reel at 48 ready / 0 served. The screen only
   polls while a listing is running, so it makes no traffic at all the rest of the time.</p></li>
-<li><h3>Docs <span class="pill new">built</span></h3><p><code>.env.example</code>, CLAUDE.md §8.1's endpoint table,
+<li><h3>Docs <span class="pill new">built</span></h3><p><code>.env.example</code>, docs/api.md's endpoint table,
   §9's config table, the repo map and a §13 decisions-log entry; design-system.md §8.1, a new §8.7 bullet for the
   screen, and a §16 entry. The three decisions named here were recorded, plus the two this build added: the folder's
   name is typed rather than fetched, because rclone cannot stat a Drive id (§7), and the tab is
