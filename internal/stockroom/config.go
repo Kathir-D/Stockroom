@@ -52,10 +52,12 @@ type Config struct {
 	SignInPhotosManifestHours int
 
 	// PreMigrateDump is PRE_MIGRATE_DUMP: whether serve runs pg_dump before
-	// applying a migration (premigrate.go). PGDump is PG_DUMP, an explicit
+	// applying a migration (premigrate.go). PreMigrateDir is PRE_MIGRATE_DIR,
+	// where the dumps go; empty means <BACKUP_DIR>/pre-migrate. PGDump is PG_DUMP, an explicit
 	// path to that binary, and RcloneBinary is RCLONE_BINARY, the same for
 	// rclone. Both are empty unless a service manager's short PATH needs them.
 	PreMigrateDump PreMigrateDumpMode
+	PreMigrateDir  string
 	PGDump         string
 	RcloneBinary   string
 
@@ -90,6 +92,19 @@ func (c Config) Installed() bool {
 		return true
 	}
 	return false
+}
+
+// PreMigrateDumpDir is where serve writes the pre-migrate dump: PRE_MIGRATE_DIR,
+// else <BACKUP_DIR>/pre-migrate, else "" to use the backup folder saved in the
+// admin panel.
+func (c Config) PreMigrateDumpDir() string {
+	switch {
+	case c.PreMigrateDir != "":
+		return c.PreMigrateDir
+	case c.BackupDir != "":
+		return filepath.Join(c.BackupDir, "pre-migrate")
+	}
+	return ""
 }
 
 // Describe is the one line every subcommand prints about its config.
@@ -210,8 +225,9 @@ func LoadConfigFrom(flagPath string) (Config, error) {
 		SignInPhotosFolderID: os.Getenv("SIGNIN_PHOTOS_FOLDER_ID"),
 		SignInPhotosDir:      getenv("SIGNIN_PHOTOS_DIR", DefaultPhotoWallDir),
 
-		PGDump:       os.Getenv("PG_DUMP"),
-		RcloneBinary: os.Getenv("RCLONE_BINARY"),
+		PreMigrateDir: os.Getenv("PRE_MIGRATE_DIR"),
+		PGDump:        os.Getenv("PG_DUMP"),
+		RcloneBinary:  os.Getenv("RCLONE_BINARY"),
 	}
 
 	switch mode := PreMigrateDumpMode(getenv("PRE_MIGRATE_DUMP", string(PreMigrateDumpOff))); mode {
@@ -270,6 +286,7 @@ func (c Config) checkInstalledPaths() error {
 		{"SIGNIN_PHOTOS_DIR", c.SignInPhotosDir},
 		{"BACKUP_DIR", c.BackupDir},
 		{"PHOTO_BACKUP_DIR", c.PhotoBackupDir},
+		{"PRE_MIGRATE_DIR", c.PreMigrateDir},
 		{"PG_DUMP", c.PGDump},
 		{"RCLONE_BINARY", c.RcloneBinary},
 	} {

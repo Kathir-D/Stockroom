@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs after the package is unpacked. A first install enables nothing: the
+# unit needs a config that only `stockroom setup` writes, and a service
+# crash-looping on a missing file would be the first thing a new user saw.
+# An upgrade restarts a running service so it picks up the new binary, which
+# applies any new migrations after dumping the database.
+set -e
+
+if [ "$1" = "configure" ]; then
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+  if [ -n "$2" ]; then
+    # Upgrading from version $2.
+    if [ -d /run/systemd/system ]; then
+      systemctl try-restart stockroom.service >/dev/null 2>&1 || true
+    fi
+  elif [ ! -f /etc/stockroom/stockroom.env ]; then
+    echo "Stockroom is installed. Finish with: sudo stockroom setup"
+  fi
+fi
+exit 0

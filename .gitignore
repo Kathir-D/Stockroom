@@ -109,3 +109,6 @@ web-app/dist/*
 desktop-app/frontend/wailsjs/
 .backup-test/
 .env.bak.*
+
+# GoReleaser output
+/dist/

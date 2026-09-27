@@ -1,0 +1,14 @@
+#!/bin/sh
+# purge removes the config, which holds the database password. Nothing here
+# drops the database or deletes /var/lib/stockroom: those hold the school's
+# records, and docs/INSTALL.md lists the commands for anyone who really wants
+# them gone.
+set -e
+
+if [ "$1" = "purge" ]; then
+  rm -rf /etc/stockroom
+fi
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+exit 0

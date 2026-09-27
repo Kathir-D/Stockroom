@@ -26,6 +26,7 @@ var configVars = []string{
 	"PHOTO_BACKUP_DIR",
 	"STOCKROOM_CONFIG",
 	"PRE_MIGRATE_DUMP",
+	"PRE_MIGRATE_DIR",
 	"PG_DUMP",
 	"RCLONE_BINARY",
 }

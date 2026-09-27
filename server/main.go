@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -103,14 +102,10 @@ func serveWith(cfg stockroom.Config) error {
 	// Before the first pending migration runs, PRE_MIGRATE_DUMP=required
 	// writes a pg_dump of the whole database (premigrate.go), and a database
 	// newer than this binary stops here rather than meeting old queries.
-	dumpDir := ""
-	if cfg.BackupDir != "" {
-		dumpDir = filepath.Join(cfg.BackupDir, "pre-migrate")
-	}
 	applied, dump, err := stockroom.PrepareSchema(ctx, db.Pool, supabase.Migrations, stockroom.SchemaOptions{
 		Dump:        cfg.PreMigrateDump,
 		PGDump:      cfg.PGDump,
-		Dir:         dumpDir,
+		Dir:         cfg.PreMigrateDumpDir(),
 		DatabaseURL: cfg.DatabaseURL,
 	})
 	if dump != "" {

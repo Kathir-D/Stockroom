@@ -1,0 +1,137 @@
+# GoReleaser builds every release artefact from a v* tag: the binaries, the
+# .deb packages for Debian and Ubuntu, checksums.txt and the Homebrew cask.
+# .github/workflows/release.yml runs it. Try it locally, without publishing:
+#
+#   goreleaser release --snapshot --clean
+version: 2
+
+project_name: stockroom
+
+before:
+  hooks:
+    # The binary embeds web-app/dist, so the UI is built first. Building Go
+    # first ships the tracked empty directory and a server that answers every
+    # page with "built without the web UI".
+    - npm ci
+    - npm run build --workspace=web-app
+    - test -f web-app/dist/index.html
+
+builds:
+  - id: stockroom
+    main: ./server
+    binary: stockroom
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }}
+
+archives:
+  - id: stockroom
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+      - docs/INSTALL.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  use: github-native
+
+# The .deb. Its name carries no version, so
+# releases/latest/download/stockroom_amd64.deb always resolves to the newest.
+nfpms:
+  - id: deb
+    package_name: stockroom
+    file_name_template: "{{ .PackageName }}_{{ .Arch }}"
+    formats: [deb]
+    vendor: Stockroom
+    homepage: https://github.com/Kathir-D/Stockroom
+    maintainer: Kathir Dev <gokathird@gmail.com>
+    description: |-
+      Equipment checkout for a school media department.
+      Students scan an ID card to sign in and scan item barcodes to borrow and
+      return. Runs on one PC with a local PostgreSQL; run `sudo stockroom setup`
+      after installing.
+    license: See https://github.com/Kathir-D/Stockroom
+    section: misc
+    priority: optional
+    bindir: /usr/bin
+    dependencies:
+      # 14 is the oldest PostgreSQL the tests-postgres CI job passes on, and
+      # 1.60 is the rclone Debian 12 and Ubuntu 24.04 ship
+      # (docs/decisions.md, 2026-09-27).
+      - postgresql (>= 14)
+      - postgresql-client
+      - ca-certificates
+      - rclone (>= 1.60)
+    recommends:
+      - xdg-utils
+    contents:
+      - src: packaging/linux/stockroom.service
+        dst: /lib/systemd/system/stockroom.service
+        file_info:
+          mode: 0644
+      - src: deploy/camera/
+        dst: /usr/share/stockroom/camera/
+        type: tree
+      - src: README.md
+        dst: /usr/share/doc/stockroom/README.md
+        file_info:
+          mode: 0644
+      - src: docs/INSTALL.md
+        dst: /usr/share/doc/stockroom/INSTALL.md
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: packaging/linux/postinst
+      preremove: packaging/linux/prerm
+      postremove: packaging/linux/postrm
+
+# The macOS install. GoReleaser 2.10 deprecated formulas (`brews`) for casks.
+# A cask can't carry a `test do` block, so `stockroom version` is checked by
+# release.yml instead. Homebrew quarantines cask downloads and the binary
+# isn't signed, so the post-install hook clears the attribute.
+homebrew_casks:
+  - name: stockroom
+    ids: [stockroom]
+    binaries: [stockroom]
+    homepage: https://github.com/Kathir-D/Stockroom
+    description: Equipment checkout for a school media department
+    repository:
+      owner: Kathir-D
+      name: homebrew-stockroom
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: stockroom-release
+      email: gokathird@gmail.com
+    dependencies:
+      - formula: postgresql@17
+      - formula: rclone
+    caveats: |
+      Finish the install with:
+
+        stockroom setup
+
+      It creates the database, writes the config and starts Stockroom at boot.
+      It asks for your password once, to install the LaunchDaemons.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/stockroom"]
+          end
+
+release:
+  github:
+    owner: Kathir-D
+    name: Stockroom
+  prerelease: auto
