@@ -427,3 +427,11 @@ The owner's request.
 - [x] **An item label shows the barcode and the serial under it, and nothing else.** The item's name is gone. The bars take the height it used, which helps most on a lens barrel, where only a narrow band of a curved label faces the scanner. A printed name also went stale when an item was renamed and the sticker stayed. This reverses the name line from Phase B (2026-09-22) and the rule that dropped it only when the bars fell under 6mm.
 - [x] **An ID card shows the name, the barcode and the number.** The "Stockroom - scan to sign in" line is gone, the bars grew from 20mm to 24mm, and the three lines sit centred on the card.
 - [x] **The scan rules stay as they were**: a module at least 0.25mm wide and a quiet zone of 10 modules each side. The serial length each layout fits is unchanged, because it depends on width, not height.
+
+**Closed (2026-09-28, asset photos from a webcam, a drop or a paste)**
+ROADMAP A4. Admin → Assets → Photo is now `asset-photo-dialog.svelte`, which replaced a bare file input.
+- [x] **Four ways in, one preview, then Save.** A chosen file, a dropped file, a pasted image and a webcam snapshot all land on the same preview, and nothing uploads until Save. A mis-snapped photo costs a retake, not a replaced picture.
+- [x] **The browser checks what the server checks** (`photo-file.ts`): JPEG, PNG, GIF or WebP, and under 10 MB less 64 KB, because the server caps the whole multipart request at 10 MiB. Every file is renamed `photo.<ext>` from its MIME type before upload, because the server picks the stored type from the extension and a pasted image often arrives named `image` with none.
+- [x] **The webcam is a snapshot through a canvas, saved as a JPEG at quality 0.9.** It asks for 1280×960 and takes what the camera gives.
+- [x] **The camera stops whenever the dialog closes**, by Cancel, Escape, Save, or leaving the screen. A webcam left open keeps its light on and blocks the closet camera and video calls.
+- [x] **A camera error says what to do**: a blocked permission points at the site settings, a busy camera at the program holding it, and a missing one at choosing a file.

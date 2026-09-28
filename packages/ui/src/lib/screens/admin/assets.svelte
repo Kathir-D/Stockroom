@@ -25,6 +25,7 @@
   import ArchiveIcon from "@lucide/svelte/icons/archive"
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore"
   import { Checkbox } from "@stockroom/ui/components/ui/checkbox"
+  import AssetPhotoDialog from "@stockroom/ui/components/app/asset-photo-dialog.svelte"
   import BarcodeDialog from "@stockroom/ui/components/app/barcode-dialog.svelte"
   import BulkAddDialog from "@stockroom/ui/components/app/bulk-add-dialog.svelte"
   import ImportDialog from "@stockroom/ui/components/app/import-dialog.svelte"
@@ -72,8 +73,6 @@
   let deleteError = $state<string | null>(null)
 
   let photoTarget = $state<AssetListItem | null>(null)
-  let photoFiles = $state<FileList | undefined>(undefined)
-  let uploading = $state(false)
 
   function blankForm(): AssetInput {
     return {
@@ -227,23 +226,6 @@
       // The server's message names the reason and the alternative ("mark it
       // unavailable instead"). Keep the dialog open and print it.
       deleteError = err instanceof Error ? err.message : String(err)
-    }
-  }
-
-  async function uploadPhoto() {
-    const file = photoFiles?.[0]
-    if (!photoTarget || !file) return
-    uploading = true
-    try {
-      await api.setAssetPhoto(photoTarget.id, file)
-      toast.success("Photo uploaded")
-      photoTarget = null
-      photoFiles = undefined
-      await load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      uploading = false
     }
   }
 
@@ -422,11 +404,8 @@
                       {...props}
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Upload a photo for ${row.name}`}
-                      onclick={() => {
-                        photoTarget = row
-                        photoFiles = undefined
-                      }}
+                      aria-label={`Photo for ${row.name}`}
+                      onclick={() => (photoTarget = row)}
                     >
                       <ImageIcon aria-hidden="true" />
                     </Button>
@@ -604,23 +583,7 @@
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<Dialog.Root open={photoTarget !== null} onOpenChange={(open) => !open && (photoTarget = null)}>
-  <Dialog.Content>
-    <Dialog.Header>
-      <Dialog.Title>Photo for {photoTarget?.name}</Dialog.Title>
-      <Dialog.Description>
-        JPEG, PNG, GIF or WebP, up to 10 MB. It replaces any existing photo.
-      </Dialog.Description>
-    </Dialog.Header>
-    <Input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" bind:files={photoFiles} />
-    <Dialog.Footer>
-      <Button variant="ghost" onclick={() => (photoTarget = null)}>Cancel</Button>
-      <Button disabled={uploading || !photoFiles?.length} onclick={uploadPhoto}>
-        {uploading ? "Uploading…" : "Upload"}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<AssetPhotoDialog bind:asset={photoTarget} onSaved={load} />
 
 
 <UserHistoryDialog

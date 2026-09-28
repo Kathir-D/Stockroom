@@ -77,6 +77,23 @@ to page", or the bars come out the wrong size.
 A sticker that falls off: open the item and press **Barcode**. It shows one
 big enough to scan straight off the screen until you print a new one.
 
+## Item photos
+
+The picture icon on an item's row opens **Photo**. A photo helps students
+pick the right unit when two look alike. There are four ways to add one:
+
+- **Use the camera** takes a picture with the computer's webcam. The first
+  time, the browser asks to use the camera; allow it. If you said no, allow it
+  again in the browser's site settings.
+- **Choose a file** picks one from the computer.
+- Drag a photo from a folder onto the dialog.
+- Copy a picture and press **Ctrl+V** with the dialog open.
+
+Each way shows the picture first, and nothing changes until you press
+**Save**. Photos can be JPEG, PNG, GIF or WebP, up to 10 MB. A new photo
+replaces the old one. The camera turns off when the dialog closes, so the
+closet camera and video calls can use it again.
+
 ## Adding students
 
 **Admin → Users → Import roster** takes a class list as a CSV with these
