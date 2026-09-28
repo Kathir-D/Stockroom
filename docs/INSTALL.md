@@ -1,6 +1,6 @@
 # Installing Stockroom
 
-This guide covers the install on the machine that runs Stockroom day to day. For a development environment, see the [README](../README.md#development).
+This guide covers the install on the machine that runs Stockroom day to day. For a development environment, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 An install is the operating system's PostgreSQL, one `stockroom` binary and one service that starts it at boot. The binary holds the API, the web UI and every database migration. Setup puts PostgreSQL on loopback only and creates a database that holds nothing else.
 
