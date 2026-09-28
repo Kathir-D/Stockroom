@@ -1,6 +1,6 @@
 # CI
 
-One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), runs on every pull request against `main` and every push to `main`. It has four jobs: `tests` (Ubuntu), `tests-windows`, `tests-postgres` and `package-linux`. A new push to a pull request cancels the run already in progress. [`TESTING.md`](TESTING.md) describes the suites themselves.
+One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), runs on every pull request against `main` and every push to `main`. It has three jobs: `tests` (Ubuntu), `tests-postgres` and `package-linux`. A new push to a pull request cancels the run already in progress. [`TESTING.md`](TESTING.md) describes the suites themselves.
 
 ## `tests` (Ubuntu)
 
@@ -11,18 +11,6 @@ One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/t
 5. `supabase test db` (pgTAP).
 6. `npm ci` at the root, then `npm run check`, `npm test` and `npm run build` across the workspace.
 7. `supabase stop`.
-
-## `tests-windows`
-
-Differs from the Linux job in three ways:
-
-1. It uses the runner's built-in PostgreSQL service instead of the Supabase CLI (user `postgres`, password `root`, port 5432).
-2. It builds `stockroom.exe`, starts it against the empty database and waits for `/health`, so the server applies the schema itself as it does on a production install. It then loads `supabase/seed.sql` with `psql`.
-3. It does not run pgTAP.
-
-It also parses `scripts/dev.ps1` with PowerShell's parser.
-
-Native Windows is not a supported platform: Windows runs Stockroom only through WSL 2 (`ROADMAP.md` section 11). Whether this job stays, as a cheap portability check, or goes is decided in that section.
 
 ## `tests-postgres`
 
@@ -92,7 +80,7 @@ The hook fails if Postgres is not running. Run `supabase start` first.
 To require the checks, go to Settings → Rules → Rulesets → New branch ruleset, target the default branch, and enable:
 
 - Require a pull request before merging
-- Require status checks to pass: `tests`, `tests-windows`, the four `tests-postgres (…)` jobs and the two `package-linux (…)` jobs
+- Require status checks to pass: `tests`, the four `tests-postgres (…)` jobs and the two `package-linux (…)` jobs
 - Require branches to be up to date before merging
 
 A check appears in the search box only after the workflow has run once.
@@ -104,7 +92,7 @@ With `gh`, as classic branch protection:
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["tests", "tests-windows",
+  "required_status_checks": { "strict": true, "contexts": ["tests",
     "tests-postgres (14)", "tests-postgres (15)", "tests-postgres (16)", "tests-postgres (17)",
     "package-linux (ubuntu-24.04)", "package-linux (debian-12)"] },
   "enforce_admins": true,
