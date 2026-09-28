@@ -158,13 +158,21 @@ td code{white-space:nowrap}
 <div class="wrap">
 
 <h1>Sign-in photo wall</h1>
-<p class="lede">Two slowly scrolling columns of department photography flanking the sign-in card, sourced
-from a Google Drive folder, normalized to one size, cached briefly on disk and discarded after use. This
-document is the build plan and the visual reference.</p>
+<p class="lede">Two strips of film, one rising and one falling, flanking the sign-in card, showing department
+photography from a Google Drive folder. The photographs are normalized to one size and held in memory as a set
+that changes slowly through the day. This document is the build plan and the visual reference.</p>
 <p class="sub">Stockroom · drafted 2026-09-16 · sits alongside <code>docs/design/design-system.md</code> §8.1</p>
 
 <div class="card">
-  <strong>Redesign planned (2026-09-23).</strong> The single-use reel described below is being replaced by a set of about 150 photos held in memory and shown as a film strip, with picks balanced across subfolders. See <code>ROADMAP.md</code> §1. This document describes what is built today.<br><br>
+  <strong>Revised 2026-09-27: a set in memory, shown as film strips.</strong> The single-use reel on disk is gone. §2 below is rewritten for the set; where §5, §6, §8 and §10 still mention batches, a TTL, served tiles, the reaper or the boot wipe, they describe the reel that was replaced. In short:
+  <ul>
+    <li>The set holds <code>app_settings.photo_wall_size</code> photographs (default 150, from 10 to 400), in memory only. A restart refills it.</li>
+    <li>Picks go folder first, then photograph, with each subfolder capped at an even share of the set (never less than a tenth), so one event can't fill the wall.</li>
+    <li>Once full, it swaps one photograph every five minutes. Photographs deleted from Drive leave at the next listing. Admin → Photo wall has the size, "N of M ready" and Reshuffle, which replaces every photograph one at a time without emptying the wall.</li>
+    <li><code>GET /signin/photos</code> returns the whole set, <code>{photos, size}</code>; tiles are served from memory at <code>/signin-photos/{id}.jpg</code>. <code>SIGNIN_PHOTOS_COUNT</code>, <code>_BATCH</code> and <code>_TTL_MINUTES</code> are gone; <code>SIGNIN_PHOTOS_DIR</code> now holds only the manifest.</li>
+    <li>Each strip on the sign-in screen is a conveyor: it holds only the frames that fit on screen plus one, and when a frame leaves one end the next photograph in the set joins at the other. So the set grows with no jump, and a browser loads only the photographs on screen.</li>
+  </ul>
+  The text from here to §11 is the original build plan, kept for its reasoning.<br><br>
   <strong>Status — §0 to §8 are built; the feature is complete but for a real Drive folder.</strong> The config block, the cache directory and its boot wipe, and the
   reel itself — state machine, filler, reaper, <code>TakePhotos</code>, the generation counter — live in
   <code>internal/stockroom/photowall.go</code>. <code>PhotoSource</code> is now implemented:
@@ -454,155 +462,39 @@ the most core screen there is. A firewall hiccup must produce today's sign-in sc
 
 <hr />
 
-<h2 id="reel"><span class="num">2</span>The reel: prefetch and discard</h2>
-<p>The reel is a prefetch buffer with single-use contents: a fixed number of tiles are kept ready in advance
-and deleted once shown. Nothing accumulates on disk, which bounds both storage and the privacy exposure in
-§0. Here is the state machine.</p>
+<h2 id="reel"><span class="num">2</span>The set</h2>
+<p>Revised 2026-09-27. The wall keeps an ordered set of normalized tiles in memory and nowhere else. The
+sign-in screen reads the whole set and scrolls through it; reading takes nothing from it.</p>
 
 <table>
-<thead><tr><th>State</th><th>Meaning</th><th>Leaves when</th></tr></thead>
+<thead><tr><th>Event</th><th>What the set does</th></tr></thead>
 <tbody>
-<tr><td><code>ready</code></td><td>normalized tile on disk, never shown</td><td>handed out by the endpoint</td></tr>
-<tr><td><code>served</code></td><td>in a batch the browser was told about; carries <code>expiresAt</code>. A drained reel may name it in a later batch too, with <code>expiresAt</code> unchanged (see "Draining" below)</td><td><code>expiresAt</code> passes</td></tr>
-<tr><td><em>(gone)</em></td><td>file deleted, slot freed</td><td>topper-upper fetches a replacement</td></tr>
+<tr><td>Short of its size</td><td>Fetches one photograph every two seconds and appends it.</td></tr>
+<tr><td>Full</td><td>Every five minutes, drops one random tile and appends a new pick.</td></tr>
+<tr><td>A photograph leaves the Drive folder</td><td>Drops it on the next tick after the manifest stops listing it, then refills.</td></tr>
+<tr><td>Size lowered</td><td>Drops the newest tiles, so a strip already running never jumps.</td></tr>
+<tr><td>Reshuffle</td><td>Marks every tile stale and replaces them one at a time at filling pace.</td></tr>
+<tr><td>Folder replaced</td><td>Drops everything at once and advances a generation, so a download in flight from the old folder is thrown away.</td></tr>
+<tr><td>25 failures in a row</td><td>Rests five minutes between tries and logs one line; the admin screen shows the last cause.</td></tr>
 </tbody>
 </table>
 
-<div class="note bad">
-  <strong>The trap worth naming: don't delete on hand-out.</strong> When <code>GET /signin/photos</code> returns,
-  the browser has a <em>list of URLs</em> and has not fetched a single image yet. Deleting immediately gives you
-  sixteen 404s and an empty wall. Deletion has to be deferred behind a TTL (default 15 minutes, comfortably
-  longer than the page takes to load and longer than the 10-minute session idle). "Delete after use" means
-  "delete after the batch expires," not "delete after the JSON response."
-</div>
+<p><strong>Memory.</strong> A tile is about 100 KB, and one over 1 MB is refused. 400 tiles, the ceiling, is
+about 40 MB.</p>
 
-<h3>Mechanics</h3>
-<ul>
-  <li><strong>On boot, wipe the directory — but only one the server owns.</strong> Every tile is single-use and
-    re-derivable; a leftover from last run is just a photo we already showed, and wiping is also what stops a
-    crash from stranding files forever. The wipe needs a guard, though: see the note below.</li>
-  <li><strong>One goroutine does both jobs</strong>, on a short tick (~10s): reap anything expired, then top up
-    while <code>ready &lt; target</code>. One goroutine means no lock dance between the filler and the reaper.</li>
-  <li><strong>Fetches are serialized and rate-limited</strong> — one photo at a time, with a small delay. There
-    is no deadline here; the reel refills over minutes and nobody is waiting. Hammering the Drive API to fill a
-    decorative buffer is how a 403 rate-limit gets earned — one that also breaks the nightly backup, since both
-    go through the same rclone remote and the same Google quota.</li>
-  <li><strong>Burst protection.</strong> If sign-ins drain the reel faster than it refills, the batch is made up
-    with tiles already handed out that still have at least two minutes to live — a repeated wall rather than an
-    empty one (see "Draining" below). Only when nothing is left at all is the answer <code>[]</code>. The
-    frontend also repeats a short list to fill the column rather than rendering a gappy one. Reel exhaustion
-    degrades density, never correctness.</li>
-  <li><strong>Sizing.</strong> 48 ready tiles at ~120 KB each is about 6 MB of disk, and at 32 per batch that's
-    a sign-in and a half of runway. <strong>The batch was 16 until 2026-09-22</strong> (three sign-ins of runway);
-    it doubled so each column holds sixteen photographs and one comes round every three to four minutes rather
-    than every two. The cost is that back-to-back sign-ins now reach repeats sooner (see "Draining" below), because
-    the refill — about one tile every 20–25 s against a real folder (§10), so roughly 12 minutes for a whole
-    batch — was already the limit, not the buffer. <strong>At most 96 tiles are on disk at once</strong>, ready and served together — twice
-    <code>SIGNIN_PHOTOS_COUNT</code>, about 12 MB. Before the ceiling, served tiles had no bound of their own.</li>
-</ul>
+<p><strong>Picking.</strong> The set tells the source what it holds and how many tiles each subfolder has.
+The source picks a random subfolder still under its cap, then a random photograph in it the set doesn't hold.
+The cap is <code>max(ceil(size / folders), ceil(size / 10))</code>. When every folder is at its cap, it picks
+from any folder, because a wall that fills beats a balanced one that doesn't.</p>
 
-<h3>Draining: the endpoint needs no session</h3>
-<p><code>GET /signin/photos</code> is unauthenticated because the screen that calls it comes before anyone signs
-in, and every call marks up to a batch — 32 — of ready tiles served. As first built, the filler topped the buffer back up
-whenever fewer than 48 were ready and never looked at how many were out — so <strong>hand-outs drove
-downloads</strong>. Anything calling the endpoint in a loop kept the filler fetching a full-size original every two
-seconds, portraits included (downloaded whole, then refused by §4's gate), on the school uplink and the Google
-account the nightly backup shares, while the wall was empty for the next person to walk up. The realistic cause is
-not malice — somebody at the keyboard of the closet PC can do far worse — but a tab stuck reloading the sign-in
-screen, a kiosk page that refreshes itself, or a script left running. Found in review, 2026-09-22.</p>
-<p>The fix bounds the <em>downloads</em>, not the callers:</p>
-<ul>
-  <li><strong>A ceiling on tiles on disk.</strong> The filler runs only while fewer than 48 are ready
-    <em>and</em> fewer than 96 exist in total. Served tiles leave only when their TTL runs out, so no number of
-    calls can cost more than 96 downloads per fifteen minutes. The filler resumes by itself as tiles expire.
-    Reaching the ceiling is logged once per episode — normal sign-ins never get there, so that line is how a
-    stuck reload loop gets noticed. The factor is fixed at twice the buffer rather than a new <code>.env</code>
-    variable: one fewer setting to explain, and it follows <code>SIGNIN_PHOTOS_COUNT</code> if that is ever
-    changed.</li>
-  <li><strong>Repeats instead of nothing.</strong> When fewer tiles are ready than a batch asks for,
-    <code>TakePhotos</code> fills the rest with served tiles that have at least two minutes left, longest-lived
-    first. A repeat <strong>keeps its expiry</strong>: it is still deleted on the schedule its first hand-out set,
-    so "delete after use" holds. Only tiles of the current generation are repeated, so a folder an admin has
-    replaced (§7) never comes back through this path. <code>ttl_seconds</code> becomes the shortest life in the
-    batch.</li>
-</ul>
-<p class="sub">Legitimate use is limited by the refill long before the ceiling: the measured rate on a real
-folder (one tile every 20–25 s, §10) is about 40 tiles in fifteen minutes, well under 96. With 32 per batch, a
-second sign-in within about ten minutes of the first gets whatever has been fetched since plus repeats of what is
-still out — the degradation this section already accepts, and the trade the larger batch makes (§2,
-"Sizing").</p>
-<p class="sub"><strong>What was not done, and why.</strong> Rate-limiting the endpoint to, say, one fresh batch a
-minute limits the symptom rather than the downloads, and a rush of real sign-ins would hit it before an
-accidental loop would. Per-client limits have nothing to key on: the server binds loopback, so every caller is
-127.0.0.1. And a token issued by the sign-in page is ceremony, since anything that can load the page can fetch
-the token.</p>
+<p><strong>Names.</strong> A tile's URL is 32 random hex characters, never derived from the Drive path or a
+content hash, and never reused. So a URL tells nobody anything about the folder behind it, and the bytes at a
+URL never change, which is what lets the tile route say <code>immutable</code>.</p>
 
-<div class="note bad">
-  <strong>The wipe deletes everything in a path a human typed.</strong> <code>SIGNIN_PHOTOS_DIR</code> is an
-  <code>.env</code> value, and "emptied on every start" applied to a mistyped path is a data-loss bug, not a
-  cache policy: pointed at <code>./uploads</code> by one slip of the finger it would destroy every profile and
-  asset photo on the machine at the next restart, quietly, on a machine whose whole job is to be left running.
-  <br /><br />
-  So the reel <strong>marks the directory it owns</strong>. The first time it adopts one it writes a
-  <code>.stockroom-signin-photos</code> file there, and on every later boot it only empties a directory carrying
-  that marker. A directory with contents and no marker is refused: nothing is deleted, the feature turns itself
-  off, and the server logs one line naming the variable to fix. An <em>empty</em> directory is adopted without
-  ceremony, because that is what a fresh install and a fresh <code>t.TempDir()</code> both look like.
-  <br /><br />
-  The marker is a file rather than, say, requiring the path to end in a known name, because the check has to
-  survive an admin choosing their own path on the closet PC — which the config table invites them to do.
-  <br /><br />
-  <strong>Two files survive the wipe: the marker, and §3's <code>manifest.json</code>.</strong> "Wipe the
-  directory" and "build the manifest once per folder, refresh it weekly" were written in different sections and
-  collide in the one directory they share. Taken literally the wipe wins and the manifest is rebuilt on every
-  start — which on a closet PC that gets switched off at night means re-listing tens of thousands of Drive files
-  every morning, for a file whose whole design is that it costs minutes and changes about never. The wipe is
-  about <em>tiles</em>, which are single-use and re-derivable in a second; the manifest is neither, so it is
-  skipped by name. The ownership guard above is unchanged and still refuses a directory holding anything else.
-</div>
-
-<h3>The served directory holds tiles and nothing else</h3>
-<p>The cache directory ends up holding three kinds of thing: the tiles, the ownership marker above, and §3's
-<code>manifest.json</code>. §5 mounts that directory on an unauthenticated route. Those two facts were written
-four sections apart and, put together, are a hole: <code>http.FileServer</code> refuses to <em>enumerate</em> a
-directory — which is the property §0's third barrier leans on — but it serves any file in one quite happily by
-name, and the manifest is a listing of every photograph's path inside the Drive folder. §0's second barrier says
-in as many words that the frontend never receives a folder listing. A flat layout put it one guessed URL away
-from anyone standing at the machine.</p>
-<p>So the tiles live in <code>&lt;dir&gt;/tiles/</code> and that subdirectory is what §5 mounts
-(<code>PhotoWall.TileDir()</code>); the marker and the manifest stay in the root, which is served nowhere. The
-property then holds by construction rather than because §5's handler remembered to exclude a filename — the same
-reasoning as "every exported method is nil-receiver safe" below, and for the same reason: a rule a handler has
-to remember is a rule one of them will eventually forget.</p>
-
-<h3>Who builds the reel</h3>
-<p>The reel hangs off <code>DB</code> beside <code>Sessions</code>, but unlike <code>Sessions</code> it is
-<strong>assigned by <code>server/main.go</code> rather than built inside <code>Open</code></strong>, and that is
-a deliberate departure from the file table in §1.</p>
-<p><code>Open</code>'s only way to report a problem is to return an error, and <code>main</code>'s only response
-to one is <code>log.Fatalf</code> — a database it cannot reach is a server that should not start. Routing the
-photo wall through the same door would make an unwritable cache directory, or a mistyped
-<code>SIGNIN_PHOTOS_DIR</code>, fatal to the whole API. That directly contradicts §9's invariant: a server that
-refuses to boot has not merely broken the wall, it has broken sign-in in the most complete way available.</p>
-<p>So <code>main</code> calls <code>NewPhotoWall</code> itself, logs a warning on failure and serves without one
-— the same shape <code>EnsureFailsafeAdmin</code> already has (CLAUDE.md §7), so this is an existing pattern
-reaching one more feature rather than a new one. Two consequences worth stating:</p>
-<ul>
-  <li><code>DB.PhotoWall</code> is <code>nil</code> whenever the feature is off, which is the common case and
-    not an error. <strong>Every exported method on the reel is nil-receiver safe</strong> — <code>TakePhotos</code>
-    on a nil reel returns no URLs and a usable TTL — so §5's handler and §7's screen never branch on it. A nil
-    check that handlers have to remember is a nil check one of them will eventually forget, on the one screen
-    that must never break.</li>
-  <li>The goroutine's lifetime is the signal context, so Ctrl+C stops the reel with everything else.</li>
-</ul>
-
-<h3>Tile identity</h3>
-<p>The filename is random (crypto/rand hex), not derived from the Drive path or a content hash. A content hash
-would be stable across runs, which quietly defeats "delete after use": the same photo would resolve to the same
-URL and could be re-requested later from a cached page. Random names make every tile a one-time object.</p>
-<p class="sub">"One-time" is about the tile's <em>life</em>, not its audience. A drained reel may name the same
-tile to a second screen inside its TTL ("Draining" above), but never extends that TTL, so the URL still stops
-existing when its first hand-out said it would.</p>
+<p class="sub">Why memory rather than disk: the reel wrote every tile to disk and deleted it fifteen minutes
+after it was shown, which needed a boot wipe, an ownership marker, a reaper and a ceiling on files. A set that
+lives only in memory needs none of those, can't leak through a static file route, and costs at most 40 MB. The
+cost is a refill after every restart, a few minutes at one photograph every two seconds.</p>
 
 <hr />
 

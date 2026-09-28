@@ -64,8 +64,9 @@ kept.
 ## Printing stickers
 
 **Admin → Assets → Print labels** makes a PDF of barcode stickers for whatever
-the list is showing. Pick the label size by what it goes on, and **print at
-100%**, never "fit to page", or the bars come out the wrong size.
+the list is showing. Each sticker is the barcode with the serial printed under
+it. Pick the label size by what it goes on, and **print at 100%**, never "fit
+to page", or the bars come out the wrong size.
 
 - Matte labels, not glossy. Glossy ones reflect the lamp and will not scan.
 - Put them where hands do not rub: the underside of a camera, the end of a
@@ -75,6 +76,23 @@ the list is showing. Pick the label size by what it goes on, and **print at
 
 A sticker that falls off: open the item and press **Barcode**. It shows one
 big enough to scan straight off the screen until you print a new one.
+
+## Item photos
+
+The picture icon on an item's row opens **Photo**. A photo helps students
+pick the right unit when two look alike. There are four ways to add one:
+
+- **Use the camera** takes a picture with the computer's webcam. The first
+  time, the browser asks to use the camera; allow it. If you said no, allow it
+  again in the browser's site settings.
+- **Choose a file** picks one from the computer.
+- Drag a photo from a folder onto the dialog.
+- Copy a picture and press **Ctrl+V** with the dialog open.
+
+Each way shows the picture first, and nothing changes until you press
+**Save**. Photos can be JPEG, PNG, GIF or WebP, up to 10 MB. A new photo
+replaces the old one. The camera turns off when the dialog closes, so the
+closet camera and video calls can use it again.
 
 ## Adding students
 
@@ -95,9 +113,16 @@ rename the columns to match, delete the rest, and save as CSV.
   asks them to choose one. That takes about ten seconds and needs nothing from
   you.
 - **One student?** **New user**, then fill in the form.
+- **A list of names and no spreadsheet?** **Paste names** takes one person per
+  line, as `Jane Doe` or `Doe, Jane`, with their number after a comma if they
+  have one. For a club or a camp with no ID numbers, fill in **Number people
+  without one from**, say `900001`, and it counts up from there, skipping
+  numbers already in use. It shows you every name and number before it adds
+  anyone, and then offers to print their ID cards.
 
 If your students' ID cards have no barcode, **Print ID cards** makes a sheet of
-cards that do, for everyone the list is showing. Search first to print a few.
+cards that do, for everyone the list is showing. Each card has the student's
+name, the barcode and the number. Search first to print a few.
 
 **Forgotten password?** The key icon on the student's row is **Set password**.
 It signs them out everywhere. Remind them that scanning the card never needs

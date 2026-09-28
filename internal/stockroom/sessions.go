@@ -25,6 +25,9 @@ type Session struct {
 // whose last request is older than the timeout is gone on its next use.
 type SessionStore struct {
 	idle time.Duration
+	// base is the idle timeout the store was built with, from
+	// SESSION_IDLE_MINUTES, which SetIdle(0) goes back to.
+	base time.Duration
 	now  func() time.Time // injectable for tests
 
 	mu       sync.Mutex
@@ -67,6 +70,7 @@ func (s *SessionStore) Sweep() {
 func NewSessionStore(idle time.Duration) *SessionStore {
 	return &SessionStore{
 		idle:     idle,
+		base:     idle,
 		now:      time.Now,
 		sessions: map[string]*Session{},
 	}
@@ -109,7 +113,21 @@ func (s *SessionStore) Get(token string) (Session, bool) {
 
 // Idle is the timeout a session gets; zero means sessions never expire.
 func (s *SessionStore) Idle() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.idle
+}
+
+// SetIdle changes the timeout for every session, live ones included, since
+// expiry is measured from the last request at the moment it is checked. Zero
+// or less goes back to the timeout the store was built with.
+func (s *SessionStore) SetIdle(idle time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if idle <= 0 {
+		idle = s.base
+	}
+	s.idle = idle
 }
 
 // Upgrade clears the Limited flag after the account sets its first password.

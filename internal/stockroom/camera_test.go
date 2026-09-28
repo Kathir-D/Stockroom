@@ -268,7 +268,12 @@ func TestCameraOutageIsLoggedOnce(t *testing.T) {
 	db, det, _, _ := cameraFixture(t)
 	ctx := context.Background()
 	w := db.camera()
-	since := time.Now()
+	// The database's clock, not this process's: the rows are stamped by
+	// Postgres, whose clock in a Docker VM can run a few milliseconds behind.
+	var since time.Time
+	if err := db.Pool.QueryRow(ctx, `select clock_timestamp()`).Scan(&since); err != nil {
+		t.Fatal(err)
+	}
 
 	w.poll(ctx) // online: the first observation is logged
 	det.mu.Lock()

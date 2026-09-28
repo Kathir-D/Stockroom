@@ -24,7 +24,6 @@ import (
 // application backs up.
 
 const (
-	rcloneBinary = "rclone"
 	// Drive is a network round trip on a school connection at 2 a.m. Ten
 	// minutes is far longer than a few hundred KB needs and short enough that
 	// a wedged process does not hold the backup lock all night.
@@ -192,7 +191,7 @@ func safeRemoteID(id string) error {
 // one who would install it.
 func runRclone(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	if _, err := exec.LookPath(rcloneBinary); err != nil {
-		return nil, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then try again", ErrNotConfigured)
+		return nil, fmt.Errorf("%w: rclone is not installed. On this machine run `sudo apt install rclone` (Linux) or `brew install rclone` (macOS), then try again", ErrNotConfigured)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

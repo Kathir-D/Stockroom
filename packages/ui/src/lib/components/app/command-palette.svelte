@@ -31,6 +31,7 @@
   import type { AssetListItem } from "../../api/types"
   import { attachScanner } from "../../scanner"
   import { resolveStatus } from "../../status"
+  import { rules } from "../../stores/rules.svelte"
   import type { Route } from "../../stores/router.svelte"
 
   let {
@@ -166,6 +167,7 @@
     return attachScanner({
       target,
       captureInsideFields: true,
+      thresholdMs: rules.scanThresholdMs,
       onBurst: ({ code, fast }) => {
         if (!fast) return
         open = false

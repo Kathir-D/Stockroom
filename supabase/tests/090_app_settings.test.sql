@@ -17,7 +17,9 @@ from unnest(array[
   'id','backup_dir','photo_backup_dir','keep_days','stale_hours','schedule_hour',
   'drive_enabled','drive_remote','drive_path',
   'github_enabled','github_repo','github_token','archive_passphrase',
-  'photo_min_free_gb','photo_max_generations','updated_at'
+  'photo_min_free_gb','photo_max_generations','photo_wall_size',
+  'max_checkout_days','overdue_blocks_checkout','session_idle_minutes','scan_threshold_ms','closed_dates',
+  'updated_at'
 ]) as c;
 
 -- The single row the migration inserts.
@@ -59,6 +61,31 @@ select throws_ok(
 select throws_ok(
   $$update app_settings set photo_min_free_gb = -1$$, '23514', null,
   'a negative disk-headroom threshold has no reading');
+select throws_ok(
+  $$update app_settings set photo_wall_size = 401$$, '23514', null,
+  'photo_wall_size = 401 is refused: the set is held in memory, and 400 is the bound');
+select throws_ok(
+  $$update app_settings set photo_wall_size = 9$$, '23514', null,
+  'photo_wall_size = 9 is refused: two strips need more than that');
+select throws_ok(
+  $$update app_settings set max_checkout_days = 0$$, '23514', null,
+  'max_checkout_days = 0 is refused: nothing could be checked out');
+select throws_ok(
+  $$update app_settings set max_checkout_days = 61$$, '23514', null,
+  'max_checkout_days = 61 is refused');
+select throws_ok(
+  $$update app_settings set session_idle_minutes = 0$$, '23514', null,
+  'session_idle_minutes = 0 is refused: null is how the .env value applies');
+select lives_ok(
+  $$update app_settings set session_idle_minutes = null$$,
+  'session_idle_minutes may be null');
+select throws_ok(
+  $$update app_settings set scan_threshold_ms = 201$$, '23514', null,
+  'scan_threshold_ms = 201 is refused: a typist would read as a scanner');
+select throws_ok(
+  $$update app_settings set closed_dates = (select array_agg(d::date) from generate_series(date '2026-01-01', date '2027-02-05', interval '1 day') d)$$,
+  '23514', null,
+  'closed_dates holds at most 400 dates');
 
 select lives_ok(
   $$update app_settings set schedule_hour = 0, photo_min_free_gb = 0$$,

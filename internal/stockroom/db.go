@@ -59,7 +59,7 @@ type DB struct {
 	// means there was none, and that step answers ErrNotConfigured.
 	EnvPath string
 
-	// photoWall is the sign-in photo wall's reel and the Drive source feeding
+	// photoWall is the sign-in photo wall's set and the Drive source feeding
 	// it (docs/design/signin-photo-wall.html §2, §3), or nil when the feature
 	// is off. Read through photoWallParts and written through SetPhotoWall.
 	//
@@ -72,7 +72,7 @@ type DB struct {
 	// the server is running: the admin panel's Google sign-in is the switch
 	// (photowall_google.go), so the sign-in screen and the admin screen may be
 	// reading these at the moment a Finish press writes them. Two separate
-	// fields would let a reader see the new reel beside the old nil source.
+	// fields would let a reader see the new set beside the old nil source.
 	photoWall atomic.Pointer[photoWallParts]
 
 	// photoWallStart serialises starting the wall -- at boot, and from a

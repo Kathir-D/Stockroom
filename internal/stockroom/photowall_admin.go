@@ -131,7 +131,7 @@ func truncate(s string, n int) string {
 // revealing nothing the sign-in screen does not already show to everyone who
 // walks up to the machine.
 type PhotoWallStatus struct {
-	// Enabled is whether a reel is running: Google signed in to, rclone
+	// Enabled is whether a set is running: Google signed in to, rclone
 	// installed, the cache directory usable. False is the common case on a
 	// fresh install and not an error.
 	Enabled bool `json:"enabled"`
@@ -156,7 +156,7 @@ type PhotoWallStatus struct {
 	//
 	// It is a field rather than something the screen infers from Enabled and
 	// RcloneInstalled, because those two do not add up to the condition the
-	// write actually checks -- a reel can exist with no source, and rclone can
+	// write actually checks -- a set can exist with no source, and rclone can
 	// be installed with no remote configured. Two ways of asking the same
 	// question is two things to keep in step, and the one that drifts is
 	// always the copy in the UI: the form would stay enabled and every press
@@ -180,10 +180,12 @@ type PhotoWallStatus struct {
 	PhotoCount  int        `json:"photo_count"`
 	BuiltAt     *time.Time `json:"built_at"`
 
-	// Ready and Served are the reel's counts: how many tiles are waiting and
-	// how many are out in a browser somewhere waiting to expire.
-	Ready  int `json:"ready"`
-	Served int `json:"served"`
+	// Ready is how many photographs the set holds now, and Size how many it
+	// is filling to: the screen's "120 of 150 ready". Size is the setting, so
+	// it reads the same with the wall off. MaxSize is its ceiling.
+	Ready   int `json:"ready"`
+	Size    int `json:"size"`
+	MaxSize int `json:"max_size"`
 
 	LastError   string     `json:"last_error"`
 	LastErrorAt *time.Time `json:"last_error_at"`
@@ -195,6 +197,7 @@ type photoWallFolder struct {
 	label     string
 	changedAt *time.Time
 	changedBy string
+	size      int
 }
 
 // PhotoWallFolder reads the live folder out of app_settings. Exported for
@@ -217,15 +220,16 @@ func (db *DB) loadPhotoWallFolder(ctx context.Context) (photoWallFolder, error) 
 	var id, label, changedBy *string
 	err := db.Pool.QueryRow(ctx, `
 		select s.signin_photos_folder_id, s.signin_photos_label, s.signin_photos_changed_at,
-		       coalesce(nullif(trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')), ''), p.full_name)
+		       coalesce(nullif(trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')), ''), p.full_name),
+		       s.photo_wall_size
 		from app_settings s
 		left join profiles p on p.id = s.signin_photos_changed_by
-		where s.id = true`).Scan(&id, &label, &f.changedAt, &changedBy)
+		where s.id = true`).Scan(&id, &label, &f.changedAt, &changedBy, &f.size)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The migration inserts the row; a database that has had it deleted by
 		// hand gets the same treatment loadSettings gives it -- an unset
 		// folder, not a failure.
-		return photoWallFolder{}, nil
+		return photoWallFolder{size: DefaultPhotoWallSize}, nil
 	}
 	if err != nil {
 		return photoWallFolder{}, fmt.Errorf("read the photo wall folder: %w", err)
@@ -247,11 +251,11 @@ func (db *DB) GetPhotoWallStatus(ctx context.Context, actor Actor) (PhotoWallSta
 }
 
 // photoWallStatus composes the places the answer lives: rclone's remotes, the
-// settings row, the source's manifest progress, and the reel's counts.
+// settings row, the source's manifest progress, and the set's counts.
 func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallStatus {
 	wall, source := db.photoWallParts()
 	src := source.Status()
-	ready, served := wall.Counts()
+	ready, _ := wall.Counts()
 
 	st := PhotoWallStatus{
 		Enabled:         wall != nil,
@@ -267,7 +271,8 @@ func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallS
 		ListedSoFar:  src.ListedSoFar,
 		PhotoCount:   src.PhotoCount,
 		Ready:        ready,
-		Served:       served,
+		Size:         f.size,
+		MaxSize:      MaxPhotoWallSize,
 		LastError:    src.LastError,
 	}
 	if !src.BuiltAt.IsZero() {
@@ -278,7 +283,7 @@ func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallS
 		at := src.LastErrorAt
 		st.LastErrorAt = &at
 	}
-	// The reel's failures, which until §10's manual pass reached no screen at
+	// The set's failures, which until §10's manual pass reached no screen at
 	// all: the source only knows about listings, so a wall that had a manifest
 	// of two thousand photographs and was resting after 25 failed downloads
 	// reported no error while showing nothing. Newer wins, because the older
@@ -318,7 +323,7 @@ func (db *DB) photoWallStatus(ctx context.Context, f photoWallFolder) PhotoWallS
 	return st
 }
 
-// describeFillFailure words a resting reel's last failure for the admin.
+// describeFillFailure words a resting set's last failure for the admin.
 //
 // A streak of photographs the normalizer refused gets §9's sentence, naming
 // the gate, because that one is fixed by what goes into the folder and not
@@ -384,7 +389,7 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 	}
 
 	// Nothing is written until Drive has answered for this exact id. A failure
-	// here leaves the previous folder live and the reel untouched.
+	// here leaves the previous folder live and the set untouched.
 	if err := source.Probe(ctx, folderID); err != nil {
 		return PhotoWallStatus{}, err
 	}
@@ -393,18 +398,14 @@ func (db *DB) SetPhotoWallFolder(ctx context.Context, actor Actor, link, label s
 		return PhotoWallStatus{}, err
 	}
 
-	// The source discards the manifest and nudges its refresher; the reel
-	// advances the generation and deletes every ready tile. Together they are
+	// The source discards the manifest and nudges its refresher; the set
+	// advances the generation and drops every tile. Together they are
 	// the teardown: a fetch already in flight carries the old generation and
 	// its result is written nowhere, so a slow `rclone cat` cannot deposit a
-	// photograph from the replaced folder into the new reel minutes later.
-	//
-	// Tiles already *served* are deliberately left to expire on their TTL.
-	// Their URLs sit in a browser that has already rendered them, and 404ing a
-	// live page to save fifteen minutes is the worse trade.
+	// photograph from the replaced folder into the new set minutes later.
 	//
 	// Only when the folder actually changed. Re-pasting the live link -- to
-	// rename it, or to be sure -- is a label edit, and tearing the reel down
+	// rename it, or to be sure -- is a label edit, and tearing the set down
 	// for it would empty the wall for the minutes a refill takes while every
 	// tile it threw away was from the right folder.
 	if source.SetFolder(folderID) {
@@ -487,15 +488,61 @@ func (db *DB) RebuildPhotoWallManifest(ctx context.Context, actor Actor) (PhotoW
 	return db.photoWallStatus(ctx, f), nil
 }
 
-// PhotoWallPreview is GET /admin/photo-wall/preview: up to n tile URLs that
-// are *not* marked served.
-//
-// A preview must not consume the buffer the sign-in screen is about to draw
-// from -- an admin refreshing this screen a few times would otherwise empty
-// the wall for the next person to walk up. The cost is that a URL here can go
-// stale: the tile it names is still ready, so it may be handed to a real
-// sign-in and deleted a TTL later. The screen treats a 404 tile the way the
-// wall does, by hiding it.
+// SetPhotoWallSize is PUT /admin/photo-wall/size: how many photographs the
+// set holds. A running wall grows or shrinks to it straight away.
+func (db *DB) SetPhotoWallSize(ctx context.Context, actor Actor, size int) (PhotoWallStatus, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return PhotoWallStatus{}, err
+	}
+	if size < MinPhotoWallSize || size > MaxPhotoWallSize {
+		return PhotoWallStatus{}, fmt.Errorf("%w: the wall holds between %d and %d photographs", ErrInvalid, MinPhotoWallSize, MaxPhotoWallSize)
+	}
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return PhotoWallStatus{}, fmt.Errorf("save the photo wall size: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `update app_settings set photo_wall_size = $1 where id = true`, size); err != nil {
+		return PhotoWallStatus{}, mapPgError("save the photo wall size", err)
+	}
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "signin_photo_wall_size", ActorID: actorLogID(actor),
+		Summary: fmt.Sprintf("Set the sign-in photo wall to %d photographs", size), Details: map[string]any{"size": size}}); err != nil {
+		return PhotoWallStatus{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PhotoWallStatus{}, fmt.Errorf("save the photo wall size: %w", err)
+	}
+	db.SignInPhotoWall().SetSize(size)
+
+	f, err := db.loadPhotoWallFolder(ctx)
+	if err != nil {
+		return PhotoWallStatus{}, err
+	}
+	return db.photoWallStatus(ctx, f), nil
+}
+
+// ReshufflePhotoWall is POST /admin/photo-wall/reshuffle: replace every
+// photograph in the set with a new pick. The wall keeps showing the old ones
+// until each is replaced, so it never goes empty.
+func (db *DB) ReshufflePhotoWall(ctx context.Context, actor Actor) (PhotoWallStatus, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return PhotoWallStatus{}, err
+	}
+	wall := db.SignInPhotoWall()
+	if wall == nil {
+		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall is not running. Sign in with Google first", ErrNotConfigured)
+	}
+	wall.Reshuffle()
+	f, err := db.loadPhotoWallFolder(ctx)
+	if err != nil {
+		return PhotoWallStatus{}, err
+	}
+	return db.photoWallStatus(ctx, f), nil
+}
+
+// PhotoWallPreview is GET /admin/photo-wall/preview: the first n photographs
+// in the set. Reading the set takes nothing from it, so a preview never
+// costs the sign-in screen a photograph.
 func (db *DB) PhotoWallPreview(ctx context.Context, actor Actor, n int) ([]string, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return nil, err

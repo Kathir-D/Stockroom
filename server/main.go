@@ -1,12 +1,15 @@
-// Command server is the Stockroom HTTP API. It is the only process that talks
-// to Postgres; both frontends call it over localhost. All logic lives in
+// Command server is the Stockroom binary, built as `stockroom`. With no
+// arguments, or with `serve`, it is the HTTP API: the only process that talks
+// to Postgres, which both frontends call over localhost. All logic lives in
 // internal/stockroom. Handlers here only decode requests, call the package,
-// and encode responses.
+// and encode responses. The other subcommands (commands.go) install, check
+// and repair an installed copy.
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,15 +23,46 @@ import (
 	"stockroom/supabase"
 )
 
-// main wires the server together in order: load config, connect to Postgres,
-// start listening, then block until Ctrl+C / SIGTERM and shut down gracefully
-// so in-flight requests finish before the process exits.
+// version and commit are stamped by the release build:
+// -ldflags "-X main.version=… -X main.commit=…".
+var (
+	version = "dev"
+	commit  = ""
+)
+
 func main() {
-	cfg, err := stockroom.LoadConfig()
-	if err != nil {
-		log.Fatalf("config: %v", err)
+	stockroom.SetVersion(version)
+	os.Exit(run(os.Args[1:]))
+}
+
+// serve is the server. It wires everything together in order: load config,
+// connect to Postgres, start listening, then block until Ctrl+C / SIGTERM and
+// shut down gracefully so in-flight requests finish before the process exits.
+func serve(args []string) int {
+	fs := flag.NewFlagSet("stockroom serve", flag.ContinueOnError)
+	configPath := fs.String("config", "", configFlagHelp)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "stockroom serve takes no arguments, got %q\n", fs.Args())
+		return 2
 	}
 
+	cfg, err := stockroom.LoadConfigFrom(*configPath)
+	if err != nil {
+		log.Printf("config: %v", err)
+		return 1
+	}
+	log.Printf("stockroom %s, %s", versionString(), cfg.Describe())
+	if err := serveWith(cfg); err != nil {
+		log.Print(err)
+		return 1
+	}
+	return 0
+}
+
+func serveWith(cfg stockroom.Config) error {
 	// ctx is cancelled on Ctrl+C / SIGTERM; everything below hangs off it so
 	// the start scripts can stop the server cleanly.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -43,7 +77,7 @@ func main() {
 		UploadsDir:  cfg.UploadsDir,
 	}, dbConnectBudget)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		return fmt.Errorf("database: %w", err)
 	}
 	defer db.Close()
 	// Where the setup wizard writes the failsafe admin (setup.go). Only ever
@@ -64,12 +98,36 @@ func main() {
 	//
 	// Development is untouched: `supabase db reset` has already applied these,
 	// they are recorded in the same table, and this finds nothing to do.
-	switch applied, err := stockroom.Migrate(ctx, db.Pool, supabase.Migrations); {
+	//
+	// Before the first pending migration runs, PRE_MIGRATE_DUMP=required
+	// writes a pg_dump of the whole database (premigrate.go), and a database
+	// newer than this binary stops here rather than meeting old queries.
+	applied, dump, err := stockroom.PrepareSchema(ctx, db.Pool, supabase.Migrations, stockroom.SchemaOptions{
+		Dump:        cfg.PreMigrateDump,
+		PGDump:      cfg.PGDump,
+		Dir:         cfg.PreMigrateDumpDir(),
+		DatabaseURL: cfg.DatabaseURL,
+	})
+	if dump != "" {
+		log.Printf("database schema: wrote %s before migrating", dump)
+	}
+	switch {
 	case err != nil:
-		log.Fatalf("database schema: %v", err)
+		return fmt.Errorf("database schema: %w", err)
 	case len(applied) > 0:
 		log.Printf("database schema: applied %d migration(s): %s",
 			len(applied), strings.Join(applied, ", "))
+	}
+
+	// rclone is found once, here, because a service manager's PATH is short
+	// (rclone.go). Drive is optional, so a missing rclone is only logged.
+	switch rc := stockroom.ResolveRclone(ctx, cfg.RcloneBinary); {
+	case !rc.Found:
+		log.Printf("rclone: %s", rc.Error)
+	case rc.TooOld:
+		log.Printf("warning: rclone %s at %s is older than %s", rc.Version, rc.Path, rc.MinVersion)
+	default:
+		log.Printf("rclone: %s (%s)", rc.Path, rc.Version)
 	}
 
 	// Settings live in the database; .env seeds the backup ones the first
@@ -158,9 +216,6 @@ func main() {
 	// breaks it hardest.
 	db.StartPhotoWall(ctx, stockroom.PhotoWallConfig{
 		Dir:              cfg.SignInPhotosDir,
-		Count:            cfg.SignInPhotosCount,
-		Batch:            cfg.SignInPhotosBatch,
-		TTL:              time.Duration(cfg.SignInPhotosTTLMinutes) * time.Minute,
 		ManifestInterval: time.Duration(cfg.SignInPhotosManifestHours) * time.Hour,
 	})
 
@@ -176,23 +231,31 @@ func main() {
 		ReadTimeout:       60 * time.Second,
 	}
 
-	// Serve in the background so main can wait on the signal context below.
+	// Serve in the background so this can wait on the signal context below.
+	// A failed listen (the port is taken) ends the process with an error,
+	// so the service manager sees a failure and restarts it.
+	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("stockroom server listening on http://%s", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
+			listenErr <- err
 		}
 	}()
 
 	// Block until a stop signal arrives, then give in-flight requests a few
 	// seconds to complete before closing the listener and the DB pool.
-	<-ctx.Done()
+	select {
+	case err := <-listenErr:
+		return fmt.Errorf("listen: %w", err)
+	case <-ctx.Done():
+	}
 	log.Println("shutting down...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	return nil
 }
 
 // dbConnectBudget is how long the server waits for Postgres to answer before

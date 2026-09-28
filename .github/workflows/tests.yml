@@ -55,6 +55,8 @@ jobs:
               - '.github/workflows/**'
               # Fixtures: examples_test.go imports every file in here.
               - 'examples/**'
+              - 'packaging/**'
+              - '.gitattributes'
 
       - name: Set up Go
         if: steps.changes.outputs.code == 'true'
@@ -194,6 +196,8 @@ jobs:
               - '.githooks/**'
               - '.github/workflows/**'
               - 'examples/**'
+              - 'packaging/**'
+              - '.gitattributes'
 
       # dev.ps1 has never run on real Windows hardware (CLAUDE.md §12,
       # open questions). Parsing it is the least this job can do; a syntax error there is
@@ -290,3 +294,194 @@ jobs:
       - name: Docs-only change
         if: steps.changes.outputs.code != 'true'
         run: echo "Only documentation changed; nothing to build or test."
+
+  # The oldest PostgreSQL Stockroom runs on. Production uses the operating
+  # system's Postgres (ROADMAP.md decision 1): Ubuntu 22.04 ships 14, Debian 12
+  # ships 15, Ubuntu 24.04 ships 16. Each leg starts the binary against an
+  # empty database so it applies the migrations itself, as an install does,
+  # then loads the seed and runs the Go suite. The lowest passing version is
+  # the .deb's `Depends: postgresql (>= N)`.
+  tests-postgres:
+    name: tests-postgres (${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "15", "16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+      PGPASSWORD: postgres
+      STOCKROOM_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'cmd/**'
+              - 'supabase/**'
+              - 'packages/**'
+              - 'desktop-app/**'
+              - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - '.githooks/**'
+              - '.github/workflows/**'
+              - 'examples/**'
+              - 'packaging/**'
+              - '.gitattributes'
+              - '.goreleaser.yaml'
+
+      - name: Set up Go
+        if: steps.changes.outputs.code == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and boot the server (applies the schema)
+        if: steps.changes.outputs.code == 'true'
+        env:
+          SERVER_ADDR: 127.0.0.1:8080
+        run: |
+          go build -o stockroom ./server
+          ./stockroom serve > server.log 2>&1 &
+          pid=$!
+          for _ in $(seq 60); do
+            curl -fs http://127.0.0.1:8080/health && break
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8080/health >/dev/null || { cat server.log; echo "the server never answered /health"; exit 1; }
+          kill $pid
+          tail -20 server.log
+
+      - name: Load the seed
+        if: steps.changes.outputs.code == 'true'
+        run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -q -f supabase/seed.sql
+
+      - name: Go tests
+        if: steps.changes.outputs.code == 'true'
+        run: go test ./... -count=1 -p 1
+
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to build or test."
+
+  # Builds the .deb, installs it, runs setup, and installs a second .deb
+  # carrying one more migration over it (packaging/linux/smoke.sh). The
+  # runner is a full VM with systemd, so the ubuntu variant tests the real
+  # service. debian-12 runs in a container with no systemd, so it uses
+  # setup --no-service and starts the server by hand.
+  package-linux:
+    name: package-linux (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ubuntu-24.04, debian-12]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'supabase/**'
+              - 'packages/**'
+              - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - '.github/workflows/**'
+              - 'examples/**'
+              - 'deploy/camera/**'
+              - 'packaging/**'
+              - '.gitattributes'
+              - '.goreleaser.yaml'
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.code == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        if: steps.changes.outputs.code == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        if: steps.changes.outputs.code == 'true'
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+
+      # The second package is the first plus one dummy migration, so
+      # installing it over the first is an upgrade that must dump the
+      # database before migrating.
+      - name: Build two packages
+        if: steps.changes.outputs.code == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: unused
+        run: |
+          goreleaser release --snapshot --clean --skip=archive,homebrew
+          mkdir -p pkgs && cp dist/stockroom_amd64.deb pkgs/first.deb
+          echo "create table upgrade_probe (id int);" > supabase/migrations/29990101000000_upgrade_probe.sql
+          goreleaser release --snapshot --clean --skip=archive,homebrew
+          cp dist/stockroom_amd64.deb pkgs/second.deb
+          rm supabase/migrations/29990101000000_upgrade_probe.sql
+
+      - name: Install, set up and upgrade (systemd)
+        if: steps.changes.outputs.code == 'true' && matrix.target == 'ubuntu-24.04'
+        run: sudo packaging/linux/smoke.sh "$PWD/pkgs/first.deb" "$PWD/pkgs/second.deb"
+
+      - name: Install, set up and upgrade (debian:12, no systemd)
+        if: steps.changes.outputs.code == 'true' && matrix.target == 'debian-12'
+        run: |
+          docker run --rm -v "$PWD/pkgs:/pkgs:ro" \
+            -v "$PWD/packaging/linux/smoke.sh:/smoke.sh:ro" debian:12 bash -c '
+              apt-get update -q && apt-get install -y -q curl procps &&
+              bash /smoke.sh /pkgs/first.deb /pkgs/second.deb --no-service'
+
+      - name: Server log on failure
+        if: failure() && matrix.target == 'ubuntu-24.04'
+        run: sudo journalctl -u stockroom -n 100 --no-pager
+
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to package."

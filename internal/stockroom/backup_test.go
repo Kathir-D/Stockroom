@@ -273,6 +273,12 @@ func withTestSettings(t *testing.T, db *DB, admin Actor, in SettingsInput) func(
 			ArchivePassphrase:   &before.ArchivePassphrase,
 			PhotoMinFreeGB:      &before.PhotoMinFreeGB,
 			PhotoMaxGenerations: &before.PhotoMaxGenerations,
+
+			MaxCheckoutDays:       &before.MaxCheckoutDays,
+			OverdueBlocksCheckout: &before.OverdueBlocksCheckout,
+			ClosedDates:           &before.ClosedDates,
+			SessionIdleMinutes:    &before.SessionIdleMinutes,
+			ScanThresholdMs:       &before.ScanThresholdMs,
 		})
 	}
 }

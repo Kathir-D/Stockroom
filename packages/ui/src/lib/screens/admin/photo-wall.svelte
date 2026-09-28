@@ -73,15 +73,20 @@
   let saving = $state(false)
   let saveError = $state<string | null>(null)
   let rebuilding = $state(false)
+  let reshuffling = $state(false)
+  /** The set's size, as typed. Text, not a number input: see settings.svelte. */
+  let sizeDraft = $state("")
+  let sizeSaving = $state(false)
+  let sizeError = $state<string | null>(null)
 
   async function load(silent = false) {
     if (!silent) loading = true
     loadError = null
     try {
       status = await api.photoWallStatus()
+      if (!sizeSaving) sizeDraft = String(status.size)
       // The preview is a second request rather than a field on the status,
-      // because it must not consume the reel and the status is polled while a
-      // listing runs. A failure here is not worth an error surface: the strip
+      // because the status is polled while a listing runs or the set fills. A failure here is not worth an error surface: the strip
       // is a confirmation, not the screen.
       try {
         preview = (await api.photoWallPreview()).photos
@@ -100,7 +105,7 @@
   })
 
   /**
-   * Poll while a listing is running, and only then.
+   * Poll while a listing is running or the set is filling, and only then.
    *
    * §3's listing of a large folder takes minutes, during which the wall is
    * empty — correct, but indistinguishable from a broken feature unless this
@@ -109,7 +114,8 @@
    * work with no internet.
    */
   $effect(() => {
-    if (!status?.listing) return
+    const filling = status?.enabled && status.folder_set && status.ready < status.size && !status.last_error
+    if (!status?.listing && !filling) return
     const timer = setInterval(() => load(true), 3000)
     return () => clearInterval(timer)
   })
@@ -160,7 +166,40 @@
     }
   }
 
-  /** A tile can be handed to a real sign-in and reaped while this is on screen. */
+  async function saveSize() {
+    const n = Number(sizeDraft.trim())
+    if (!Number.isInteger(n) || !status || n < 10 || n > status.max_size) {
+      sizeError = `Enter a whole number from 10 to ${status?.max_size ?? 400}.`
+      return
+    }
+    sizeSaving = true
+    sizeError = null
+    try {
+      status = await api.setPhotoWallSize(n)
+      toast.success(`The wall now holds ${n} photographs`)
+      await load(true)
+    } catch (err) {
+      sizeError = err instanceof Error ? err.message : String(err)
+    } finally {
+      sizeSaving = false
+    }
+  }
+
+  async function reshuffle() {
+    reshuffling = true
+    saveError = null
+    try {
+      status = await api.reshufflePhotoWall()
+      toast.success("Swapping in new photographs, a few seconds each")
+      await load(true)
+    } catch (err) {
+      saveError = err instanceof Error ? err.message : String(err)
+    } finally {
+      reshuffling = false
+    }
+  }
+
+  /** A photograph can leave the set while this is on screen. */
   function hideBrokenTile(event: Event) {
     const img = event.currentTarget
     if (img instanceof HTMLImageElement) img.style.visibility = "hidden"
@@ -262,9 +301,11 @@
             </dd>
           </div>
           <div>
-            <dt class="text-fg-faint">Tiles ready</dt>
+            <dt class="text-fg-faint">Photographs ready</dt>
             <dd class="text-fg">
-              {status.ready} waiting, {status.served} showing
+              {status.ready} of {status.size}{status.enabled && status.ready < status.size && status.folder_set
+                ? ", filling"
+                : ""}
             </dd>
           </div>
         </dl>
@@ -289,15 +330,53 @@
 
         {#if status.folder_set}
           <div>
-            <Button variant="secondary" disabled={rebuilding || status.listing} onclick={rebuild}>
-              {status.listing ? "Listing…" : rebuilding ? "Starting…" : "Re-list this folder"}
-            </Button>
+            <div class="flex flex-wrap gap-2">
+              <Button variant="secondary" disabled={rebuilding || status.listing} onclick={rebuild}>
+                {status.listing ? "Listing…" : rebuilding ? "Starting…" : "Re-list this folder"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={reshuffling || !status.enabled || status.ready === 0}
+                onclick={reshuffle}
+              >
+                {reshuffling ? "Starting…" : "Reshuffle"}
+              </Button>
+            </div>
             <p class="mt-1 text-xs text-fg-faint">
-              The folder is re-listed automatically about once a week. Press this after uploading a
-              batch of photographs you want on the wall today.
+              The folder is re-listed automatically about once a week. Re-list after uploading a
+              batch of photographs you want on the wall today. Reshuffle swaps every photograph on
+              the wall for a new pick, one every few seconds, without emptying it.
             </p>
           </div>
         {/if}
+
+        <div class="flex flex-col gap-1">
+          <Label for="photo-wall-size">Photographs on the wall</Label>
+          <div class="flex gap-2">
+            <Input
+              id="photo-wall-size"
+              class="w-24"
+              bind:value={sizeDraft}
+              inputmode="numeric"
+              onkeydown={(e) => e.key === "Enter" && saveSize()}
+            />
+            <Button
+              variant="secondary"
+              disabled={sizeSaving || sizeDraft.trim() === String(status.size)}
+              onclick={saveSize}
+            >
+              {sizeSaving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+          <p class="text-xs text-fg-faint">
+            From 10 to {status.max_size}. The wall picks evenly across the folder's subfolders, so
+            one big event doesn't fill it, and swaps one photograph every few minutes so it changes
+            through the day. They are held in memory, about 100 KB each.
+          </p>
+          {#if sizeError}
+            <p class="text-sm text-status-overdue" role="alert">{sizeError}</p>
+          {/if}
+        </div>
       {/if}
     </section>
 
@@ -309,15 +388,12 @@
           What the wall is showing
         </h2>
         <p class="text-xs text-fg-muted">
-          Six of the tiles waiting to go out, at the size and crop the sign-in screen uses. This is
+          The first six photographs in the set, at the crop the sign-in screen uses. This is
           the check that matters: everything in the live folder will eventually appear on the
           sign-in screen, which is the one screen anybody can see without signing in.
         </p>
 
         {#if preview.length > 0}
-          <!-- Looking at these does not consume them: a preview that emptied
-               the buffer would make this screen's own confirmation the thing
-               that breaks the wall. -->
           <ul class="grid grid-cols-3 gap-2">
             {#each preview as src (src)}
               <li>
@@ -337,7 +413,7 @@
             {:else if status.listing}
               Nothing yet — the folder is still being listed.
             {:else}
-              Nothing yet. The reel fills a photograph at a time over a few minutes, deliberately
+              Nothing yet. The set fills a photograph at a time over a few minutes, deliberately
               slowly, so it never earns a rate limit on the same Google account the nightly backup
               uses.
             {/if}

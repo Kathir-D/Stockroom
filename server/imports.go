@@ -142,5 +142,8 @@ func (d deps) handleSignInConfig(w http.ResponseWriter, r *http.Request) {
 		// The checkout rules, so the date picker offers what the server
 		// accepts (CLAUDE.md §7).
 		"checkout": d.db.CheckoutRules(r.Context()),
+		// The longest gap between keys that still reads as a scanner
+		// (CLAUDE.md §10), tuned in Admin → Settings.
+		"scan_threshold_ms": d.db.ScanThresholdMs(r.Context()),
 	})
 }

@@ -370,6 +370,31 @@ export interface RosterRow {
   error?: string;
 }
 
+/** A pasted list of names, one person per line, and where numbering starts. */
+export interface AddNamesInput {
+  names: string;
+  /** The first number for lines without one, such as "900001". Blank: every line has its own. */
+  first_number: string;
+}
+
+export interface AddNamesRow {
+  /** The line in the pasted text, counting blank lines. */
+  line: number;
+  first_name: string;
+  last_name: string;
+  student_number: string;
+  /** Whether the number came from the range. */
+  assigned: boolean;
+  error?: string;
+  /** Set once the account exists. */
+  id?: string;
+}
+
+export interface AddNamesResult {
+  rows: AddNamesRow[];
+  failed: number;
+}
+
 export interface RosterResult {
   created: number;
   updated: number;
@@ -463,6 +488,16 @@ export interface Settings {
   student_number_pattern: string;
   /** "HH:MM": a loan is due at this time on the next school day after its last day of use. */
   due_time: string;
+  /** How many days after today the last day of use may be, 1 to 60. */
+  max_checkout_days: number;
+  /** Whether anything overdue stops a new checkout. */
+  overdue_blocks_checkout: boolean;
+  /** Dates the school is closed, "YYYY-MM-DD", sorted. */
+  closed_dates: string[];
+  /** Minutes an idle session lasts; 0 means SESSION_IDLE_MINUTES in .env. */
+  session_idle_minutes: number;
+  /** The longest gap between keys that still reads as a scanner. */
+  scan_threshold_ms: number;
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;
@@ -508,6 +543,15 @@ export interface PhotoMirrorStatus {
   warnings: string[];
 }
 
+export interface RcloneInfo {
+  path: string;
+  version: string;
+  found: boolean;
+  too_old: boolean;
+  min_version: string;
+  error?: string;
+}
+
 export interface BackupStatusResult {
   configured: boolean;
   dir: string;
@@ -524,6 +568,8 @@ export interface BackupStatusResult {
    */
   failsafe_admin_configured: boolean;
   photo_mirror: PhotoMirrorStatus | null;
+  /** The rclone the server resolved at startup, or null when it never looked. */
+  rclone: RcloneInfo | null;
   /** Already-worded sentences. The UI decides how to render them, not what they say. */
   warnings: string[];
   log: string[];
@@ -614,22 +660,26 @@ export interface HealthResult {
   ok: boolean;
   db: string;
   time: string;
+  /** The server's version, "dev" from a working copy. */
+  version?: string;
 }
 
 /**
- * The sign-in photo wall's batch (docs/design/signin-photo-wall.html §5).
+ * The sign-in photo wall's set (docs/design/signin-photo-wall.html §5).
  *
- * `photos` is always an array and is often empty -- the wall is off, the
- * manifest is still building, Drive is unreachable, or a burst of sign-ins
- * drained the reel. All of those mean the same thing to the only caller: draw
- * no columns. There is no error shape here because the endpoint never returns
- * one.
+ * `photos` is always an array and is often empty: the wall is off, the
+ * manifest is still building, or Drive is unreachable. All of those mean the
+ * same thing to the only caller: draw no strips. There is no error shape here
+ * because the endpoint never returns one.
  */
 export interface SignInPhotos {
-  /** Server-relative tile paths, e.g. `/signin-photos/9f2c….jpg`. */
+  /**
+   * Server-relative tile paths, e.g. `/signin-photos/9f2c….jpg`, in strip
+   * order. New photographs arrive at the end.
+   */
   photos: string[];
-  /** How long those URLs stay fetchable before the server deletes the files. */
-  ttl_seconds: number;
+  /** How many the set is filling to. More than `photos.length` while it fills. */
+  size: number;
 }
 
 /**
@@ -678,9 +728,10 @@ export interface PhotoWallStatus {
   photo_count: number;
   built_at: string | null;
 
-  /** Tiles waiting, and tiles out in a browser waiting to expire. */
+  /** Photographs in the set now, the set's size setting, and its ceiling. */
   ready: number;
-  served: number;
+  size: number;
+  max_size: number;
 
   last_error: string;
   last_error_at: string | null;

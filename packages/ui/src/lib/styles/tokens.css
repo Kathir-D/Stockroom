@@ -53,6 +53,7 @@
   --surface: #35383b; /* cards, sidebar, table container, top bar */
   --raised: #3d4144; /* hover, selected row, input fill, thumbnails */
   --overlay: #424649; /* dialogs and popovers, floats above surface */
+  --film: #151617; /* the sign-in photo wall's film base, darker than the ground */
 
   /* Lifted with the ground, for the same reason: measured against #2E3033 the
      old --fg-faint (#7C8281) falls to 3.38:1, under the 4.5:1 AA minimum

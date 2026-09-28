@@ -26,14 +26,11 @@ import (
 // a backup; not into any response; not into the log. What the screen learns
 // is `rclone listremotes`, which prints names only.
 
-// PhotoWallConfig is the install-time half of the wall: where the tiles are
-// cached and how many. The remote is the shared Google one, from
-// app_settings; the folder lives there too.
+// PhotoWallConfig is the install-time half of the wall: where the manifest
+// is kept and how often it is rebuilt. The remote is the shared Google one,
+// from app_settings; the folder and the set's size live there too.
 type PhotoWallConfig struct {
 	Dir              string
-	Count            int
-	Batch            int
-	TTL              time.Duration
 	ManifestInterval time.Duration
 }
 
@@ -42,7 +39,7 @@ type photoWallParts struct {
 	source *DrivePhotoSource
 }
 
-// photoWallParts returns the running reel and its source; both nil while the
+// photoWallParts returns the running set and its source; both nil while the
 // wall is off. Every method on either is nil-safe.
 func (db *DB) photoWallParts() (*PhotoWall, *DrivePhotoSource) {
 	if p := db.photoWall.Load(); p != nil {
@@ -51,15 +48,15 @@ func (db *DB) photoWallParts() (*PhotoWall, *DrivePhotoSource) {
 	return nil, nil
 }
 
-// SignInPhotoWall is the running reel, or nil. For server/, whose two public
+// SignInPhotoWall is the running set, or nil. For server/, whose two public
 // routes hand out and serve its tiles.
 func (db *DB) SignInPhotoWall() *PhotoWall {
 	wall, _ := db.photoWallParts()
 	return wall
 }
 
-// SetPhotoWall installs a reel and its source. StartPhotoWall is the
-// production path; this is exported for tests that build a reel by hand.
+// SetPhotoWall installs a set and its source. StartPhotoWall is the
+// production path; this is exported for tests that build a set by hand.
 func (db *DB) SetPhotoWall(wall *PhotoWall, source *DrivePhotoSource) {
 	db.photoWall.Store(&photoWallParts{wall: wall, source: source})
 }
@@ -68,7 +65,7 @@ func (db *DB) SetPhotoWall(wall *PhotoWall, source *DrivePhotoSource) {
 // starts the wall if Google has already been signed in to for it.
 //
 // ctx is the server's lifetime, and is kept: a sign-in finishing later starts
-// the wall from an HTTP request, and a reel whose goroutines died with that
+// the wall from an HTTP request, and a set whose goroutines died with that
 // request would stop a second after it started.
 //
 // Nothing here is fatal, and nothing is returned. §9's invariant is that no
@@ -112,7 +109,7 @@ func (db *DB) googleRemoteName(ctx context.Context) (string, error) {
 	return s.googleRemote(), nil
 }
 
-// startPhotoWallLocked builds and starts the reel and its source, once. The
+// startPhotoWallLocked builds and starts the set and its source, once. The
 // caller holds photoWallStart. A wall already running is pointed at the
 // current remote and otherwise left alone: rclone reads its config on every
 // call, so a reconnected token is picked up by the next listing or download
@@ -136,10 +133,11 @@ func (db *DB) startPhotoWallLocked(ctx context.Context) error {
 	// The live folder comes from app_settings, never from .env (§8), so a
 	// folder chosen before the sign-in -- or kept from an earlier one -- is
 	// read straight away.
-	folderID, folderLabel, err := db.PhotoWallFolder(ctx)
+	f, err := db.loadPhotoWallFolder(ctx)
 	if err != nil {
 		return err
 	}
+	folderID, folderLabel := f.id, f.label
 	source, err := NewDrivePhotoSource(DrivePhotoSourceOptions{
 		Remote:          remote,
 		FolderID:        folderID,
@@ -149,24 +147,13 @@ func (db *DB) startPhotoWallLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	wall, err := NewPhotoWall(PhotoWallOptions{
-		Dir:    cfg.Dir,
-		Count:  cfg.Count,
-		Batch:  cfg.Batch,
-		TTL:    cfg.TTL,
-		Source: source,
-	})
-	if err != nil {
-		return fmt.Errorf("check SIGNIN_PHOTOS_DIR: %w", err)
-	}
+	wall := NewPhotoWall(PhotoWallOptions{Size: f.size, Source: source})
 	db.SetPhotoWall(wall, source)
 
 	go wall.Run(runCtx)
-	// After the reel, because NewPhotoWall wipes the cache directory and the
-	// source reads its manifest back out of it.
 	go source.Run(runCtx)
 
-	log.Printf("sign-in photo wall: on, reading Google Drive through rclone remote %q, caching in %s", remote, cfg.Dir)
+	log.Printf("sign-in photo wall: on, reading Google Drive through rclone remote %q, manifest in %s", remote, cfg.Dir)
 	if folderID == "" {
 		log.Printf("sign-in photo wall: no Drive folder set, so the wall stays empty until one is chosen in Admin → Photo wall")
 	} else {

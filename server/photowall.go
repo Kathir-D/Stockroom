@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"net/http"
 	"strconv"
 
@@ -9,97 +8,69 @@ import (
 )
 
 // The sign-in photo wall's two unauthenticated routes
-// (docs/design/signin-photo-wall.html §5): the batch endpoint the component
-// calls once on mount, and the static mount the resulting <img> tags fetch
-// from.
+// (docs/design/signin-photo-wall.html §5): the set the component polls, and
+// the tiles its <img> tags fetch, served from memory.
 //
 // Neither takes a session, and that is not an oversight. The wall renders on
 // the sign-in screen, which exists precisely because nobody is signed in yet;
 // there is no session to require. §0 is where the consequences of that are
 // argued through -- the short version is that the tiles are departmental
-// photography, they carry no Drive identifier, the directory cannot be
-// enumerated, and the server listens on loopback only.
+// photography, they carry no Drive identifier, their names are random, and
+// the server listens on loopback only.
 
 // signInPhotosResponse is what the component gets. Both fields are always
-// present: an empty list is a normal answer, not an error condition, so the
-// frontend never has to distinguish a missing key from an empty one.
+// present: an empty list is a normal answer, not an error condition.
 type signInPhotosResponse struct {
+	// Photos is the set's tile URLs in strip order. New photographs arrive
+	// at the end, so a strip that appends what it hasn't seen never jumps.
 	Photos []string `json:"photos"`
-	// TTLSeconds is how long the URLs above stay fetchable. The component does
-	// not currently need it -- it fetches once on mount and never polls -- but
-	// it is the one number that makes the response self-describing, and a
-	// client that ever does want to re-fetch should read it rather than
-	// hard-code fifteen minutes.
-	TTLSeconds int `json:"ttl_seconds"`
+	// Size is how many the set is filling to, so the strip can tell a set
+	// still filling from a full one and poll faster while it fills.
+	Size int `json:"size"`
 }
 
-// handleSignInPhotos hands out a batch of tile URLs.
+// handleSignInPhotos returns the set.
 //
 // It always answers 200, including when there is nothing to give. Not
-// configured, rclone missing, the manifest still building, Drive unreachable,
-// or a burst of sign-ins draining the reel faster than it refills all produce
-// the same empty list, because they all mean the same thing to the only
-// caller: draw no columns. §9's invariant is that no failure in this subsystem
-// may delay, block or visibly break sign-in, and an error status here would be
-// a red herring in the log on the one screen that must never look broken.
+// configured, rclone missing, the manifest still building or Drive
+// unreachable all produce the same empty list, because they all mean the
+// same thing to the only caller: draw no strips. §9's invariant is that no
+// failure in this subsystem may delay, block or visibly break sign-in.
 func (d deps) handleSignInPhotos(w http.ResponseWriter, r *http.Request) {
-	urls, ttl := d.db.SignInPhotoWall().TakePhotos(0)
-	if urls == nil {
-		// json.Marshal writes a nil slice as null, and the component would
-		// then have to guard against it. An empty list is the honest shape.
-		urls = []string{}
-	}
-
-	// A cached list points at files that have already been deleted, and the
-	// tiles it names were marked served the moment this ran -- so replaying it
-	// is a wall of 404s rather than a saved request.
+	wall := d.db.SignInPhotoWall()
+	_, size := wall.Counts()
+	// The set changes every few minutes, so a cached copy is soon wrong.
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, signInPhotosResponse{
-		Photos:     urls,
-		TTLSeconds: int(ttl.Seconds()),
-	})
+	writeJSON(w, http.StatusOK, signInPhotosResponse{Photos: wall.Photos(), Size: size})
 }
 
-// photoTileServer serves the tiles themselves off local disk.
+// photoTileServer serves one tile from the set's memory. Nothing on disk is
+// reachable here, so the manifest (a listing of the Drive folder, which §0
+// says no client may receive) can't be served by any name.
 //
-// dir is PhotoWall.TileDir(), never the cache directory: the ownership marker
-// and §3's manifest.json live in the root, and the manifest is a listing of
-// every photograph's path inside the Drive folder, which §0's second barrier
-// says no client may ever receive. http.FileServer refuses to enumerate a
-// directory but serves any file in one by name, so the separation is what
-// makes that barrier hold -- not this function remembering to exclude a
-// filename.
-//
-// A nil reel returns "" from TileDir, and fileServer answers an empty dir with
-// a 404 handler, so the off state needs no branch here or in the router.
-//
-// The reel is looked up per request rather than captured when the router is
+// The set is looked up per request rather than captured when the router is
 // built, because it can start after that: an admin signing in to Google on
 // the Photo wall screen starts it on a running server (photowall_google.go).
 func photoTileServer(currentWall func() *stockroom.PhotoWall) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wall := currentWall()
-		files := fileServer(stockroom.PhotoWallPrefix, wall.TileDir())
-
-		// Tile names are random and single-use, so the bytes at a given URL
-		// can never change -- immutable is exactly true.
-		//
-		// The lifetime is what is left of this tile's life rather than the year
-		// a permanently-immutable asset would get, because the server *deletes*
-		// the file at the end of that window. Per tile, not the reel's TTL: a
-		// drained reel hands a tile out again with only part of its life left
-		// (TakePhotos). Rounded up, so a tile fetched the instant it is handed
-		// out reads as the full TTL rather than a second short of it. A year-long max-age would leave
-		// a photograph in the browser's disk cache long after the copy on disk
-		// was reaped, which is the opposite of what "delete after use" (§2) is
-		// for, and it would buy nothing: the component fetches each URL once
-		// and is handed a fresh batch on the next mount.
-		//
-		// private, because the machine is shared and there is no shared cache
-		// on loopback for public to be about.
-		maxAge := int(math.Ceil(wall.TileMaxAge(r.URL.Path).Seconds()))
-		w.Header().Set("Cache-Control", "private, max-age="+strconv.Itoa(maxAge)+", immutable")
-		files.ServeHTTP(w, r)
+		data, ok := currentWall().Tile(r.URL.Path)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		// A tile's name is random and never reused, so the bytes at a URL
+		// never change and immutable is exactly true. A day rather than a
+		// year: long enough that a strip scrolling all day never fetches a
+		// tile twice, short enough that a photograph dropped from the set
+		// leaves the browser's cache soon after. private, because the
+		// machine is shared and there is no shared cache on loopback.
+		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(data)
+		}
 	})
 }
 
@@ -126,7 +97,7 @@ func (d deps) handlePhotoWallStatus(w http.ResponseWriter, r *http.Request, acto
 
 // PUT /admin/photo-wall  {"link": "...", "label"?} or {"folder": handle, "label"?}
 // A pasted link, or a folder chosen in the picker (GET /admin/google/folders).
-// Either way: probe Drive, write the row, tear the reel down. A failed probe
+// Either way: probe Drive, write the row, empty the set. A failed probe
 // writes nothing and leaves the previous folder live.
 func (d deps) handleSetPhotoWallFolder(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in struct {
@@ -165,21 +136,44 @@ func (d deps) handleRebuildPhotoWall(w http.ResponseWriter, r *http.Request, act
 	writeJSON(w, http.StatusOK, status)
 }
 
+// PUT /admin/photo-wall/size  {"size": 150}
+// How many photographs the set holds.
+func (d deps) handleSetPhotoWallSize(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in struct {
+		Size int `json:"size"`
+	}
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	status, err := d.db.SetPhotoWallSize(r.Context(), actor, in.Size)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// POST /admin/photo-wall/reshuffle
+// Replace every photograph in the set, one at a time, without emptying it.
+func (d deps) handleReshufflePhotoWall(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	status, err := d.db.ReshufflePhotoWall(r.Context(), actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 // GET /admin/photo-wall/preview
-// Up to six tile URLs that are *not* marked served: a preview must not
-// consume the buffer the sign-in screen is about to draw from.
+// The first six photographs in the set. Reading the set takes nothing from
+// it, so the preview costs the sign-in screen nothing.
 func (d deps) handlePhotoWallPreview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	urls, err := d.db.PhotoWallPreview(r.Context(), actor, 0)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if urls == nil {
-		urls = []string{}
-	}
-	// The tiles behind these URLs are still ready, so they may be handed to a
-	// real sign-in and reaped a TTL later. Caching the list would point the
-	// screen at files that are gone.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"photos": urls})
 }

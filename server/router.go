@@ -36,9 +36,10 @@ func newRouter(d deps) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":   true,
-			"db":   "ok",
-			"time": time.Now().UTC(),
+			"ok":      true,
+			"db":      "ok",
+			"time":    time.Now().UTC(),
+			"version": stockroom.Version(),
 		})
 	})
 
@@ -54,7 +55,7 @@ func newRouter(d deps) http.Handler {
 
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §5). No
 	// session: this is what the sign-in screen renders behind the card, and
-	// there is no session to require yet. Both routes are nil-safe on a reel
+	// there is no session to require yet. Both routes are nil-safe on a set
 	// that was never built, which is the common case -- see server/photowall.go.
 	mux.HandleFunc("GET /signin/photos", d.handleSignInPhotos)
 	mux.HandleFunc("GET /signin/config", d.handleSignInConfig)
@@ -177,12 +178,14 @@ func newRouter(d deps) http.Handler {
 
 	// The sign-in photo wall's Drive folder
 	// (docs/design/signin-photo-wall.html §7). Admin-only, enforced inside
-	// internal/stockroom. None of these four ever returns the folder id: the
+	// internal/stockroom. None of these ever returns the folder id: the
 	// link is a capability, so the field is write-only and the screen is given
 	// a label, counts and a preview strip instead.
 	mux.Handle("GET /admin/photo-wall", d.withSession(d.handlePhotoWallStatus, fullOnly))
 	mux.Handle("PUT /admin/photo-wall", d.withSession(d.handleSetPhotoWallFolder, fullOnly))
 	mux.Handle("POST /admin/photo-wall/rebuild", d.withSession(d.handleRebuildPhotoWall, fullOnly))
+	mux.Handle("PUT /admin/photo-wall/size", d.withSession(d.handleSetPhotoWallSize, fullOnly))
+	mux.Handle("POST /admin/photo-wall/reshuffle", d.withSession(d.handleReshufflePhotoWall, fullOnly))
 	mux.Handle("GET /admin/photo-wall/preview", d.withSession(d.handlePhotoWallPreview, fullOnly))
 
 	// The activity log and the closet camera (ROADMAP §2.4, §2.5). Admin-only,
@@ -201,6 +204,8 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))
 	mux.Handle("POST /users/import", d.withSession(d.handleImportRoster, fullOnly))
+	mux.Handle("POST /users/add-names/preview", d.withSession(d.handlePreviewAddNames, fullOnly))
+	mux.Handle("POST /users/add-names", d.withSession(d.handleAddNames, fullOnly))
 	mux.Handle("GET /users/{id}", d.withSession(d.handleGetUser, fullOnly))
 	mux.Handle("PUT /users/{id}", d.withSession(d.handleUpdateUser, fullOnly))
 	mux.Handle("DELETE /users/{id}", d.withSession(d.handleDeleteUser, fullOnly))

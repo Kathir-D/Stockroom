@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
+
+	"stockroom/internal/platform"
 )
 
 // A folder picker for this machine's disks, for the two backup folders on
@@ -131,6 +136,11 @@ func localPlaces() []LocalFolder {
 		add("Desktop", filepath.Join(home, "Desktop"))
 		add("Documents", filepath.Join(home, "Documents"))
 	}
+	// Under WSL the teacher's files are on the Windows side, and a backup
+	// there survives the distribution being removed.
+	if dir := windowsDocuments(); dir != "" {
+		add("Windows Documents", dir)
+	}
 	// External drives: where a backup most wants to go, and the folder a
 	// person is least likely to be able to type the path of.
 	var drives []string
@@ -157,3 +167,22 @@ func localPlaces() []LocalFolder {
 	}
 	return places
 }
+
+// windowsDocuments is the Windows user's Documents folder as WSL mounts it,
+// or "" outside WSL. cmd.exe is slow to start, so it runs once per process.
+var windowsDocuments = sync.OnceValue(func() string {
+	if !platform.IsWSL() {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "cmd.exe", "/c", "echo %USERNAME%")
+	// cmd.exe complains when started from a Linux folder it can't map.
+	cmd.Dir = "/mnt/c"
+	out, err := cmd.Output()
+	name := strings.TrimSpace(string(out))
+	if err != nil || name == "" || strings.Contains(name, "%") {
+		return ""
+	}
+	return filepath.Join("/mnt/c/Users", name, "Documents")
+})

@@ -40,11 +40,14 @@ import (
 // weekly in the background, and choosing a photograph is then a random index
 // into a slice rather than an API call.
 
+// DefaultPhotoWallDir is where the manifest is kept when SIGNIN_PHOTOS_DIR is
+// unset. Nothing else is written there.
+const DefaultPhotoWallDir = "./.cache/signin-photos"
+
 const (
-	// photoWallManifest is the manifest's filename inside the reel's cache
-	// directory. The boot wipe skips it by name: every tile is single-use and
-	// re-derivable in a second, but the manifest costs minutes of Drive
-	// listing to rebuild and §3 specifies it as a weekly artifact, so wiping
+	// photoWallManifest is the manifest's filename inside SIGNIN_PHOTOS_DIR.
+	// It is the one thing the wall keeps on disk: it costs minutes of Drive
+	// listing to rebuild and §3 specifies it as a weekly artifact, so losing
 	// it on every start would make a closet PC that reboots nightly re-list
 	// the whole folder nightly.
 	photoWallManifest = "manifest.json"
@@ -128,8 +131,8 @@ type DrivePhotoSourceOptions struct {
 	// admin-panel value, so "configured but no folder chosen yet" is a normal
 	// state in which the source simply never lists anything.
 	FolderID string
-	// Dir is where manifest.json lives. This is the reel's cache directory,
-	// which the reel has already created and taken ownership of.
+	// Dir is where manifest.json lives, SIGNIN_PHOTOS_DIR. It is created if
+	// missing.
 	Dir string
 	// RefreshInterval is how often the manifest is rebuilt. Zero takes the
 	// weekly default.
@@ -137,7 +140,7 @@ type DrivePhotoSourceOptions struct {
 }
 
 // DrivePhotoSource implements PhotoSource over rclone. It is safe for
-// concurrent use: the reel's filler calls NextPhoto while its own refresher
+// concurrent use: the set's filler calls NextPhoto while its own refresher
 // goroutine rebuilds the manifest, and §7 will call SetFolder from an HTTP
 // handler.
 type DrivePhotoSource struct {
@@ -162,6 +165,7 @@ type DrivePhotoSource struct {
 	mu       sync.Mutex
 	folderID string
 	manifest *photoManifest
+	index    *photoIndex
 	loaded   bool
 	// nextAttempt gates the refresher: it is the refresh interval after a
 	// success and a few minutes after a failure.
@@ -183,7 +187,7 @@ type DrivePhotoSource struct {
 	// now" and "the manifest is stale" would have to be the same state, and
 	// the only way to say the first would be to throw the second away.
 	rebuildRequested bool
-	// lastErr is kept rather than logged, for the same reason the reel keeps
+	// lastErr is kept rather than logged, for the same reason the set keeps
 	// its own: a decorative subsystem failing every few minutes on a machine
 	// with no internet must not fill the log with noise nobody asked for.
 	lastErr   error
@@ -222,6 +226,9 @@ func NewDrivePhotoSource(opts DrivePhotoSourceOptions) (*DrivePhotoSource, error
 	}
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("%w: SIGNIN_PHOTOS_DIR is not set, so there is nowhere to keep the manifest", ErrNotConfigured)
+	}
+	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("check SIGNIN_PHOTOS_DIR: %w", err)
 	}
 	if _, err := exec.LookPath(rcloneBinary); err != nil {
 		return nil, fmt.Errorf("%w: rclone is not installed. On this machine run `brew install rclone` (macOS) or `winget install Rclone.Rclone` (Windows), then restart the server", ErrNotConfigured)
@@ -285,8 +292,8 @@ func (s *DrivePhotoSource) driveRoot(folderID string, file ...string) string {
 // manifest for the old one, cancels any listing of it still running, and asks
 // the refresher to list the new one now.
 //
-// It reports whether anything changed, so §7 can skip the reel teardown when
-// an admin pastes the link that is already live. The reel's half of a switch
+// It reports whether anything changed, so §7 can skip the set teardown when
+// an admin pastes the link that is already live. The set's half of a switch
 // -- dropping every ready tile and advancing the generation -- is
 // PhotoWall.Invalidate, and the two are called together.
 func (s *DrivePhotoSource) SetFolder(folderID string) bool {
@@ -415,8 +422,8 @@ func (s *DrivePhotoSource) Status() PhotoWallSourceStatus {
 	return st
 }
 
-// Run keeps the manifest current. It is a second goroutine beside the reel's,
-// and deliberately so: the reel's one-goroutine rule is about the *tiles*, so
+// Run keeps the manifest current. It is a second goroutine beside the set's,
+// and deliberately so: the set's one-goroutine rule is about the *tiles*, so
 // that the filler and the reaper never argue over a file being written as it
 // is deleted. The manifest is a different file with a single writer, on a
 // timescale of weeks rather than seconds.
@@ -643,28 +650,35 @@ func (s *DrivePhotoSource) decodeListing(r io.Reader) ([]photoEntry, error) {
 	return entries, nil
 }
 
-// NextPhoto picks a photograph at random, downloads it and normalizes it.
+// NextPhoto picks a photograph the set doesn't hold, downloads it and
+// normalizes it.
 //
-// Selection is a random index into the manifest: no API call to choose, and
-// uniform across the whole folder. Files the normalizer turns away -- portraits,
-// panoramas, anything Go cannot decode -- are retried past here rather than
-// reported, because PhotoSource's contract is that an error out of this method
-// means "nothing usable right now" and the reel answers it by backing off.
-func (s *DrivePhotoSource) NextPhoto(ctx context.Context) ([]byte, error) {
+// Selection is folder first, then photograph: a random folder among those
+// still under their cap, then a random unheld photograph in it. Picking
+// uniformly across the whole folder would let one event with three thousand
+// photographs fill the wall, where folder first gives each event a fair
+// share. Files the normalizer turns away (portraits, panoramas, anything Go
+// can't decode) are retried past here rather than reported, because
+// PhotoSource's contract is that an error out of this method means "nothing
+// usable right now" and the set answers it by backing off.
+func (s *DrivePhotoSource) NextPhoto(ctx context.Context, want PhotoPick) (key, folder string, tile []byte, err error) {
 	if s == nil {
-		return nil, errors.New("the photo wall has no source")
+		return "", "", nil, errors.New("the photo wall has no source")
 	}
 
 	var lastErr error
+	tried := map[string]bool{}
 	for attempt := 0; attempt < photoFetchAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return "", "", nil, err
 		}
-		folderID, entry, ok := s.pick()
+		folderID, entry, ok := s.pick(want, tried)
 		if !ok {
-			return nil, s.notReadyErr()
+			if lastErr != nil {
+				break
+			}
+			return "", "", nil, s.notReadyErr()
 		}
-
 		// The download streams to stdout and into the decoder; the
 		// full-resolution original is never written to disk (§3).
 		raw, err := s.fetch(ctx, s.driveRoot(folderID, entry.Path), entry.Path)
@@ -674,27 +688,124 @@ func (s *DrivePhotoSource) NextPhoto(ctx context.Context) ([]byte, error) {
 		}
 		tile, err := normalizePhoto(bytes.NewReader(raw))
 		if err != nil {
+			// Not asked for again this call: it will be refused again. A
+			// failed download may work on the next try, so it isn't marked.
+			tried[entry.Path] = true
 			lastErr = err
 			continue
 		}
 		s.clearAuthWarning()
-		return tile, nil
+		return entry.Path, photoFolder(entry.Path), tile, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no usable photograph found")
 	}
-	return nil, lastErr
+	return "", "", nil, lastErr
 }
 
-// pick chooses one manifest entry at random, along with the folder it belongs
-// to so a switch mid-download can be detected.
-func (s *DrivePhotoSource) pick() (string, photoEntry, bool) {
+// photoFolder is the folder a manifest path sits in, relative to the chosen
+// Drive folder. Photographs at the top level share the folder ".".
+func photoFolder(p string) string { return path.Dir(p) }
+
+// photoFolderCap is how many tiles one folder may hold in a set of size
+// drawn from n folders: an even share, but never less than a tenth of the
+// set, so a drive of two big folders and forty tiny ones still fills.
+func photoFolderCap(size, n int) int {
+	if n < 1 {
+		n = 1
+	}
+	even := (size + n - 1) / n
+	tenth := (size + 9) / 10
+	return max(even, tenth, 1)
+}
+
+// photoIndex groups a manifest's entries by folder. It is built once per
+// manifest, the first time something asks, and then read under s.mu.
+type photoIndex struct {
+	of       *photoManifest
+	paths    map[string]bool
+	folders  []string
+	byFolder map[string][]int
+}
+
+func (s *DrivePhotoSource) indexLocked() *photoIndex {
+	if s.index != nil && s.index.of == s.manifest {
+		return s.index
+	}
+	ix := &photoIndex{of: s.manifest, paths: map[string]bool{}, byFolder: map[string][]int{}}
+	if s.manifest != nil {
+		for i, e := range s.manifest.Entries {
+			ix.paths[e.Path] = true
+			f := photoFolder(e.Path)
+			if _, ok := ix.byFolder[f]; !ok {
+				ix.folders = append(ix.folders, f)
+			}
+			ix.byFolder[f] = append(ix.byFolder[f], i)
+		}
+	}
+	s.index = ix
+	return ix
+}
+
+// Listed reports whether key is in the current manifest. known is false
+// while there is no manifest, so a set is never emptied because a listing
+// is still running or failed.
+func (s *DrivePhotoSource) Listed(key string) (present, known bool) {
+	if s == nil {
+		return false, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manifest == nil || len(s.manifest.Entries) == 0 {
+		return false, false
+	}
+	return s.indexLocked().paths[key], true
+}
+
+// pick chooses one manifest entry the set doesn't hold and this call hasn't
+// tried, from a folder under its cap, along with the folder ID it belongs to
+// so a switch mid-download can be detected. When every folder is at its cap
+// it picks from any folder: a wall that fills is better than a balanced one
+// that doesn't.
+func (s *DrivePhotoSource) pick(want PhotoPick, tried map[string]bool) (string, photoEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.manifest == nil || len(s.manifest.Entries) == 0 {
 		return "", photoEntry{}, false
 	}
-	return s.folderID, s.manifest.Entries[rand.IntN(len(s.manifest.Entries))], true
+	ix := s.indexLocked()
+	limit := photoFolderCap(want.Size, len(ix.folders))
+	free := func(i int) bool {
+		p := s.manifest.Entries[i].Path
+		return !want.Held[p] && !tried[p]
+	}
+	for _, capped := range []bool{true, false} {
+		var candidates []string
+		for _, f := range ix.folders {
+			if capped && want.PerFolder[f] >= limit {
+				continue
+			}
+			candidates = append(candidates, f)
+		}
+		rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+		for _, f := range candidates {
+			idx := ix.byFolder[f]
+			// A few random probes, then a scan, so a folder that is nearly
+			// all held still costs one pass at most.
+			for range 8 {
+				if i := idx[rand.IntN(len(idx))]; free(i) {
+					return s.folderID, s.manifest.Entries[i], true
+				}
+			}
+			start := rand.IntN(len(idx))
+			for k := range idx {
+				if i := idx[(start+k)%len(idx)]; free(i) {
+					return s.folderID, s.manifest.Entries[i], true
+				}
+			}
+		}
+	}
+	return "", photoEntry{}, false
 }
 
 // notReadyErr says *why* there is nothing to hand out. All of these resolve to
@@ -711,7 +822,7 @@ func (s *DrivePhotoSource) notReadyErr() error {
 		return warmingUp(fmt.Errorf("the Drive folder is still being listed (%d files so far)", s.listed))
 	case s.lastErr != nil:
 		// Not warming up: the listing failed, or the folder holds nothing
-		// usable. Those are real, and the reel counting them toward its rest
+		// usable. Those are real, and the set counting them toward its rest
 		// is what stops a machine with no internet from asking every ten
 		// seconds forever.
 		return s.lastErr
@@ -722,7 +833,7 @@ func (s *DrivePhotoSource) notReadyErr() error {
 
 // errPhotoWallWarmingUp marks the not-ready answers that are a *normal state*
 // rather than a failure: no folder chosen yet, or the first listing still
-// running. §9 lists both as normal, and the reel must not count them.
+// running. §9 lists both as normal, and the set must not count them.
 //
 // It did, once. At one attempt every two seconds, the minute a first listing
 // takes was 25 "failures" and a five-minute rest before the listing had even

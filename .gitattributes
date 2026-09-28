@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Files that run or are read on Linux keep LF on every checkout, Windows
+# included: the packaged systemd unit is compared byte for byte with the one
+# setup writes, and a maintainer script with CRLF fails under /bin/sh.
+packaging/** text eol=lf
+*.sh text eol=lf

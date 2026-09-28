@@ -1,45 +1,31 @@
 name: release
 
-# Builds a binary per platform on a version tag and attaches them to a GitHub
-# release. Each one carries the web UI and every migration compiled in, so what
-# a school downloads is one file and what they run is one process
-# (docs/decisions.md, Phase A).
+# Builds a release with GoReleaser on a version tag: the binaries for Linux and
+# macOS, stockroom_amd64.deb and stockroom_arm64.deb, checksums.txt, and the
+# Homebrew cask. .goreleaser.yaml says what goes in each.
 #
-# Without this a school needs Go and Node installed to get a binary at all,
-# which is the whole difference between "download and run" and "be a
-# developer". scripts/install.sh currently builds from a checkout instead; that
-# is the honest state until these artefacts exist and have been downloaded onto
-# a machine that is not this one.
+# The build and the publish are separate jobs. The build runs `npm ci`, which
+# runs every dependency's lifecycle scripts, so it gets a read-only token. The
+# publish job runs no third-party code: it uploads what the build made and
+# commits the cask to the tap.
 on:
   push:
     tags: ['v*']
-  # Manual runs build the matrix without publishing anything, so the workflow
-  # itself can be proven before a tag depends on it.
+  # A manual run builds a snapshot and publishes nothing, so the workflow can
+  # be proven before a tag depends on it.
   workflow_dispatch:
 
-# Read-only by default. The build job runs `npm ci`, which runs dependency
-# lifecycle scripts, so a write token there is a write token handed to every
-# package in the lockfile. Only `publish` -- which runs no third-party code
-# beyond the release action -- gets to write.
 permissions:
   contents: read
 
 jobs:
   build:
-    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: darwin,  goarch: arm64, ext: '' }
-          - { goos: darwin,  goarch: amd64, ext: '' }
-          - { goos: linux,   goarch: amd64, ext: '' }
-          - { goos: windows, goarch: amd64, ext: '.exe' }
-
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
+          # GoReleaser reads the tags to name the version and the changelog.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -47,73 +33,103 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # No Go cache in a release build. The module and build caches are
-      # restored as trusted, and a cache written by any other workflow run
-      # could put its objects into a signed-off binary. npm keeps its cache:
-      # `npm ci` checks every tarball against the lockfile's integrity hash.
+      # No Go cache in a release build. A cache written by any other run would
+      # be restored as trusted and could put its objects into the binary. npm
+      # keeps its cache: `npm ci` checks every tarball against the lockfile.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
 
-      # One install at the repository root. A per-app `npm ci --prefix` is the
-      # nested-node_modules bug in the place nobody watches (docs/decisions.md,
-      # 2026-09-14).
-      - run: npm ci
-
-      # Before the Go build, not after: the binary embeds web-app/dist, so a
-      # build that runs first silently ships the tracked empty directory and
-      # the result is a server that answers every page with "this binary was
-      # built without the web UI".
-      - run: npm run build --workspace=web-app
-
-      - name: Verify the UI is actually there
-        run: test -f web-app/dist/index.html
-
-      - name: Build
+      # GoReleaser's before hooks run `npm ci` and build the web UI before the
+      # Go build, which embeds it. --skip=publish leaves everything in dist/.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: >-
+            release --clean
+            ${{ github.event_name == 'push' && '--skip=publish' || '--snapshot' }}
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
-        run: |
-          out="stockroom_${GOOS}_${GOARCH}${{ matrix.ext }}"
-          go build -trimpath -ldflags "-s -w" -o "$out" ./server
-          echo "ARTIFACT=$out" >> "$GITHUB_ENV"
+          # The cask template reads it. The build job never pushes, so it
+          # only needs a value.
+          HOMEBREW_TAP_TOKEN: unused
+
+      # The cask can't carry a test block, so check the binary here.
+      - name: Check the binary runs
+        run: dist/stockroom_linux_amd64_v1/stockroom version
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT }}
-          path: ${{ env.ARTIFACT }}
+          name: dist
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/checksums.txt
+            dist/homebrew/Casks/stockroom.rb
           if-no-files-found: error
 
   publish:
-    name: publish
     needs: build
-    runs-on: ubuntu-latest
-    # Only a tag push publishes. A manual run stops after the matrix, which is
-    # what makes this workflow safe to exercise -- and the event check is what
-    # makes that true: workflow_dispatch can be run *against* a tag, which sets
-    # github.ref to refs/tags/v... exactly as a push does.
+    runs-on: ubuntu-24.04
+    # Only a tag push publishes. workflow_dispatch can run against a tag,
+    # which sets github.ref exactly as a push does, so check the event too.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-    # No checkout: this job only downloads the artefacts and creates the
-    # release, and a checkout would be one more place the token is persisted.
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          merge-multiple: true
+          name: dist
+          path: dist
 
-      # Checksums travel with the binaries so somebody who downloads over a
-      # school network can tell a truncated file from a complete one.
-      - name: Checksums
-        working-directory: artifacts
-        run: sha256sum stockroom_* > checksums.txt
+      # A tag with a hyphen (v0.9.0-rc.1) is a prerelease, so
+      # releases/latest, which get.sh downloads from, skips it.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A re-run (say, after adding the tap secret) finds the release
+          # already up. Replace its files and go on to the tap step.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The release for ${TAG} exists. Replacing its files."
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/*.deb dist/*.tar.gz dist/checksums.txt
+            exit 0
+          fi
+          flags=()
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --generate-notes "${flags[@]}" \
+            dist/*.deb dist/*.tar.gz dist/checksums.txt
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/stockroom_*
-            artifacts/checksums.txt
-          generate_release_notes: true
+      # The tap token is a fine-grained token with contents write on
+      # Kathir-D/homebrew-stockroom only. A prerelease doesn't touch the tap.
+      - name: Update the Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releases) and re-run this job."
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Kathir-D/homebrew-stockroom.git" tap
+          mkdir -p tap/Casks
+          cp dist/homebrew/Casks/stockroom.rb tap/Casks/stockroom.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/stockroom.rb
+          # A re-run for the same tag has nothing new to commit.
+          if git diff --cached --quiet; then
+            echo "The tap already has stockroom ${TAG}."
+            exit 0
+          fi
+          git commit -m "stockroom ${TAG}"
+          # HEAD names the branch, so this works on a tap created empty (the
+          # first push makes the branch) as well as one with a README.
+          git push origin HEAD

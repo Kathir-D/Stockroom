@@ -18,16 +18,13 @@ func TestDueFor(t *testing.T) {
 	}
 	for day, want := range cases {
 		d, _ := time.ParseInLocation("2006-01-02", day, loc)
-		got, err := dueFor(d, "15:30")
-		if err != nil {
-			t.Fatal(err)
-		}
+		got := defaultLoanRules().dueFor(d)
 		if got.Format("2006-01-02 15:04") != want {
 			t.Errorf("dueFor(%s) = %s, want %s", day, got.Format("2006-01-02 15:04"), want)
 		}
 	}
-	if _, err := dueFor(time.Now(), "3:30pm"); !errors.Is(err, ErrInvalid) {
-		t.Errorf("dueFor with a bad time = %v, want ErrInvalid", err)
+	if _, _, err := parseDueTime("3:30pm"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("parseDueTime(3:30pm) = %v, want ErrInvalid", err)
 	}
 }
 
@@ -37,19 +34,20 @@ func TestCheckDueAtCapsTheLastDayOfUse(t *testing.T) {
 	loc := time.FixedZone("school", 0)
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, loc) // a Monday
 	lastDay := now.AddDate(0, 0, MaxCheckoutDays)   // next Monday
-	due, _ := dueFor(lastDay, "15:30")              // next Tuesday 15:30
-	if got, err := checkDueAt(due, now, "15:30"); err != nil || !got.Equal(due) {
+	r := defaultLoanRules()
+	due := r.dueFor(lastDay) // next Tuesday 15:30
+	if got, err := checkDueAt(due, now, r); err != nil || !got.Equal(due) {
 		t.Errorf("due after the seventh day = %v, %v; want it unchanged", got, err)
 	}
-	if _, err := checkDueAt(due.Add(time.Minute), now, "15:30"); !errors.Is(err, ErrInvalid) {
+	if _, err := checkDueAt(due.Add(time.Minute), now, r); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a minute past the cap = %v, want ErrInvalid", err)
 	}
-	if _, err := checkDueAt(now.Add(-time.Minute), now, "15:30"); !errors.Is(err, ErrInvalid) {
+	if _, err := checkDueAt(now.Add(-time.Minute), now, r); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a due time in the past = %v, want ErrInvalid", err)
 	}
 	// Picking today means due the next school day, never already overdue.
-	today, _ := dueFor(now, "15:30")
-	if _, err := checkDueAt(today, now, "15:30"); err != nil || !today.After(now.Add(24*time.Hour)) {
+	today := r.dueFor(now)
+	if _, err := checkDueAt(today, now, r); err != nil || !today.After(now.Add(24*time.Hour)) {
 		t.Errorf("due for today's last day = %v (%v), want tomorrow afternoon", today, err)
 	}
 }
@@ -67,9 +65,66 @@ func TestCheckDueAtMovesToAClosingTime(t *testing.T) {
 	}
 	for in, want := range cases {
 		at, _ := time.ParseInLocation("2006-01-02 15:04", in, loc)
-		got, err := checkDueAt(at, now, "15:30")
+		got, err := checkDueAt(at, now, defaultLoanRules())
 		if err != nil || got.Format("2006-01-02 15:04") != want {
 			t.Errorf("checkDueAt(%s) = %s, %v; want %s", in, got.Format("2006-01-02 15:04"), err, want)
 		}
+	}
+}
+
+// A closed date is not a school day: a loan that would fall due on one falls
+// due on the first day back, and a run of them is skipped whole.
+func TestClosedDatesPushTheDueDate(t *testing.T) {
+	loc := time.FixedZone("school", 0)
+	r := defaultLoanRules()
+	r.closed = map[string]bool{"2026-09-29": true, "2026-09-30": true, "2026-10-05": true}
+	cases := map[string]string{
+		"2026-09-28": "2026-10-01 15:30", // Monday, Tuesday and Wednesday closed -> Thursday
+		"2026-10-02": "2026-10-06 15:30", // Friday, Monday closed -> Tuesday
+		"2026-10-01": "2026-10-02 15:30", // an open day after -> unchanged
+	}
+	for day, want := range cases {
+		d, _ := time.ParseInLocation("2006-01-02", day, loc)
+		if got := r.dueFor(d).Format("2006-01-02 15:04"); got != want {
+			t.Errorf("dueFor(%s) = %s, want %s", day, got, want)
+		}
+	}
+	// A due time a client sent for a closed day moves to the day back.
+	now := time.Date(2026, 9, 28, 10, 0, 0, 0, loc)
+	at := time.Date(2026, 9, 29, 15, 30, 0, 0, loc)
+	if got, err := checkDueAt(at, now, r); err != nil || got.Format("2006-01-02 15:04") != "2026-10-01 15:30" {
+		t.Errorf("checkDueAt(closed Tuesday) = %s, %v; want Thursday", got, err)
+	}
+	// The cap moves with the holiday: last day of use next Monday is closed,
+	// so its due time is the Tuesday after.
+	if got := r.latestDueAt(now).Format("2006-01-02 15:04"); got != "2026-10-06 15:30" {
+		t.Errorf("latestDueAt = %s, want 2026-10-06 15:30", got)
+	}
+}
+
+// A list that closes everything can't hang a checkout.
+func TestClosedDatesAreBounded(t *testing.T) {
+	r := defaultLoanRules()
+	r.closed = map[string]bool{}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range 400 {
+		r.closed[start.AddDate(0, 0, i).Format(time.DateOnly)] = true
+	}
+	if got := r.dueFor(start); got.IsZero() {
+		t.Fatal("want some due time, got zero")
+	}
+}
+
+// A shorter cap from settings refuses what the default allows.
+func TestMaxCheckoutDaysFromTheRules(t *testing.T) {
+	loc := time.FixedZone("school", 0)
+	now := time.Date(2026, 9, 28, 10, 0, 0, 0, loc) // a Monday
+	r := defaultLoanRules()
+	r.maxDays = 2
+	if _, err := checkDueAt(r.dueFor(now.AddDate(0, 0, 2)), now, r); err != nil {
+		t.Errorf("two days out with a cap of 2 = %v, want ok", err)
+	}
+	if _, err := checkDueAt(r.dueFor(now.AddDate(0, 0, 3)), now, r); !errors.Is(err, ErrInvalid) {
+		t.Errorf("three days out with a cap of 2 = %v, want ErrInvalid", err)
 	}
 }

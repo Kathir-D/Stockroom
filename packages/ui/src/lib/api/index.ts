@@ -45,6 +45,8 @@ import type {
   Profile,
   RestoreResult,
   RosterResult,
+  AddNamesInput,
+  AddNamesResult,
   AssetImportResult,
   BulkAddInput,
   BulkPreview,
@@ -90,7 +92,7 @@ export function health() {
 /* ------------------------------------------------- sign-in photo wall ---- */
 
 /**
- * A batch of tile URLs for the sign-in photo wall
+ * The sign-in photo wall's set of tile URLs
  * (docs/design/signin-photo-wall.html §5).
  *
  * `anonymous` because there is no session at the sign-in screen and the route
@@ -435,6 +437,16 @@ export function setUserPassword(id: string, password: string) {
  * Roster CSV import. Relative `photo_path` values in the CSV resolve against
  * `photoDir`, which is why a roster with photos has to come in as multipart.
  */
+/** What a pasted list of names would add; writes nothing. */
+export function previewAddNames(input: AddNamesInput) {
+  return request<AddNamesResult>("/users/add-names/preview", { method: "POST", body: input });
+}
+
+/** Add a pasted list of names, all or none. */
+export function addNames(input: AddNamesInput) {
+  return request<AddNamesResult>("/users/add-names", { method: "POST", body: input });
+}
+
 export function importRoster(file: File, photoDir?: string, archiveMissing = false) {
   const form = new FormData();
   form.set("file", file);
@@ -823,13 +835,25 @@ export function rebuildPhotoWall() {
   });
 }
 
+/** How many photographs the wall's set holds, between 10 and 400. */
+export function setPhotoWallSize(size: number) {
+  return request<PhotoWallStatus>("/admin/photo-wall/size", {
+    method: "PUT",
+    body: { size },
+  });
+}
+
 /**
- * Up to six tiles from the reel **without** marking them served: a preview
- * must not consume the buffer the sign-in screen is about to draw from.
- *
- * The same tiles stay available to sign-in, which means a URL here can go
- * stale — treat a 404 the way the wall does, by hiding that tile.
+ * Replace every photograph in the set with a new pick. The server swaps them
+ * one at a time, so the wall never goes empty; watch `ready` settle.
  */
+export function reshufflePhotoWall() {
+  return request<PhotoWallStatus>("/admin/photo-wall/reshuffle", {
+    method: "POST",
+  });
+}
+
+/** The first six photographs in the set. Reading the set takes nothing from it. */
 export function photoWallPreview() {
   return request<{ photos: string[] }>("/admin/photo-wall/preview");
 }

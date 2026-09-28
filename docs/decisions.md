@@ -350,3 +350,88 @@ Settled with the owner while planning the last stretch to production. `ROADMAP.m
 - [x] **The `.deb` ships from GitHub releases first**, with a signed apt repository later. Release assets are named without a version so `releases/latest/download/` always resolves.
 - [x] **`scripts/install.sh` and the Docker production files are deleted once the packages pass on Linux and macOS.** Two install paths would drift, and the one nobody tests is the one a school would find. `deploy/camera/` stays.
 - [x] **The camera and the photo wall are a parallel track**, as is the repository housekeeping. None of them blocks packaging and packaging blocks none of them, so ROADMAP splits into track A (parallel) and track B (in order).
+
+**Closed (2026-09-27, one binary, the packages, setup and doctor)**
+ROADMAP track B sections 1 to 4, and the code parts of 5 and 11, on `feat/roadmap-production-path`. What's left there needs a tag, a real Mac with `sudo`, a VM reboot or a Windows machine.
+- [x] **One binary with subcommands**: `serve` (the default), `setup`, `service`, `doctor`, `restore`, `version` and `open`, each with its own `flag.FlagSet` and no new dependency. The install logic lives in `internal/setup` behind a command runner, a prompter and a `Paths` struct, so its tests run without root. `restore`'s body moved to `internal/cli`, and `cmd/restore` is a wrapper kept for `go run` from a checkout. OS detection (WSL, systemd, opening a browser) is in `internal/platform`.
+- [x] **The config is found in a fixed order**: `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then `/etc/stockroom/stockroom.env` or `$(brew --prefix)/var/stockroom/stockroom.env`. A config from the flag or a system path is an install, and an install refuses a relative data path, `PG_DUMP` or `RCLONE_BINARY` at startup, naming the variable. Development keeps finding `.env` exactly as before.
+- [x] **The server dumps the database before migrating.** `PRE_MIGRATE_DUMP=required` (setup writes it) refuses to migrate without a dump, `off` (the default, so development needs no `pg_dump`) skips it. Dumps go to `PRE_MIGRATE_DIR`, else `BACKUP_DIR/pre-migrate`, else the saved backup folder, at mode 600, newest 10 kept. The password goes in `PGPASSWORD`, never the arguments, which `ps` shows every local user. `PRE_MIGRATE_DIR` exists because `BACKUP_DIR` is a first-boot seed an admin later moves, and the dump folder shouldn't move with it unannounced.
+- [x] **A database newer than the binary is refused** at startup, and `doctor` reports it. Running an old binary against a newer schema would write rows the new code doesn't expect.
+- [x] **rclone 1.60 is the minimum.** Debian 12 and Ubuntu 24.04 both package 1.60.1, and every command Stockroom runs works on it, tested offline: `lsjson` with its flags, `cat --head`, `copy --exclude`, `config create … token=`, and `authorize` with the client id in the environment. The `.deb` depends on the distribution's `rclone (>= 1.60)`. Sign-in against a real Google account on 1.60 is still untested. The server resolves rclone once at start (config, `PATH`, then the usual install paths), and the backup screen and `doctor` show the path and version and warn below 1.60.
+- [x] **PostgreSQL 14 is the minimum.** 14, 15, 16 and 17 all pass the Go suite against a schema the server applied itself, locally and in the `tests-postgres` CI matrix. Ubuntu 22.04 ships 14 but packages rclone 1.53, so it's unsupported anyway, and `get.sh` refuses anything older than Debian 12 or Ubuntu 24.04 with a message.
+- [x] **Setup repairs rather than reinstalls, and never overwrites the config.** It reads the role's state and the config and handles all four cases: both present (leave them), a role with no config (reset its password, write a config), a config with no role (recreate the role with the config's password), neither (create both). The database password is 32 alphanumeric characters from `crypto/rand`, sent to `psql` on stdin. Prompts read `/dev/tty`, because under `curl … | sudo bash` stdin is the script.
+- [x] **macOS ships as a Homebrew cask, not a formula.** GoReleaser 2.10 deprecated `brews` for `homebrew_casks`. A cask can't carry a `test do` block, so the release workflow runs `stockroom version` instead, and it can depend on formulas, so `postgresql@17` and `rclone` still come with it. Homebrew quarantines cask downloads and the binary isn't signed, so a post-install hook clears the flag. The cask also carries `deploy/camera/`, which setup finds next to the real binary.
+- [x] **The release workflow publishes with `gh`, not GoReleaser.** GoReleaser's separate `publish` step is a Pro feature, and publishing from the build job would hand a write token to every npm lifecycle script. So the build job runs `--skip=publish` read-only, and a second job creates the release and commits the generated cask to the tap. A tag with a hyphen is a prerelease, which `releases/latest` (and so `get.sh`) skips, and it doesn't touch the tap.
+- [x] **A fresh install's missing backup is a warning, not a failure.** `doctor` fails on a backup that used to succeed and has gone stale, but on day one nothing has run yet, and a red FAIL on every new install would teach people to ignore it.
+- [x] **Proven in containers, not yet on machines.** The snapshot `.deb` installs on `ubuntu:24.04` (PostgreSQL 16) and `debian:12` (PostgreSQL 15). In a privileged Ubuntu container with systemd as PID 1, `get.sh` installed it, setup enabled and started the service as the invoking user, the service came back after a container restart, a second `.deb` with a dummy migration wrote a pre-migrate dump and kept the data, and `doctor` passed. `packaging/linux/smoke.sh` repeats that in CI. macOS setup is written and unit-tested but has not run, because it needs `sudo` on a real Mac.
+- [x] **Under WSL the service runs as the Ubuntu user the teacher creates.** `get.ps1` lets Ubuntu's first start ask for a user name rather than installing with `--root`, because that account is `SUDO_USER` for setup, the way the teacher's account is on Linux. The folder picker lists the Windows Documents folder as a place, found with `cmd.exe /c echo %USERNAME%` once per process. `get.ps1` parses under PowerShell 7 and has not run on Windows.
+
+**Closed (2026-09-27, the photo wall as a set in memory)**
+ROADMAP A2, apart from what needs the real Drive folder. `docs/design/signin-photo-wall.html` §2 is rewritten for it.
+- [x] **A set in memory replaces the single-use reel on disk**, reversing 2026-09-16's "delete after use". The reel wrote each tile to disk and deleted it fifteen minutes after it was shown, which needed a boot wipe, an ownership marker, a reaper, a served state and a ceiling on files. The set holds `app_settings.photo_wall_size` tiles (default 150, 10 to 400) in memory only, so none of that exists, no static file route can reach the manifest, and 400 tiles is about 40 MB. The cost is a refill after every restart.
+- [x] **Picks are folder first, with a cap per folder** of `max(ceil(size / folders), ceil(size / 10))`. Choosing a folder first gives each event a fair share; the tenth keeps a drive of two big folders and forty tiny ones filling. With every folder at its cap it picks from any, because a wall that fills beats a balanced one that doesn't.
+- [x] **The set changes slowly.** Once full it swaps one random tile every five minutes, drops photographs the manifest stops listing, and appends every new tile at the end. Reshuffle marks every tile stale and replaces them at filling pace, so the wall never empties; a folder switch still empties it at once.
+- [x] **`GET /signin/photos` kept its path** and now returns the whole set, `{photos, size}`. Renaming it would have bought nothing and broken the two host smoke tests that pin the unauthenticated paths.
+- [x] **Each strip is a conveyor, not a CSS marquee.** A marquee loops by translating half of a doubled list, so a list that grows jumps. The conveyor holds only the frames on screen plus one and recycles a frame from one end to the other, so the set grows with no jump and a browser loads only what is on screen. With reduced motion it never starts.
+- [x] **`SIGNIN_PHOTOS_DIR` stays, holding only the manifest.** The roadmap said to delete it, but the manifest costs minutes of Drive listing and must survive a restart, so it needs a place on disk. `SIGNIN_PHOTOS_COUNT`, `_BATCH` and `_TTL_MINUTES` are gone, and an old `.env` that still sets them is ignored.
+- [x] **A file the normalizer refuses isn't asked for again in the same pick**, but a failed download is, since it may work on the next try.
+- [x] **Checked with a fake rclone serving local JPEGs** through the real server and the web app: the set filled to its size, the strips ran top to bottom, and the folders mixed evenly although one held most of the files.
+
+**Closed (2026-09-27, repository housekeeping)**
+- [x] **The repository has a description and nine topics**, set with `gh repo edit`.
+- [x] **`./scripts/dev.sh test` passes twice in a row** with no `supabase db reset` between.
+
+
+**Closed (2026-09-27, loan rules in settings and school holidays)**
+ROADMAP A4's first two items. Admin → Settings has a Loans card and a Sign-out and scanner card.
+- [x] **Five columns on `app_settings`**:
+  - `max_checkout_days` (7, 1 to 60)
+  - `overdue_blocks_checkout` (true)
+  - `closed_dates` (a `date[]` of at most 400)
+  - `session_idle_minutes` (null, or 1 to 240)
+  - `scan_threshold_ms` (50, 10 to 200)
+- [x] **`session_idle_minutes` is null by default, not 10.** Null means `SESSION_IDLE_MINUTES` from `.env` still applies, so an install that tuned it there keeps its value. A change applies at boot and on save to every live session, since expiry is measured when it is checked.
+- [x] **A closed date is not a school day**, so a loan never falls due on one, and the cap moves with it. `due.go` and `due.ts` skip closed dates the same way. Both stop after 120 days, so a list that closes the whole year can't hang a checkout.
+- [x] **The box takes ranges.** It accepts `2026-12-21 to 2027-01-01` and stores only the weekdays in it, so a winter break costs ten dates of the 400. It shows a run broken only by weekends as one range again.
+- [x] **Turning off the overdue block keeps the overdue notice at sign-in**, reworded from "bring it back before checking anything else out" to a request. The block is the rule; knowing about it is still useful.
+- [x] **`/signin/config` carries all of it**: `scan_threshold_ms` beside `session_idle_seconds`, and the closed dates and the block under `checkout`. After a save the admin's screen reloads the rules, so the machine follows at once. Every other screen picks them up at its next sign-in.
+
+**Closed (2026-09-27, the support bundle)**
+ROADMAP A4.
+- [x] **`stockroom support-bundle` writes one zip**:
+  - doctor's report
+  - the version and schema
+  - the machine
+  - the config
+  - the service's last 2,000 log lines
+- [x] **Secrets are removed**: the values of config keys named like a password, secret, token, key or student number, a password inside a URL, GitHub and Google tokens, and bearer headers. The failsafe admin's number counts as a secret, because a student number is a working scan login.
+- [x] **Nothing from the database goes in.** A bundle is for an issue tracker, and the database holds the roster.
+- [x] **A config that doesn't load still goes in**, raw and redacted, along with the service log, because that is when a bundle is most needed.
+- [x] **Linux needs sudo** to read the system journal. The zip is then handed to the account that ran sudo.
+
+**Closed (2026-09-27, the hardware guide and the FAQ)**
+ROADMAP A4. `docs/HARDWARE.md` and `docs/FAQ.md`, linked from the README.
+- [x] **The guide recommends a 2D imager over a laser scanner.** An imager reads the barcode the Barcode button shows on screen, and QR codes on ID cards. No model is named until one is bought and tested (ROADMAP §8).
+- [x] **The guide says no screen lock**, because a locked screen sends every scan into the password box. A school that requires one gets a closet-only account.
+
+**Closed (2026-09-27, pasting names and numbering from a range)**
+ROADMAP A4's two user items, as one dialog: Admin → Users → Paste names.
+- [x] **One person per line.** Tabs split the fields when there are any, so spreadsheet columns paste; otherwise commas do. A field with a digit in it is the number, since names don't have digits. Two name fields split by a comma are "Last, First", as school exports write them. One field splits at its last space.
+- [x] **The range is a first number**, such as `900001` or `G0001`. Its trailing digits count up and keep their width, and it skips any number already in use by an account or as an item's serial. A first number that doesn't fit the student-number rule in Settings is refused before anything is worked out.
+- [x] **It only adds.** A number that already belongs to somebody is an error on that line. Updating names is the roster import's job, and a paste that renamed an account would hand that person's loans to someone else.
+- [x] **It previews, then adds every line or none**, in one transaction under an advisory lock, so two admins can't be handed the same numbers. Any edit to the text throws the preview away.
+- [x] **It ends by offering the new people's ID cards.** Someone numbered from a range has no card, and typing a number needs a password they haven't set.
+
+**Closed (2026-09-28, what a label and an ID card show)**
+The owner's request.
+- [x] **An item label shows the barcode and the serial under it, and nothing else.** The item's name is gone. The bars take the height it used, which helps most on a lens barrel, where only a narrow band of a curved label faces the scanner. A printed name also went stale when an item was renamed and the sticker stayed. This reverses the name line from Phase B (2026-09-22) and the rule that dropped it only when the bars fell under 6mm.
+- [x] **An ID card shows the name, the barcode and the number.** The "Stockroom - scan to sign in" line is gone, the bars grew from 20mm to 24mm, and the three lines sit centred on the card.
+- [x] **The scan rules stay as they were**: a module at least 0.25mm wide and a quiet zone of 10 modules each side. The serial length each layout fits is unchanged, because it depends on width, not height.
+
+**Closed (2026-09-28, asset photos from a webcam, a drop or a paste)**
+ROADMAP A4. Admin → Assets → Photo is now `asset-photo-dialog.svelte`, which replaced a bare file input.
+- [x] **Four ways in, one preview, then Save.** A chosen file, a dropped file, a pasted image and a webcam snapshot all land on the same preview, and nothing uploads until Save. A mis-snapped photo costs a retake, not a replaced picture.
+- [x] **The browser checks what the server checks** (`photo-file.ts`): JPEG, PNG, GIF or WebP, and under 10 MB less 64 KB, because the server caps the whole multipart request at 10 MiB. Every file is renamed `photo.<ext>` from its MIME type before upload, because the server picks the stored type from the extension and a pasted image often arrives named `image` with none.
+- [x] **The webcam is a snapshot through a canvas, saved as a JPEG at quality 0.9.** It asks for 1280×960 and takes what the camera gives.
+- [x] **The camera stops whenever the dialog closes**, by Cancel, Escape, Save, or leaving the screen. A webcam left open keeps its light on and blocks the closet camera and video calls.
+- [x] **A camera error says what to do**: a blocked permission points at the site settings, a busy camera at the program holding it, and a missing one at choosing a file.

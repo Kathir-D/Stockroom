@@ -453,6 +453,19 @@
           </Table.Body>
         </Table.Root>
       </div>
+
+      {#if status.rclone}
+        <p class="text-xs text-fg-muted">
+          {#if status.rclone.found}
+            Drive uploads run <code class="font-mono">{status.rclone.path}</code>{status.rclone
+              .version
+              ? `, rclone ${status.rclone.version}`
+              : ""}.
+          {:else}
+            rclone is not installed, so the Drive target cannot run.
+          {/if}
+        </p>
+      {/if}
     </section>
 
     <!-- ------------------------------------------------ restore upload ---- -->

@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * The due-date picker: `popover` + `calendar`, hard-capped at seven days
-   * (design-system.md §5.1).
+   * The due-date picker: `popover` + `calendar`, capped at the checkout days
+   * an admin set, seven by default (design-system.md §5.1).
    *
    * The person picks the **last day they need the item**. It is due at the
    * closing time on the next school day after that (CLAUDE.md §7, `due.ts`),
@@ -57,7 +57,7 @@
     picked = next
     // The selection travels out through `onValueChange` and comes back in as
     // `value`; there is nothing else to assign here.
-    onValueChange(next ? dueInstantFor(next.toDate(zone), rules.dueTime) : null)
+    onValueChange(next ? dueInstantFor(next.toDate(zone), rules.dueTime, rules.closedDates) : null)
     if (next) open = false
   }
 </script>
@@ -87,6 +87,6 @@
 
   <p class="text-xs text-fg-faint">
     Due back at {rules.dueTime} on the next school day after the day you pick. Up to
-    {rules.maxCheckoutDays} days; the latest is {dueLabel(latestDue(rules.maxCheckoutDays, rules.dueTime))}.
+    {rules.maxCheckoutDays} days; the latest is {dueLabel(latestDue(rules.maxCheckoutDays, rules.dueTime, rules.closedDates))}.
   </p>
 </div>

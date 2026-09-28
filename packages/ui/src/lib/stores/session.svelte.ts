@@ -12,6 +12,7 @@
 import * as api from "../api/index"
 import type { BackupWarning, CustodyRecord, Profile } from "../api/types"
 import { cart } from "./cart.svelte"
+import { rules } from "./rules.svelte"
 
 class SessionStore {
   profile = $state<Profile | null>(null)
@@ -102,9 +103,10 @@ class SessionStore {
    * Whether the UI should refuse to build a cart. Belt to the server's
    * suspenders: the checkout button disables itself the instant an overdue user
    * signs in, and the server refuses anyway (design-system.md §8.4, §15 Q6).
+   * Off when an admin has turned the overdue block off in Settings.
    */
   get checkoutBlocked() {
-    return this.hasOverdue
+    return this.hasOverdue && rules.overdueBlocks
   }
 
   /**

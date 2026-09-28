@@ -40,6 +40,8 @@
   import * as api from "../../api/index"
   import type { Profile, RosterResult, UserInput } from "../../api/types"
   import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
+  import AddNamesDialog from "@stockroom/ui/components/app/add-names-dialog.svelte"
+  import ListIcon from "@lucide/svelte/icons/list-plus"
   import { session } from "../../stores/session.svelte"
 
   /** The server's own bound, mirrored so the field can say it before the 400. */
@@ -77,6 +79,7 @@
   let deleteError = $state<string | null>(null)
 
   let importOpen = $state(false)
+  let addNamesOpen = $state(false)
   let importFiles = $state<FileList | undefined>(undefined)
   let importPhotoDir = $state("")
   let importArchiveMissing = $state(false)
@@ -312,6 +315,10 @@
     >
       <UploadIcon aria-hidden="true" />
       Import roster
+    </Button>
+    <Button variant="secondary" onclick={() => (addNamesOpen = true)}>
+      <ListIcon aria-hidden="true" />
+      Paste names
     </Button>
     <Button onclick={openCreate}>
       <PlusIcon aria-hidden="true" />
@@ -602,6 +609,8 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<AddNamesDialog bind:open={addNamesOpen} onAdded={load} />
 
 <!-- Roster import. Never fire-and-forget: the per-row result list is the point
      of the dialog, so it stays open until the admin has read it (§8.7). -->

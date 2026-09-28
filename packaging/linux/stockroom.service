@@ -1,0 +1,18 @@
+[Unit]
+Description=Stockroom equipment checkout
+Documentation=https://github.com/Kathir-D/Stockroom
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/stockroom serve --config /etc/stockroom/stockroom.env
+Restart=on-failure
+RestartSec=2
+ProtectSystem=full
+ReadWritePaths=/etc/stockroom
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

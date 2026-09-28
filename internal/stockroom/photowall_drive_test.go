@@ -124,16 +124,16 @@ func TestDriveListingReadsWhatRcloneActuallyPrints(t *testing.T) {
 func TestDriveNotReadyIsWarmingUp(t *testing.T) {
 	ctx := context.Background()
 
-	_, err := newTestSource(t, "").NextPhoto(ctx)
+	_, _, _, err := newTestSource(t, "").NextPhoto(ctx, PhotoPick{})
 	if !errors.Is(err, errPhotoWallWarmingUp) || !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("no folder chosen: %v, want warming up and still ErrNotConfigured", err)
 	}
 	s := newTestSource(t, "FOLDER-1")
-	if _, err := s.NextPhoto(ctx); !errors.Is(err, errPhotoWallWarmingUp) {
+	if _, _, _, err := s.NextPhoto(ctx, PhotoPick{}); !errors.Is(err, errPhotoWallWarmingUp) {
 		t.Errorf("manifest not built yet: %v, want warming up", err)
 	}
 	s.listing = true
-	if _, err := s.NextPhoto(ctx); !errors.Is(err, errPhotoWallWarmingUp) {
+	if _, _, _, err := s.NextPhoto(ctx, PhotoPick{}); !errors.Is(err, errPhotoWallWarmingUp) {
 		t.Errorf("first listing running: %v, want warming up", err)
 	}
 
@@ -141,14 +141,14 @@ func TestDriveNotReadyIsWarmingUp(t *testing.T) {
 	// with no internet rest rather than ask every ten seconds forever.
 	s.listing = false
 	s.lastErr = errors.New("list the Drive folder: dial tcp: no such host")
-	if _, err := s.NextPhoto(ctx); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
+	if _, _, _, err := s.NextPhoto(ctx, PhotoPick{}); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
 		t.Errorf("failed listing: %v, want a failure the reel counts", err)
 	}
 	// So is a folder that listed fine and holds nothing usable (§9).
 	empty := newTestSource(t, "FOLDER-1")
 	empty.list = stubListing(`[]`)
 	empty.buildManifest(ctx, "FOLDER-1")
-	if _, err := empty.NextPhoto(ctx); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
+	if _, _, _, err := empty.NextPhoto(ctx, PhotoPick{}); err == nil || errors.Is(err, errPhotoWallWarmingUp) {
 		t.Errorf("empty folder: %v, want a failure the reel counts", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestDriveErrorsNeverCarryTheFolderID(t *testing.T) {
 	}
 	var err error
 	for i := 0; i < 3; i++ {
-		_, err = s.NextPhoto(ctx)
+		_, _, _, err = s.NextPhoto(ctx, PhotoPick{})
 	}
 	clean("NextPhoto's error", err.Error())
 	if !errors.Is(err, errPhotoDriveAuth) || !strings.Contains(err.Error(), "rclone config reconnect gdrive:") ||
@@ -205,13 +205,13 @@ func TestDriveErrorsNeverCarryTheFolderID(t *testing.T) {
 	// warned about again rather than silently.
 	jpg := testJPEG(t, 1500, 1000)
 	s.fetch = func(context.Context, string, string) ([]byte, error) { return jpg, nil }
-	if _, err := s.NextPhoto(ctx); err != nil {
+	if _, _, _, err := s.NextPhoto(ctx, PhotoPick{}); err != nil {
 		t.Fatalf("NextPhoto with a good download: %v", err)
 	}
 	s.fetch = func(context.Context, string, string) ([]byte, error) {
 		return nil, fmt.Errorf("download a.jpg: %s", expired)
 	}
-	_, _ = s.NextPhoto(ctx)
+	_, _, _, _ = s.NextPhoto(ctx, PhotoPick{})
 	if n := strings.Count(logged.String(), "warning: sign-in photo wall"); n != 2 {
 		t.Errorf("%d warnings after the sign-in expired a second time, want 2", n)
 	}
@@ -288,21 +288,10 @@ func TestDriveManifestSurvivesAFailedListing(t *testing.T) {
 // minutes of Drive listing where a tile is a second.
 func TestDriveManifestReloadsAfterARestart(t *testing.T) {
 	first := newTestSource(t, "FOLDER-1")
-	// The reel owns the directory and marks it before the source ever writes
-	// there, so the test adopts it in the same order the server does.
-	if err := wipePhotoWallDir(first.dir); err != nil {
-		t.Fatalf("wipePhotoWallDir: %v", err)
-	}
 	first.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
 	first.buildManifest(context.Background(), "FOLDER-1")
-
-	// The reel wipes its cache directory on every boot. The manifest has to
-	// come through that, which is why wipePhotoWallDir skips it by name.
-	if err := wipePhotoWallDir(first.dir); err != nil {
-		t.Fatalf("the second boot's wipe: %v", err)
-	}
 	if _, err := os.Stat(filepath.Join(first.dir, photoWallManifest)); err != nil {
-		t.Fatalf("the boot wipe deleted the manifest: %v", err)
+		t.Fatalf("no manifest on disk: %v", err)
 	}
 
 	same := newTestSource(t, "FOLDER-1")
@@ -332,7 +321,7 @@ func TestDriveManifestReloadsAfterARestart(t *testing.T) {
 // unusable files and retrying past them is the source's business, because a
 // real folder legitimately holds portraits, panoramas and video that the ratio
 // gate turns away. An error out of NextPhoto means "nothing usable right now",
-// and the reel answers that by backing off.
+// and the set answers that by backing off.
 func TestDriveNextPhotoRetriesPastRubbish(t *testing.T) {
 	s := newTestSource(t, "FOLDER-1")
 	s.list = stubListing(`[
@@ -355,7 +344,7 @@ func TestDriveNextPhotoRetriesPastRubbish(t *testing.T) {
 		}
 	}
 
-	tile, err := s.NextPhoto(context.Background())
+	_, _, tile, err := s.NextPhoto(context.Background(), PhotoPick{})
 	if err != nil {
 		t.Fatalf("NextPhoto: %v", err)
 	}
@@ -398,7 +387,7 @@ func TestDriveNestedPathsSurviveToTheFetch(t *testing.T) {
 		sawRemote = remote
 		return good, nil
 	}
-	if _, err := s.NextPhoto(context.Background()); err != nil {
+	if _, _, _, err := s.NextPhoto(context.Background(), PhotoPick{}); err != nil {
 		t.Fatalf("NextPhoto: %v", err)
 	}
 	if want := "gdrive,root_folder_id=FOLDER-1:" + nested; sawRemote != want {
@@ -410,15 +399,26 @@ func TestDriveNestedPathsSurviveToTheFetch(t *testing.T) {
 // video returns instead of downloading it all.
 func TestDriveNextPhotoGivesUp(t *testing.T) {
 	s := newTestSource(t, "FOLDER-1")
-	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.list = stubListing(`[
+	  {"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false},
+	  {"Path":"b.jpg","Name":"b.jpg","Size":1000,"IsDir":false},
+	  {"Path":"c.jpg","Name":"c.jpg","Size":1000,"IsDir":false},
+	  {"Path":"d.jpg","Name":"d.jpg","Size":1000,"IsDir":false},
+	  {"Path":"e.jpg","Name":"e.jpg","Size":1000,"IsDir":false}
+	]`)
 	s.buildManifest(context.Background(), "FOLDER-1")
 
 	calls := 0
-	s.fetch = func(context.Context, string, string) ([]byte, error) {
+	seen := map[string]bool{}
+	s.fetch = func(_ context.Context, _, file string) ([]byte, error) {
 		calls++
+		if seen[file] {
+			t.Errorf("asked for %s again after the normalizer refused it", file)
+		}
+		seen[file] = true
 		return []byte("not a photograph"), nil
 	}
-	if _, err := s.NextPhoto(context.Background()); err == nil {
+	if _, _, _, err := s.NextPhoto(context.Background(), PhotoPick{}); err == nil {
 		t.Fatal("want an error when nothing in the folder is usable")
 	}
 	if calls != photoFetchAttempts {
@@ -432,12 +432,12 @@ func TestDriveNextPhotoGivesUp(t *testing.T) {
 // something.
 func TestDriveNextPhotoSaysWhyItHasNothing(t *testing.T) {
 	unset := newTestSource(t, "")
-	if _, err := unset.NextPhoto(context.Background()); !errors.Is(err, ErrNotConfigured) {
+	if _, _, _, err := unset.NextPhoto(context.Background(), PhotoPick{}); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("no folder chosen should be ErrNotConfigured, got %v", err)
 	}
 
 	waiting := newTestSource(t, "FOLDER-1")
-	_, err := waiting.NextPhoto(context.Background())
+	_, _, _, err := waiting.NextPhoto(context.Background(), PhotoPick{})
 	if err == nil || !strings.Contains(err.Error(), "manifest") {
 		t.Fatalf("no manifest yet should say so, got %v", err)
 	}
@@ -565,38 +565,92 @@ func TestDriveListingCountsProgress(t *testing.T) {
 	}
 }
 
-// TestDriveManifestIsNotInTheServedDirectory is §0's second barrier -- the
-// frontend never receives a Drive file ID or a folder listing -- held against
-// §5's static mount.
-//
-// The manifest is exactly such a listing, and http.FileServer refuses to
-// enumerate a directory but serves any file in one by name. A flat cache
-// directory would therefore put the whole of the Drive folder's structure one
-// guessed URL away, on the only unauthenticated screen in the application. The
-// tiles live in their own subdirectory so that the directory §5 mounts holds
-// nothing else by construction, rather than because a handler remembered to
-// exclude a filename.
-func TestDriveManifestIsNotInTheServedDirectory(t *testing.T) {
-	dir := t.TempDir()
-	w, err := NewPhotoWall(PhotoWallOptions{Dir: dir})
-	if err != nil {
-		t.Fatalf("NewPhotoWall: %v", err)
-	}
-
+// TestDrivePicksBalanceFolders: one event with many photographs must not
+// fill the wall. Picks go folder first, and a folder at its cap is skipped
+// while others have room.
+func TestDrivePicksBalanceFolders(t *testing.T) {
 	s := newTestSource(t, "FOLDER-1")
-	s.dir = dir
-	s.list = stubListing(`[{"Path":"events/gala.jpg","Name":"gala.jpg","Size":1000,"IsDir":false}]`)
+	var entries []string
+	for i := range 200 {
+		entries = append(entries, fmt.Sprintf(`{"Path":"big/%d.jpg","Name":"%d.jpg","Size":1000,"IsDir":false}`, i, i))
+	}
+	for _, f := range []string{"a", "b", "c", "d"} {
+		for i := range 10 {
+			entries = append(entries, fmt.Sprintf(`{"Path":"%s/%d.jpg","Name":"%d.jpg","Size":1000,"IsDir":false}`, f, i, i))
+		}
+	}
+	s.list = stubListing("[" + strings.Join(entries, ",") + "]")
 	s.buildManifest(context.Background(), "FOLDER-1")
 
-	if _, err := os.Stat(filepath.Join(dir, photoWallManifest)); err != nil {
-		t.Fatalf("the manifest should be in the cache root: %v", err)
+	want := PhotoPick{Held: map[string]bool{}, PerFolder: map[string]int{}, Size: 40}
+	for range 40 {
+		_, e, ok := s.pick(want, nil)
+		if !ok {
+			t.Fatal("pick found nothing with room left")
+		}
+		if want.Held[e.Path] {
+			t.Fatalf("picked %s twice", e.Path)
+		}
+		want.Held[e.Path] = true
+		want.PerFolder[photoFolder(e.Path)]++
 	}
-	served, err := os.ReadDir(w.TileDir())
-	if err != nil {
-		t.Fatal(err)
+	// Five folders in a set of 40 is a cap of 8 each.
+	for f, n := range want.PerFolder {
+		if n > 8 {
+			t.Errorf("folder %s has %d of 40, over its cap of 8", f, n)
+		}
 	}
-	for _, e := range served {
-		t.Errorf("the served directory holds %q, which is not a tile", e.Name())
+	if len(want.PerFolder) != 5 {
+		t.Errorf("the set drew from %d folders, want all 5: %v", len(want.PerFolder), want.PerFolder)
+	}
+}
+
+// TestDrivePicksPastTheCapRatherThanStop: when every folder is at its cap
+// the wall still fills, from any folder, and a set bigger than the folder
+// stops asking once everything is held.
+func TestDrivePicksPastTheCapRatherThanStop(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	s.list = stubListing(`[
+	  {"Path":"a/1.jpg","Name":"1.jpg","Size":1000,"IsDir":false},
+	  {"Path":"a/2.jpg","Name":"2.jpg","Size":1000,"IsDir":false},
+	  {"Path":"a/3.jpg","Name":"3.jpg","Size":1000,"IsDir":false}
+	]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+
+	want := PhotoPick{Held: map[string]bool{"a/1.jpg": true}, PerFolder: map[string]int{"a": 40}, Size: 10}
+	if _, e, ok := s.pick(want, nil); !ok || e.Path == "a/1.jpg" {
+		t.Fatalf("pick = %q, %v; want an unheld photograph despite the cap", e.Path, ok)
+	}
+	want.Held["a/2.jpg"], want.Held["a/3.jpg"] = true, true
+	if _, e, ok := s.pick(want, nil); ok {
+		t.Errorf("picked %q with everything held", e.Path)
+	}
+}
+
+// TestDriveListed answers from the manifest, and says it doesn't know while
+// there isn't one, so a set is never emptied by a listing in progress.
+func TestDriveListed(t *testing.T) {
+	s := newTestSource(t, "FOLDER-1")
+	if _, known := s.Listed("a.jpg"); known {
+		t.Error("Listed claims to know with no manifest")
+	}
+	s.list = stubListing(`[{"Path":"a.jpg","Name":"a.jpg","Size":1000,"IsDir":false}]`)
+	s.buildManifest(context.Background(), "FOLDER-1")
+	if present, known := s.Listed("a.jpg"); !present || !known {
+		t.Error("a.jpg is in the manifest but Listed says otherwise")
+	}
+	if present, known := s.Listed("gone.jpg"); present || !known {
+		t.Error("gone.jpg is not in the manifest but Listed says otherwise")
+	}
+}
+
+func TestPhotoFolderCap(t *testing.T) {
+	for _, c := range []struct{ size, n, want int }{
+		{150, 1, 150}, {150, 3, 50}, {150, 50, 15}, {10, 100, 1}, {40, 5, 8},
+	} {
+		if got := photoFolderCap(c.size, c.n); got != c.want {
+			t.Errorf("photoFolderCap(%d, %d) = %d, want %d", c.size, c.n, got, c.want)
+		}
 	}
 }
 
@@ -652,7 +706,7 @@ func TestDriveRebuildKeepsTheManifestServing(t *testing.T) {
 	if s.manifest != before {
 		t.Fatal("Rebuild discarded the manifest the wall is still serving from")
 	}
-	if _, _, ok := s.pick(); !ok {
+	if _, _, ok := s.pick(PhotoPick{}, nil); !ok {
 		t.Error("the wall went dark while the rebuild was pending")
 	}
 	// And the press has to actually list: with the manifest kept, a fresh one

@@ -51,15 +51,20 @@
   import StudentNumberFormat from "@stockroom/ui/components/app/student-number-format.svelte"
   import IdCardIcon from "@lucide/svelte/icons/id-card"
   import type { StudentNumberFormat as Format } from "../../student-number"
+  import { formatClosedDates, parseClosedDates } from "../../due"
+  import { Textarea } from "@stockroom/ui/components/ui/textarea"
+  import TimerIcon from "@lucide/svelte/icons/timer"
   import * as api from "../../api/index"
   import type { GoogleStatus, Settings, SettingsInput } from "../../api/types"
   import { dateTime } from "../../status"
   import { router } from "../../stores/router.svelte"
+  import { rules } from "../../stores/rules.svelte"
 
   /** Which card is mid-save, so only that card's button says "Saving…". */
   type Card =
     | "checkout"
     | "signin"
+    | "session"
     | "folders"
     | "schedule"
     | "photos"
@@ -110,6 +115,11 @@
     student_number_format: "digits" as Format,
     student_number_pattern: "",
     due_time: "15:30",
+    max_checkout_days: "",
+    overdue_blocks_checkout: true,
+    closed_dates: "",
+    session_idle_minutes: "",
+    scan_threshold_ms: "",
   })
 
   /** Secrets live outside `draft`: blank means unchanged, not blank-it-out. */
@@ -136,6 +146,11 @@
       student_number_format: next.student_number_format,
       student_number_pattern: next.student_number_pattern,
       due_time: next.due_time,
+      max_checkout_days: String(next.max_checkout_days),
+      overdue_blocks_checkout: next.overdue_blocks_checkout,
+      closed_dates: formatClosedDates(next.closed_dates),
+      session_idle_minutes: next.session_idle_minutes ? String(next.session_idle_minutes) : "",
+      scan_threshold_ms: String(next.scan_threshold_ms),
     }
     // The secret fields are cleared on every adopt, including after a save that
     // just stored one. Leaving a token sitting in a text box on a shared closet
@@ -188,6 +203,9 @@
     try {
       const input = build()
       adopt(await api.saveSettings(input))
+      // The loan rules, the idle timeout and the scanner speed are read from
+      // the rules store everywhere else, so this machine follows at once.
+      void rules.load(true)
       toast.success("Settings saved")
     } catch (err) {
       // The server's messages are written for the person reading them ("a
@@ -206,8 +224,22 @@
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
         throw new Error("The due time must be HH:MM on a 24-hour clock, such as 15:30.")
       }
-      return { due_time: value }
+      return {
+        due_time: value,
+        max_checkout_days: whole(draft.max_checkout_days, "Longest loan", 1, 60),
+        overdue_blocks_checkout: draft.overdue_blocks_checkout,
+        closed_dates: parseClosedDates(draft.closed_dates),
+      }
     })
+
+  const saveSession = () =>
+    save("session", () => ({
+      // Blank means the .env value, which the server stores as no override.
+      session_idle_minutes: draft.session_idle_minutes.trim()
+        ? whole(draft.session_idle_minutes, "Sign out after", 1, 240)
+        : 0,
+      scan_threshold_ms: whole(draft.scan_threshold_ms, "Scanner speed", 10, 200),
+    }))
 
   const saveSignIn = () =>
     save("signin", () => ({
@@ -380,23 +412,83 @@
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
         <ClockIcon class="size-4 text-fg-muted" aria-hidden="true" />
-        When loans are due
+        Loans
       </h2>
       <p class="text-xs text-fg-muted">
         A student picks the last day they need an item. It is due back at this time on the next school
-        day (Monday to Friday) after that, so something returned first thing the next morning is never
-        already late. Set it to when the closet closes.
+        day after that, so something returned first thing the next morning is never already late. Set
+        it to when the closet closes.
       </p>
-      <div class="flex max-w-40 flex-col gap-1.5">
-        <Label for="due-time">Due back at (24-hour)</Label>
-        <Input id="due-time" bind:value={draft.due_time} inputmode="numeric" placeholder="15:30" />
+      <div class="flex flex-wrap gap-4">
+        <div class="flex w-40 flex-col gap-1.5">
+          <Label for="due-time">Due back at (24-hour)</Label>
+          <Input id="due-time" bind:value={draft.due_time} inputmode="numeric" placeholder="15:30" />
+        </div>
+        <div class="flex w-40 flex-col gap-1.5">
+          <Label for="max-checkout-days">Longest loan (days)</Label>
+          <Input id="max-checkout-days" bind:value={draft.max_checkout_days} inputmode="numeric" placeholder="7" />
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-fg">
+        <Checkbox
+          checked={draft.overdue_blocks_checkout}
+          onCheckedChange={(v) => (draft.overdue_blocks_checkout = v === true)}
+        />
+        Someone with an overdue item can't check anything else out
+      </label>
+      <div class="flex max-w-md flex-col gap-1.5">
+        <Label for="closed-dates">Days the school is closed</Label>
+        <Textarea
+          id="closed-dates"
+          bind:value={draft.closed_dates}
+          rows={5}
+          spellcheck={false}
+          placeholder={"2026-11-26\n2026-12-21 to 2027-01-01"}
+          class="font-mono text-sm"
+        />
+        <p class="text-xs text-fg-faint">
+          One date or range per line. A loan never falls due on one of these days; it moves to the
+          first school day after. Weekends are always closed, so leave them out.
+        </p>
       </div>
       {#if cardError.checkout}
         <p class="text-sm text-status-overdue" role="alert">{cardError.checkout}</p>
       {/if}
       <div>
         <Button disabled={saving === "checkout"} onclick={saveCheckout}>
-          {saving === "checkout" ? "Saving…" : "Save due time"}
+          {saving === "checkout" ? "Saving…" : "Save loan rules"}
+        </Button>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------- session and scan ---- -->
+    <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
+        <TimerIcon class="size-4 text-fg-muted" aria-hidden="true" />
+        Sign-out and scanner
+      </h2>
+      <p class="text-xs text-fg-muted">
+        How long someone stays signed in with nobody touching the machine, and how fast the scanner
+        types. Leave the first blank to use SESSION_IDLE_MINUTES from the server's settings file. Raise
+        the scanner speed only if real scans come through as typing; Ctrl+Shift+D shows the timing
+        of the last scan.
+      </p>
+      <div class="flex flex-wrap gap-4">
+        <div class="flex w-48 flex-col gap-1.5">
+          <Label for="session-idle">Sign out after (minutes)</Label>
+          <Input id="session-idle" bind:value={draft.session_idle_minutes} inputmode="numeric" placeholder="10" />
+        </div>
+        <div class="flex w-48 flex-col gap-1.5">
+          <Label for="scan-threshold">Scanner speed (ms per key)</Label>
+          <Input id="scan-threshold" bind:value={draft.scan_threshold_ms} inputmode="numeric" placeholder="50" />
+        </div>
+      </div>
+      {#if cardError.session}
+        <p class="text-sm text-status-overdue" role="alert">{cardError.session}</p>
+      {/if}
+      <div>
+        <Button disabled={saving === "session"} onclick={saveSession}>
+          {saving === "session" ? "Saving…" : "Save"}
         </Button>
       </div>
     </section>

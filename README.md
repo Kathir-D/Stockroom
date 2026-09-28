@@ -9,7 +9,7 @@
   <a href="LICENSE"><img alt="license: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
   <img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white">
   <img alt="Svelte 5" src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white">
-  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white">
+  <img alt="PostgreSQL 14+" src="https://img.shields.io/badge/PostgreSQL-14%2B-336791?logo=postgresql&logoColor=white">
 </p>
 
 ## Features
@@ -37,33 +37,42 @@
 
 ### Software
 
+The install brings everything it needs. On Linux the `.deb` depends on the distribution's PostgreSQL (14 or newer) and rclone (1.60 or newer). On macOS the Homebrew cask depends on `postgresql@17` and `rclone`. Supported systems are Debian 12, Ubuntu 24.04 and newer, macOS, and Windows 10 or 11 through WSL 2.
+
+Development needs more:
+
 | Dependency | Why | Install |
 |---|---|---|
-| **Docker** | Runs PostgreSQL today, and the Supabase CLI in development. The planned packages use the system's PostgreSQL instead | https://www.docker.com/products/docker-desktop/ |
-| **Go** 1.25+ | Builds the API server and the desktop app's Go host | https://go.dev/dl/ |
+| **Docker** | Runs the Supabase CLI's database, and the optional closet camera | https://www.docker.com/products/docker-desktop/ |
+| **Go** 1.25+ | Builds the server and the desktop app's Go host | https://go.dev/dl/ |
 | **Node.js** 22+ (with npm) | Builds the frontend | https://nodejs.org/en/download |
-| **Supabase CLI** | Development only. Runs the dev database, migrations and database tests | https://supabase.com/docs/guides/cli/getting-started |
-| **Wails CLI** | Development only. Builds and runs the desktop app | Installed automatically by `scripts/dev.sh` |
-| `rclone` | Optional. Google Drive backups and the sign-in photo wall | https://rclone.org/downloads/ (see [docs/BACKUP-SETUP.md](docs/BACKUP-SETUP.md)) |
+| **Supabase CLI** | Runs the dev database, migrations and database tests | https://supabase.com/docs/guides/cli/getting-started |
+| **Wails CLI** | Builds and runs the desktop app | Installed by `scripts/dev.sh` |
+| `rclone` | Google Drive backups and the sign-in photo wall | https://rclone.org/downloads/ |
 
 ## Installation
 
-Linux is the main target, then macOS. Windows will be supported only through WSL 2, running the Linux package inside Ubuntu, and there is no native Windows installer.
-
-Today's installer builds from a checkout, so it needs Go, Node and Docker. It is being replaced by one command per platform, a `.deb` on Linux and a Homebrew formula on macOS ([ROADMAP.md](ROADMAP.md) track B).
+Linux (Debian 12, Ubuntu 24.04 or newer):
 
 ```bash
-git clone https://github.com/Kathir-D/Stockroom.git
-cd Stockroom
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh | sudo bash
 ```
 
-This builds a single binary (API, web UI and migrations), starts a local PostgreSQL container and registers a service that keeps the server running. Open http://127.0.0.1:8080 and the setup wizard walks you through the rest.
+macOS:
 
-Run the same command again to upgrade. It backs up the database first. See [docs/INSTALL.md](docs/INSTALL.md) for options and troubleshooting.
+```bash
+brew install kathir-d/stockroom/stockroom && stockroom setup
+```
 
-> [!IMPORTANT]
-> On macOS the service starts at login, so turn on **System Settings → Users & Groups → Automatic login**. Otherwise Stockroom does not run after a restart.
+Windows 10 or 11, in an administrator PowerShell. It runs the Linux package inside Ubuntu under WSL 2:
+
+```powershell
+irm https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.ps1 | iex
+```
+
+Each one installs PostgreSQL and rclone, creates the database, writes the config, and installs a service that starts Stockroom at boot with nobody logged in. Then open http://127.0.0.1:8080 and the setup wizard walks you through the rest.
+
+Run the same command again to upgrade. The server dumps the database before it applies a new migration. `stockroom doctor` checks an install and says how to fix what's wrong. See [docs/INSTALL.md](docs/INSTALL.md) for options, uninstalling and troubleshooting.
 
 ### First-time setup
 
@@ -87,7 +96,7 @@ Sample files for every import are in [`examples/`](examples/).
 3. Pick a due date and check out.
 4. To return something, scan its sticker from any screen.
 
-Any USB barcode scanner that works as a keyboard (HID keyboard-wedge) is supported. See the [admin guide](docs/ADMIN-GUIDE.md) for setting up equipment, students and labels, and the [student guide](docs/STUDENT-GUIDE.md) for a printable one-pager.
+Any USB barcode scanner that works as a keyboard (HID keyboard-wedge) is supported. See the [admin guide](docs/ADMIN-GUIDE.md) for setting up equipment, students and labels, and the [student guide](docs/STUDENT-GUIDE.md) for a printable one-pager. [HARDWARE.md](docs/HARDWARE.md) covers choosing and setting up the scanner, labels and the closet computer, and [FAQ.md](docs/FAQ.md) answers the common questions.
 
 ## Configuration
 
@@ -107,7 +116,7 @@ Values read on first start only are managed in **Admin → Settings** afterwards
 
 ## Backups
 
-Backups run nightly inside the server and write every table to CSV in a zip, with checksums and optional encryption. Copies can be pushed to Google Drive (via [rclone](https://rclone.org/)) and GitHub. Restore from **Admin → Backup**, or with `go run ./cmd/restore` if no admin can sign in.
+Backups run nightly inside the server and write every table to CSV in a zip, with checksums and optional encryption. Copies can be pushed to Google Drive (via [rclone](https://rclone.org/)) and GitHub. Restore from **Admin → Backup**, or with `stockroom restore` if no admin can sign in.
 
 See [docs/BACKUP-SETUP.md](docs/BACKUP-SETUP.md).
 
@@ -148,7 +157,7 @@ The development seed (`supabase/seed.sql`) creates these accounts. Sign in by sc
 The seed also includes a category tree, sample equipment (some checked out, one unavailable) and one kit. To try the first-login password prompt, create a user in Admin → Users (new users have no password) and scan or enter their number.
 
 > [!WARNING]
-> These credentials are public. The seed is for development only and is never loaded by `install.sh`.
+> These credentials are public. The seed is for development only, and no install ever loads it.
 
 ### Manual setup
 
@@ -172,14 +181,17 @@ The Go server is the only database client. Both frontends render the same Svelte
 
 ```
 internal/stockroom/   business logic, permission checks and all database access
-server/               HTTP API; serves the embedded web UI
-cmd/restore/          command-line restore
+server/               the stockroom binary: HTTP API, embedded web UI, subcommands
+internal/setup/       stockroom setup, service and doctor
+internal/cli/         stockroom restore
+cmd/restore/          the same restore, for go run from a checkout
 packages/ui/          Svelte frontend shared by both apps
 web-app/              browser app
 desktop-app/          Wails desktop app
 supabase/             migrations, seed data, pgTAP tests
-deploy/               production docker-compose and service templates
-scripts/              install and dev scripts
+packaging/            the .deb's systemd unit and maintainer scripts
+deploy/               the older checkout installer's files, and camera/
+scripts/              get.sh, get.ps1, dev.sh and the older install.sh
 examples/             sample category trees, roster and asset list
 docs/                 guides, design docs and ADRs
 ```
@@ -194,9 +206,10 @@ More detail: [TESTING.md](TESTING.md), [CI.md](CI.md), [CONTEXT.md](CONTEXT.md) 
 | Components render but do not update | A nested `node_modules` is shadowing the workspace. Run `./scripts/dev.sh deps` |
 | Port 5173 in use | Free it with `./scripts/dev.sh stop`. Vite will not pick another port, because the API would reject it |
 | "Something holds :8080 but does not answer /health" | The server is running without a database. Run `./scripts/dev.sh stop`, then `./scripts/dev.sh` |
-| A scan asks for a password | The scan was read as typing. Press Ctrl+Shift+D to see key timings and adjust `SCAN_KEY_THRESHOLD_MS` in `packages/ui/src/lib/scanner.ts` |
+| A scan asks for a password | The scan was read as typing. Press Ctrl+Shift+D to see key timings and raise the scanner speed in Admin → Settings |
 | A scan does nothing | Scan into a text editor. If nothing appears, the scanner is not in keyboard mode. If no new line appears, configure it to send Enter after each code |
-| Locked out of the admin panel | Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env` and restart the server |
+| Locked out of the admin panel | Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in the config (`.env` in development) and restart the server |
+| Something is wrong with an install | Run `stockroom doctor`. It names each problem and how to fix it. `stockroom support-bundle` zips its report and the log, secrets removed, for an issue |
 | Cannot delete a user | Users holding items cannot be deleted. Check the items in first |
 | Backups reported as stale | Admin → Backup shows the last error for each target and the backup log |
 
