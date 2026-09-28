@@ -1,6 +1,7 @@
 package stockroom
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -45,5 +46,26 @@ func TestSetEnvValuesRoundTrips(t *testing.T) {
 
 	if err := setEnvValues(path, map[string]string{"ADMIN_PASSWORD": "it's"}); err == nil {
 		t.Error("a single quote was accepted; it cannot be written literally")
+	}
+}
+
+// CreateEnvFile writes a new file once and never overwrites one, which is how
+// setup keeps its promise never to replace an install's config.
+func TestCreateEnvFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stockroom.env")
+	if err := CreateEnvFile(path, "DATABASE_URL='x'\n", 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateEnvFile(path, "DATABASE_URL='y'\n", 0o600); err == nil {
+		t.Error("CreateEnvFile overwrote an existing file")
+	}
+	if raw, _ := os.ReadFile(path); string(raw) != "DATABASE_URL='x'\n" {
+		t.Errorf("file = %q, want the first write", raw)
+	}
+	if _, err := EnvQuote("it's"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("EnvQuote(it's) = %v, want ErrInvalid", err)
+	}
+	if q, err := EnvQuote("a$b#c"); err != nil || q != "'a$b#c'" {
+		t.Errorf("EnvQuote(a$b#c) = %q, %v", q, err)
 	}
 }

@@ -46,13 +46,13 @@ No. Only the nightly backup to Google Drive or GitHub does, and a failed push do
 No. It runs on one computer and answers only that computer. Other machines on the network can't reach it. That's on purpose, because a scan of a student number signs that student in.
 
 **Does it send overdue reminders by email?**
-No. Overdue loans show in the app: to the student at sign-in, and to admins under **Admin → Overdue**.
+No. Overdue checkouts show in the app: to the student at sign-in, and to admins under **Admin → Overdue**.
 
 **Can students reserve equipment?**
 No. The first person to check an item out has it.
 
-**The school is closed next week. Will loans fall due during the break?**
-Not if you add the dates in **Admin → Settings → Loans → Days the school is closed**. One date or range per line, such as `2026-12-21 to 2027-01-01`. A loan that would fall due on a closed day falls due on the first day back.
+**The school is closed next week. Will checkouts fall due during the break?**
+Not if you add the dates in **Admin → Settings → Checkouts → Days the school is closed**. One date or range per line, such as `2026-12-21 to 2027-01-01`. A checkout that would fall due on a closed day falls due on the first day back.
 
 **Why can't admins see a student number next to a name?**
 Everyone can see who has an item. Only admins see the holder's student number, because a scan of that number signs its owner in.
@@ -64,7 +64,7 @@ A serial can't equal anybody's student number, ignoring upper and lower case, be
 Archive them in **Admin → Users**. They can't sign in and drop out of the lists, but their history stays. An account that ever borrowed anything can't be deleted.
 
 **An item is lost.**
-Find its loan in **Admin → Overdue**, which also lists everything out, and press **Mark lost**. The loan closes as lost, the item becomes unavailable, and the student stops being overdue on it.
+Find its checkout in **Admin → Overdue**, which also lists everything out, and press **Mark lost**. The checkout closes as lost, the item becomes unavailable, and the student stops being overdue on it.
 
 **Everyone got signed out at once.**
 The server restarted. Sessions live in memory, so a restart signs everyone out, and nothing else is lost.

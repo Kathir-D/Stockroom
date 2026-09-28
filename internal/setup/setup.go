@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/joho/godotenv"
+
+	"stockroom/internal/stockroom"
 )
 
 // Options are setup's flags.
@@ -27,6 +28,9 @@ type Options struct {
 	AdminNumber       string
 	AdminPasswordFile string
 	Addr              string
+	// ConfigFile is --config: where the config is written and read. Empty
+	// means the one the service already uses, else the platform's default.
+	ConfigFile string
 }
 
 const defaultAddr = "127.0.0.1:8080"
@@ -49,6 +53,9 @@ type installer struct {
 // the database, and resets the database password only when the config that
 // held it is gone.
 func Setup(ctx context.Context, env *Env, opts Options) error {
+	if err := useConfig(env, opts.ConfigFile); err != nil {
+		return err
+	}
 	in := &installer{env: env, opts: opts}
 	for _, step := range []struct {
 		name string
@@ -349,6 +356,47 @@ func previousServiceUser(dropIn string) string {
 	return ""
 }
 
+// previousServiceConfig is the config a drop-in from an earlier setup
+// --config points the service at, or "".
+func previousServiceConfig(dropIn string) string {
+	f, err := os.Open(dropIn)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "ExecStart=") {
+			continue
+		}
+		if _, cfg, ok := strings.Cut(line, " --config "); ok {
+			return strings.TrimSpace(cfg)
+		}
+	}
+	return ""
+}
+
+// useConfig settles e.Paths.ConfigFile for setup and service: the --config
+// flag, else the config an earlier setup --config chose (so a repair run
+// without the flag keeps it), else the platform's default.
+func useConfig(e *Env, flagPath string) error {
+	if flagPath == "" {
+		if e.GOOS == "linux" {
+			if prev := previousServiceConfig(e.Paths.DropIn); prev != "" {
+				e.Paths.ConfigFile = prev
+			}
+		}
+		return nil
+	}
+	abs, err := checkConfigPath(flagPath)
+	if err != nil {
+		return err
+	}
+	e.Paths.ConfigFile = abs
+	return nil
+}
+
 /* -------------------------------------------------------------- config ---- */
 
 func (in *installer) writeConfig(ctx context.Context) error {
@@ -380,7 +428,7 @@ func (in *installer) writeConfig(ctx context.Context) error {
 		}
 	}
 
-	body := renderConfig(configValues{
+	body, err := renderConfig(configValues{
 		databaseURL:   fmt.Sprintf("postgresql://%s:%s@127.0.0.1:%s/%s", roleName, in.dbPassword, in.dbPort, dbName),
 		addr:          in.addr,
 		admin:         admin,
@@ -388,16 +436,10 @@ func (in *installer) writeConfig(ctx context.Context) error {
 		backupDir:     backupDir,
 		preMigrateDir: filepath.Join(e.Paths.DataDir, "backups", "pre-migrate"),
 	}, time.Now())
-
-	f, err := os.OpenFile(e.Paths.ConfigFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, err := io.WriteString(f, body); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if err := stockroom.CreateEnvFile(e.Paths.ConfigFile, body, 0o600); err != nil {
 		return err
 	}
 	if err := e.Chown(e.Paths.ConfigFile, in.svcUser.uid, in.svcUser.gid); err != nil {
@@ -487,11 +529,19 @@ type configValues struct {
 	dataDir, backupDir, preMigrateDir string
 }
 
-// renderConfig is the config setup writes. Values are single-quoted, which
-// godotenv reads literally, so a `$` in a password stays a `$`.
-func renderConfig(v configValues, now time.Time) string {
-	q := func(s string) string { return "'" + s + "'" }
-	return fmt.Sprintf(`# Written by stockroom setup on %s.
+// renderConfig is the config setup writes. Values are quoted by
+// stockroom.EnvQuote, which godotenv reads literally, so a `$` in a password
+// stays a `$`.
+func renderConfig(v configValues, now time.Time) (string, error) {
+	var bad error
+	q := func(s string) string {
+		quoted, err := stockroom.EnvQuote(s)
+		if err != nil && bad == nil {
+			bad = err
+		}
+		return quoted
+	}
+	body := fmt.Sprintf(`# Written by stockroom setup on %s.
 #
 # Most settings live in the database and are changed in the admin panel.
 # BACKUP_DIR and PHOTO_BACKUP_DIR only seed the admin panel's values the first
@@ -526,6 +576,7 @@ SESSION_IDLE_MINUTES=10
 		q(filepath.Join(v.dataDir, "photo-backups")),
 		q(v.preMigrateDir),
 	)
+	return body, bad
 }
 
 /* ------------------------------------------------------------- service ---- */

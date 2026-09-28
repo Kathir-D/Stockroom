@@ -38,3 +38,19 @@ func (db *DB) SavedFolders(ctx context.Context) (Folders, error) {
 	}
 	return f, nil
 }
+
+// ServerInfo is what doctor reports about the PostgreSQL server itself.
+type ServerInfo struct {
+	Version string
+	// VersionNum is server_version_num, 170002 for 17.2.
+	VersionNum      int
+	ListenAddresses string
+}
+
+// ServerInfo reads the server's version and listen_addresses.
+func (db *DB) ServerInfo(ctx context.Context) (ServerInfo, error) {
+	var si ServerInfo
+	err := db.Pool.QueryRow(ctx, `select current_setting('server_version'), current_setting('server_version_num')::int,
+		current_setting('listen_addresses')`).Scan(&si.Version, &si.VersionNum, &si.ListenAddresses)
+	return si, err
+}

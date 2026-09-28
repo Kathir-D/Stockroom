@@ -127,13 +127,12 @@ func (d *doctor) checkPostgres(ctx context.Context, cfg stockroom.Config) *stock
 		return nil
 	}
 
-	var version, listen string
-	var num int
-	if err := db.Pool.QueryRow(ctx, `select current_setting('server_version'), current_setting('server_version_num')::int,
-		current_setting('listen_addresses')`).Scan(&version, &num, &listen); err != nil {
+	si, err := db.ServerInfo(ctx)
+	if err != nil {
 		d.report(levelFail, "PostgreSQL answered but a query failed: "+err.Error(), "")
 		return db
 	}
+	version, num, listen := si.Version, si.VersionNum, si.ListenAddresses
 	if num < 140000 {
 		d.report(levelFail, "PostgreSQL "+version+" is older than 14, the oldest Stockroom is tested on", "upgrade PostgreSQL (docs/INSTALL.md, Upgrading PostgreSQL)")
 	} else {

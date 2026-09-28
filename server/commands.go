@@ -76,6 +76,7 @@ func versionString() string {
 
 func cmdVersion(args []string) int {
 	fs := flag.NewFlagSet("stockroom version", flag.ContinueOnError)
+	configPath := fs.String("config", "", configFlagHelp)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -84,6 +85,17 @@ func cmdVersion(args []string) int {
 		schema = "unknown (" + err.Error() + ")"
 	}
 	fmt.Printf("stockroom %s\ncommit    %s\nschema    %s\n", version, orNone(commit), schema)
+	// Only which file, not what is in it: version must work with no database
+	// and a broken config.
+	switch path, source, err := stockroom.FindConfig(*configPath); {
+	case err != nil:
+		fmt.Printf("config    %v\n", err)
+		return 1
+	case path == "":
+		fmt.Println("config    none found")
+	default:
+		fmt.Printf("config    %s (%s)\n", path, source)
+	}
 	return 0
 }
 

@@ -108,10 +108,10 @@ func TestSettingsBoundsAreReadable(t *testing.T) {
 	restore()
 }
 
-// The loan rules round-trip, closed dates come back sorted and once each, and
+// The checkout rules round-trip, closed dates come back sorted and once each, and
 // the idle timeout reaches the live session store and goes back to the .env
 // value when cleared.
-func TestLoanRuleSettings(t *testing.T) {
+func TestCheckoutRuleSettings(t *testing.T) {
 	db := requireTestDB(t)
 	ctx := context.Background()
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))

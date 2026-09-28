@@ -44,16 +44,31 @@ EOF
     ;;
 esac
 
-# Older releases package an rclone older than 1.60, which the .deb needs.
+# Older releases package an rclone older than 1.60, which the .deb needs. A
+# derivative (Mint, Pop!_OS, Kali…) numbers its own releases, so it is judged
+# by the Ubuntu or Debian release it is built on.
+too_old() { die "${PRETTY_NAME:-this system} is too old: Stockroom needs Debian 12 or Ubuntu 24.04 or newer, or a system built on one"; }
+older_than() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" != "$1" ]; }
 case "${ID:-}" in
-  ubuntu) oldest=24.04 ;;
-  debian) oldest=12 ;;
-  *) oldest= ;;
+  ubuntu) [ -z "${VERSION_ID:-}" ] || ! older_than 24.04 "$VERSION_ID" || too_old ;;
+  debian) [ -z "${VERSION_ID:-}" ] || ! older_than 12 "$VERSION_ID" || too_old ;;
+  *)
+    if [ -n "${UBUNTU_CODENAME:-}" ]; then
+      # Every Ubuntu before 24.04 (noble).
+      case "$UBUNTU_CODENAME" in
+        trusty|xenial|bionic|focal|groovy|hirsute|impish|jammy|kinetic|lunar|mantic) too_old ;;
+      esac
+    elif [ -r /etc/debian_version ]; then
+      # "11.9" on a stable base, a name such as "trixie/sid" on testing or a
+      # rolling release, which is new enough.
+      debian_base=$(cut -d. -f1 /etc/debian_version)
+      case "$debian_base" in
+        ''|*[!0-9]*) ;;
+        *) [ "$debian_base" -ge 12 ] || too_old ;;
+      esac
+    fi
+    ;;
 esac
-if [ -n "$oldest" ] && [ -n "${VERSION_ID:-}" ] &&
-  [ "$(printf '%s\n%s\n' "$oldest" "$VERSION_ID" | sort -V | head -1)" != "$oldest" ]; then
-  die "${PRETTY_NAME:-this system} is too old: Stockroom needs Debian 12 or Ubuntu 24.04 or newer"
-fi
 
 # 3. The architecture, named the way the release names its files.
 arch=$(dpkg --print-architecture)
