@@ -71,7 +71,7 @@ type Settings struct {
 	// the last day of use the borrower picks (due.go).
 	DueTime string `json:"due_time"`
 
-	// The loan rules (due.go, custody.go): how many days out the last day of
+	// The checkout rules (due.go, custody.go): how many days out the last day of
 	// use may be, whether anything overdue blocks a new checkout, and the
 	// dates the school is closed, as "2006-01-02", sorted.
 	MaxCheckoutDays       int      `json:"max_checkout_days"`

@@ -24,6 +24,7 @@ func cmdSetup(args []string) int {
 	fs.StringVar(&o.AdminNumber, "admin-number", "", "failsafe admin student number")
 	fs.StringVar(&o.AdminPasswordFile, "admin-password-file", "", "file holding the failsafe admin password, or - for stdin")
 	fs.StringVar(&o.Addr, "addr", "", "address the server listens on (default 127.0.0.1:8080)")
+	fs.StringVar(&o.ConfigFile, "config", "", "config file to write and point the service at (default: the service's current one, else the system path)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -45,8 +46,9 @@ func cmdSetup(args []string) int {
 func cmdService(args []string) int {
 	fs := flag.NewFlagSet("stockroom service", flag.ContinueOnError)
 	user := fs.String("user", "", "account the service runs as, for install (default: the current service user, or whoever ran sudo)")
+	configPath := fs.String("config", "", "config file the service reads, for install (default: the service's current one, else the system path)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: stockroom service install|uninstall|start|stop|restart|status [--user name]")
+		fmt.Fprintln(fs.Output(), "Usage: stockroom service install|uninstall|start|stop|restart|status [--user name] [--config file]")
 		fs.PrintDefaults()
 	}
 	if len(args) == 0 {
@@ -59,7 +61,7 @@ func cmdService(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := setup.Service(ctx, setup.NewEnv(), action, *user); err != nil {
+	if err := setup.Service(ctx, setup.NewEnv(), action, *user, *configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "stockroom service %s: %v\n", action, err)
 		return 1
 	}

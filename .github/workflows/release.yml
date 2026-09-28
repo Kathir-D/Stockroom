@@ -7,7 +7,10 @@ name: release
 # The build and the publish are separate jobs. The build runs `npm ci`, which
 # runs every dependency's lifecycle scripts, so it gets a read-only token. The
 # publish job runs no third-party code: it uploads what the build made and
-# commits the cask to the tap.
+# commits the cask to the tap. That keeps the write token and the tap token
+# away from dependency scripts. It does not vouch for the files themselves:
+# the binaries, packages and cask all come from the job that ran `npm ci`, so
+# what protects their contents is package-lock.json's pinned hashes.
 on:
   push:
     tags: ['v*']

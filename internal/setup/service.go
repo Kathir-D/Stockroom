@@ -41,12 +41,18 @@ func (s *systemdService) systemctl(ctx context.Context, args ...string) (string,
 
 func (s *systemdService) install(ctx context.Context, a account) error {
 	e := s.env
+	// The packaged unit names linuxConfigFile. Any other config, from
+	// setup --config, goes in the drop-in; a unit written here names it.
+	override := ""
+	if _, err := os.Stat(e.Paths.PackagedUnit); err == nil && e.Paths.ConfigFile != linuxConfigFile {
+		override = e.Paths.ConfigFile
+	}
 	if _, err := os.Stat(e.Paths.PackagedUnit); err != nil {
 		// Not installed from the package: write a unit that runs this binary.
 		if err := os.MkdirAll(filepath.Dir(e.Paths.LocalUnit), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(e.Paths.LocalUnit, []byte(systemdUnit(e.Paths.Binary)), 0o644); err != nil {
+		if err := os.WriteFile(e.Paths.LocalUnit, []byte(systemdUnit(e.Paths.Binary, e.Paths.ConfigFile)), 0o644); err != nil {
 			return err
 		}
 		e.ok("wrote %s for %s", e.Paths.LocalUnit, e.Paths.Binary)
@@ -54,7 +60,7 @@ func (s *systemdService) install(ctx context.Context, a account) error {
 	if err := os.MkdirAll(filepath.Dir(e.Paths.DropIn), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(e.Paths.DropIn, []byte(userDropIn(a.name, a.group)), 0o644); err != nil {
+	if err := os.WriteFile(e.Paths.DropIn, []byte(userDropIn(a.name, a.group, e.Paths.Binary, override)), 0o644); err != nil {
 		return err
 	}
 	if _, err := s.systemctl(ctx, "daemon-reload"); err != nil {
@@ -63,7 +69,7 @@ func (s *systemdService) install(ctx context.Context, a account) error {
 	if _, err := s.systemctl(ctx, "enable", "stockroom"); err != nil {
 		return err
 	}
-	e.ok("service enabled, running as %s", a.name)
+	e.ok("service enabled, running as %s and reading %s", a.name, e.Paths.ConfigFile)
 	return nil
 }
 
@@ -140,7 +146,7 @@ func (s *launchdService) install(ctx context.Context, a account) error {
 	if err := loadDaemon(ctx, e, serverLabel, plist); err != nil {
 		return err
 	}
-	e.ok("LaunchDaemon %s loaded, running as %s", serverLabel, a.name)
+	e.ok("LaunchDaemon %s loaded, running as %s and reading %s", serverLabel, a.name, e.Paths.ConfigFile)
 	return nil
 }
 
@@ -243,7 +249,7 @@ func writeRootFile(ctx context.Context, e *Env, path, content string) error {
 
 // Service runs `stockroom service <action>`. install takes the account to run
 // as: userName, else the one already in the drop-in, else whoever ran sudo.
-func Service(ctx context.Context, e *Env, action, userName string) error {
+func Service(ctx context.Context, e *Env, action, userName, configPath string) error {
 	switch e.GOOS {
 	case "linux":
 		if !e.Root {
@@ -255,6 +261,9 @@ func Service(ctx context.Context, e *Env, action, userName string) error {
 	case "darwin":
 	default:
 		return fmt.Errorf("services are managed on Linux and macOS, not %s", e.GOOS)
+	}
+	if err := useConfig(e, configPath); err != nil {
+		return err
 	}
 	svc := newService(e)
 	switch action {

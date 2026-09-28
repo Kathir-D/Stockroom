@@ -2,8 +2,13 @@ package setup
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// linuxConfigFile is the config the packaged unit names. setup --config can
+// choose another, and the drop-in then points the unit at it.
+const linuxConfigFile = "/etc/stockroom/stockroom.env"
 
 // systemdUnit is the service unit. The package ships it rendered with
 // /usr/bin/stockroom as packaging/linux/stockroom.service, and a test keeps
@@ -15,7 +20,7 @@ import (
 // /media included, and those two options would make the backup fail on
 // exactly the folders the picker offers. The service user comes from a
 // drop-in setup writes, so the unit has no User= line.
-func systemdUnit(binary string) string {
+func systemdUnit(binary, config string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Stockroom equipment checkout
 Documentation=https://github.com/Kathir-D/Stockroom
@@ -24,22 +29,43 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-ExecStart=%s serve --config /etc/stockroom/stockroom.env
+ExecStart=%s serve --config %s
 Restart=on-failure
 RestartSec=2
 ProtectSystem=full
-ReadWritePaths=/etc/stockroom
+ReadWritePaths=%s
 PrivateTmp=yes
 NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target
-`, binary)
+`, binary, config, filepath.Dir(config))
 }
 
-// userDropIn is /etc/systemd/system/stockroom.service.d/user.conf.
-func userDropIn(user, group string) string {
-	return fmt.Sprintf("# Written by stockroom setup. The account the service runs as.\n[Service]\nUser=%s\nGroup=%s\n", user, group)
+// userDropIn is /etc/systemd/system/stockroom.service.d/user.conf: the
+// account the service runs as and, when config is not "", the config the
+// packaged unit should read instead of its own. The empty ExecStart= clears
+// the unit's line before replacing it.
+func userDropIn(user, group, binary, config string) string {
+	s := fmt.Sprintf("# Written by stockroom setup. The account the service runs as.\n[Service]\nUser=%s\nGroup=%s\n", user, group)
+	if config != "" {
+		s += fmt.Sprintf("# The config chosen with --config.\nExecStart=\nExecStart=%s serve --config %s\nReadWritePaths=%s\n",
+			binary, config, filepath.Dir(config))
+	}
+	return s
+}
+
+// checkConfigPath makes a --config path absolute and refuses one a unit's
+// ExecStart or a shell would split or expand.
+func checkConfigPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(abs, " \t\r\n\"'\\$%;`") {
+		return "", fmt.Errorf("--config %q: use a path without spaces, quotes or any of $ %% ; ` \\", path)
+	}
+	return abs, nil
 }
 
 // launchDaemon renders a LaunchDaemon plist. RunAtLoad and KeepAlive start it

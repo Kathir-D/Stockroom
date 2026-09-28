@@ -227,10 +227,21 @@ func TestLoadConfigRefusesRelativePathsWhenInstalled(t *testing.T) {
 	useSystemPath(t, filepath.Join(dir, "absent.env"))
 
 	path := writeEnv(t, filepath.Join(t.TempDir(), "stockroom.env"), "x",
-		"SIGNIN_PHOTOS_DIR=/var/lib/stockroom/cache")
+		"SIGNIN_PHOTOS_DIR=/var/lib/stockroom/cache", "UPLOADS_DIR=./uploads")
 	_, err := LoadConfigFrom(path)
 	if err == nil || !strings.Contains(err.Error(), "UPLOADS_DIR") {
-		t.Fatalf("relative default UPLOADS_DIR in an installed config: err = %v, want one naming UPLOADS_DIR", err)
+		t.Fatalf("relative UPLOADS_DIR in an installed config: err = %v, want one naming UPLOADS_DIR", err)
+	}
+
+	// Left unset, they default to absolute paths instead of the working
+	// copy's relative ones.
+	isolateEnv(t)
+	cfg, err := LoadConfigFrom(writeEnv(t, filepath.Join(t.TempDir(), "stockroom.env"), "x"))
+	if err != nil {
+		t.Fatalf("an installed config without UPLOADS_DIR or SIGNIN_PHOTOS_DIR: %v", err)
+	}
+	if !filepath.IsAbs(cfg.UploadsDir) || !filepath.IsAbs(cfg.SignInPhotosDir) {
+		t.Errorf("defaults = %q and %q, want absolute paths", cfg.UploadsDir, cfg.SignInPhotosDir)
 	}
 
 	// The same file found as a working copy's .env keeps relative paths.

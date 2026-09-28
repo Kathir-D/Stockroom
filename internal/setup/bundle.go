@@ -119,7 +119,10 @@ system.txt   the operating system and how the service runs
 config.txt   the config file, with passwords, tokens and the admin's number removed
 service.log  the service's recent output, with secrets removed
 
-Nothing from the database is in here: no names, no student numbers, no loans.
+No records from the database are in here: no names, no student numbers, no
+checkouts. From the database it holds only what doctor.txt says about it: the
+PostgreSQL version, whether the schema is current, the folders chosen in the
+admin panel and how long ago the last backup succeeded.
 Read it before you send it anywhere.
 `
 

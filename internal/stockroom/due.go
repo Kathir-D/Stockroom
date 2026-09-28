@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// When a loan is due (CLAUDE.md §7, decided 2026-09-26).
+// When a checkout is due (CLAUDE.md §7, decided 2026-09-26).
 //
 // The borrower picks the last day they will use the item, and it is due at the
 // closing time (app_settings.due_time, 15:30 unless changed) on the next
@@ -16,7 +16,7 @@ import (
 // hours, and the overdue block then stopped that student borrowing anything.
 //
 // A school day is a weekday that isn't one of the closed dates an admin keeps
-// in Admin → Settings (app_settings.closed_dates), so a loan ending before a
+// in Admin → Settings (app_settings.closed_dates), so a checkout ending before a
 // holiday falls due on the first day back.
 //
 // MaxCheckoutDays caps the *last day of use*: by default it may be at most
@@ -38,9 +38,9 @@ func parseDueTime(s string) (hour, minute int, err error) {
 	return t.Hour(), t.Minute(), nil
 }
 
-// loanRules is everything that decides a due date and whether a checkout
+// checkoutRules is everything that decides a due date and whether a checkout
 // may go ahead, read from app_settings once per checkout.
-type loanRules struct {
+type checkoutRules struct {
 	hour, minute int
 	// maxDays caps the last day of use, in days after today.
 	maxDays int
@@ -55,15 +55,15 @@ type loanRules struct {
 // about sixty weekdays.
 const maxClosedRun = 120
 
-// defaultLoanRules is what a fresh install uses, and what a failed settings
+// defaultCheckoutRules is what a fresh install uses, and what a failed settings
 // read falls back to so it can't stop a checkout.
-func defaultLoanRules() loanRules {
+func defaultCheckoutRules() checkoutRules {
 	h, m, _ := parseDueTime(DefaultDueTime)
-	return loanRules{hour: h, minute: m, maxDays: MaxCheckoutDays, overdueBlocks: true}
+	return checkoutRules{hour: h, minute: m, maxDays: MaxCheckoutDays, overdueBlocks: true}
 }
 
 // schoolDay reports whether t's date is a weekday the school is open.
-func (r loanRules) schoolDay(t time.Time) bool {
+func (r checkoutRules) schoolDay(t time.Time) bool {
 	if t.Weekday() == time.Saturday || t.Weekday() == time.Sunday {
 		return false
 	}
@@ -72,7 +72,7 @@ func (r loanRules) schoolDay(t time.Time) bool {
 
 // nextSchoolDayAt is the closing time on the first school day strictly after
 // the date day falls on, in day's location.
-func (r loanRules) nextSchoolDayAt(day time.Time) time.Time {
+func (r checkoutRules) nextSchoolDayAt(day time.Time) time.Time {
 	y, m, d := day.Date()
 	next := time.Date(y, m, d+1, r.hour, r.minute, 0, 0, day.Location())
 	for i := 0; !r.schoolDay(next) && i < maxClosedRun; i++ {
@@ -84,7 +84,7 @@ func (r loanRules) nextSchoolDayAt(day time.Time) time.Time {
 // closingAtOrAfter is the first closing time on a school day at or after t,
 // in t's location. A due time the picker computed is already one, so it comes
 // back unchanged.
-func (r loanRules) closingAtOrAfter(t time.Time) time.Time {
+func (r checkoutRules) closingAtOrAfter(t time.Time) time.Time {
 	y, m, d := t.Date()
 	c := time.Date(y, m, d, r.hour, r.minute, 0, 0, t.Location())
 	if c.Before(t) || !r.schoolDay(c) {
@@ -93,30 +93,30 @@ func (r loanRules) closingAtOrAfter(t time.Time) time.Time {
 	return c
 }
 
-// dueFor is when a loan is due whose borrower picked lastDay as the last day
+// dueFor is when a checkout is due whose borrower picked lastDay as the last day
 // of use. The date picker computes the same thing in due.ts.
-func (r loanRules) dueFor(lastDay time.Time) time.Time {
+func (r checkoutRules) dueFor(lastDay time.Time) time.Time {
 	return r.nextSchoolDayAt(lastDay)
 }
 
 // latestDueAt is the latest due time a checkout made at now may have: the
 // closing time after the last day of use maxDays out.
-func (r loanRules) latestDueAt(now time.Time) time.Time {
+func (r checkoutRules) latestDueAt(now time.Time) time.Time {
 	y, m, d := now.Date()
 	return r.nextSchoolDayAt(time.Date(y, m, d+r.maxDays, 0, 0, 0, 0, now.Location()))
 }
 
-// loanRules reads the rules, falling back to the defaults so a settings read
+// checkoutRules reads the rules, falling back to the defaults so a settings read
 // that fails can't stop a checkout.
-func (db *DB) loanRules(ctx context.Context) loanRules {
-	r := defaultLoanRules()
+func (db *DB) checkoutRules(ctx context.Context) checkoutRules {
+	r := defaultCheckoutRules()
 	var dueTime string
 	var closed []string
 	err := db.Pool.QueryRow(ctx, `
 		select due_time, max_checkout_days, overdue_blocks_checkout, closed_dates::text[]
 		from app_settings where id = true`).Scan(&dueTime, &r.maxDays, &r.overdueBlocks, &closed)
 	if err != nil {
-		return defaultLoanRules()
+		return defaultCheckoutRules()
 	}
 	if h, m, err := parseDueTime(dueTime); err == nil {
 		r.hour, r.minute = h, m
@@ -140,7 +140,7 @@ type CheckoutRules struct {
 
 // CheckoutRules reads the rules. Public: /signin/config carries them.
 func (db *DB) CheckoutRules(ctx context.Context) CheckoutRules {
-	r := db.loanRules(ctx)
+	r := db.checkoutRules(ctx)
 	closed := make([]string, 0, len(r.closed))
 	for d := range r.closed {
 		closed = append(closed, d)

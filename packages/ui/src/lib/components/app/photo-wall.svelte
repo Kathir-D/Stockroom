@@ -193,7 +193,8 @@
     A scoped <style> block rather than utilities, for what Tailwind has no good
     spelling of: the mask and the sprocket holes. They are component-local, so
     they don't belong in tokens.css, which owns colours, radii, shadows and
-    durations. The one colour here, the film base, is a token (--film).
+    durations. The one colour here, the film base, is a token (--film), and so
+    is the frames' radius (--radius-xs).
   */
 
   /*
@@ -257,7 +258,7 @@
       var(--ground) 5px 13px,
       transparent 13px 18px
     );
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
   }
 
   .frame::before {
@@ -273,7 +274,7 @@
     width: 100%;
     aspect-ratio: 3 / 2;
     object-fit: cover;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     background: var(--raised);
     filter: saturate(0.75);
   }
