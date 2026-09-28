@@ -384,3 +384,98 @@ jobs:
       - name: Docs-only change
         if: steps.changes.outputs.code != 'true'
         run: echo "Only documentation changed; nothing to build or test."
+
+  # Builds the .deb, installs it, runs setup, and installs a second .deb
+  # carrying one more migration over it (packaging/linux/smoke.sh). The
+  # runner is a full VM with systemd, so the ubuntu variant tests the real
+  # service. debian-12 runs in a container with no systemd, so it uses
+  # setup --no-service and starts the server by hand.
+  package-linux:
+    name: package-linux (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ubuntu-24.04, debian-12]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - 'go.mod'
+              - 'go.sum'
+              - 'internal/**'
+              - 'server/**'
+              - 'supabase/**'
+              - 'packages/**'
+              - 'web-app/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/**'
+              - '.github/workflows/**'
+              - 'examples/**'
+              - 'deploy/camera/**'
+              - 'packaging/**'
+              - '.goreleaser.yaml'
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.code == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-go@v5
+        if: steps.changes.outputs.code == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        if: steps.changes.outputs.code == 'true'
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+
+      # The second package is the first plus one dummy migration, so
+      # installing it over the first is an upgrade that must dump the
+      # database before migrating.
+      - name: Build two packages
+        if: steps.changes.outputs.code == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: unused
+        run: |
+          goreleaser release --snapshot --clean --skip=archive,homebrew
+          mkdir -p pkgs && cp dist/stockroom_amd64.deb pkgs/first.deb
+          echo "create table upgrade_probe (id int);" > supabase/migrations/29990101000000_upgrade_probe.sql
+          goreleaser release --snapshot --clean --skip=archive,homebrew
+          cp dist/stockroom_amd64.deb pkgs/second.deb
+          rm supabase/migrations/29990101000000_upgrade_probe.sql
+
+      - name: Install, set up and upgrade (systemd)
+        if: steps.changes.outputs.code == 'true' && matrix.target == 'ubuntu-24.04'
+        run: sudo packaging/linux/smoke.sh "$PWD/pkgs/first.deb" "$PWD/pkgs/second.deb"
+
+      - name: Install, set up and upgrade (debian:12, no systemd)
+        if: steps.changes.outputs.code == 'true' && matrix.target == 'debian-12'
+        run: |
+          docker run --rm -v "$PWD/pkgs:/pkgs:ro" \
+            -v "$PWD/packaging/linux/smoke.sh:/smoke.sh:ro" debian:12 bash -c '
+              apt-get update -q && apt-get install -y -q curl procps &&
+              bash /smoke.sh /pkgs/first.deb /pkgs/second.deb --no-service'
+
+      - name: Server log on failure
+        if: failure() && matrix.target == 'ubuntu-24.04'
+        run: sudo journalctl -u stockroom -n 100 --no-pager
+
+      - name: Docs-only change
+        if: steps.changes.outputs.code != 'true'
+        run: echo "Only documentation changed; nothing to package."

@@ -15,7 +15,8 @@ if [ "$1" = "configure" ]; then
     if [ -d /run/systemd/system ]; then
       systemctl try-restart stockroom.service >/dev/null 2>&1 || true
     fi
-  elif [ ! -f /etc/stockroom/stockroom.env ]; then
+  elif [ ! -f /etc/stockroom/stockroom.env ] && [ -z "${STOCKROOM_GET:-}" ]; then
+    # get.sh sets STOCKROOM_GET and runs setup itself next.
     echo "Stockroom is installed. Finish with: sudo stockroom setup"
   fi
 fi

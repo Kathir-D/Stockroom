@@ -68,10 +68,12 @@ func DefaultPaths(goos string) Paths {
 	switch goos {
 	case "darwin":
 		prefix := stockroom.BrewPrefix()
-		// A Homebrew binary runs from its Cellar, whose path changes with
-		// every upgrade. The daemon points at the stable link instead.
-		if rel, err := filepath.Rel(filepath.Join(prefix, "Cellar"), bin); err == nil && !startsWithDotDot(rel) {
-			bin = filepath.Join(prefix, "bin", "stockroom")
+		// A Homebrew binary runs from its Caskroom (or Cellar), whose path
+		// changes with every upgrade. The daemon points at the stable link.
+		for _, dir := range []string{"Caskroom", "Cellar"} {
+			if rel, err := filepath.Rel(filepath.Join(prefix, dir), bin); err == nil && !startsWithDotDot(rel) {
+				bin = filepath.Join(prefix, "bin", "stockroom")
+			}
 		}
 		return Paths{
 			ConfigFile:    filepath.Join(prefix, "var", "stockroom", "stockroom.env"),

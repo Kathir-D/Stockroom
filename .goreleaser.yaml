@@ -97,9 +97,11 @@ nfpms:
       postremove: packaging/linux/postrm
 
 # The macOS install. GoReleaser 2.10 deprecated formulas (`brews`) for casks.
-# A cask can't carry a `test do` block, so `stockroom version` is checked by
-# release.yml instead. Homebrew quarantines cask downloads and the binary
-# isn't signed, so the post-install hook clears the attribute.
+# A cask can't carry a `test do` block, so release.yml runs `stockroom version`
+# instead. Homebrew quarantines cask downloads and the binary isn't signed, so
+# the post-install hook clears the attribute. release.yml builds with
+# --skip=publish and commits the generated cask to the tap itself, so the
+# repository and token below are only read, never used to push.
 homebrew_casks:
   - name: stockroom
     ids: [stockroom]
@@ -111,8 +113,8 @@ homebrew_casks:
       name: homebrew-stockroom
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     commit_author:
-      name: stockroom-release
-      email: gokathird@gmail.com
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
     dependencies:
       - formula: postgresql@17
       - formula: rclone
