@@ -59,7 +59,7 @@ These steps need the owner. An agent can't create repositories, secrets or tags 
 5. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
 6. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install kathir-d/stockroom/stockroom && stockroom version` on a Mac.
 
-If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. A re-run with nothing new to commit succeeds without pushing.
+If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. The re-run finds the release, replaces its files, and goes on to the tap. A re-run with nothing new to commit succeeds without pushing.
 
 The cask is unsigned. Its post-install hook clears the quarantine flag so macOS runs it. `xattr -l $(brew --prefix)/bin/stockroom` should print nothing.
 

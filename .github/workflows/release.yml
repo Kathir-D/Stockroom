@@ -90,6 +90,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          # A re-run (say, after adding the tap secret) finds the release
+          # already up. Replace its files and go on to the tap step.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The release for ${TAG} exists. Replacing its files."
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/*.deb dist/*.tar.gz dist/checksums.txt
+            exit 0
+          fi
           flags=()
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
@@ -105,7 +113,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releasing) and re-run this job."
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releases) and re-run this job."
             exit 1
           fi
           git clone --depth 1 \
