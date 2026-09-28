@@ -64,8 +64,9 @@ kept.
 ## Printing stickers
 
 **Admin → Assets → Print labels** makes a PDF of barcode stickers for whatever
-the list is showing. Pick the label size by what it goes on, and **print at
-100%**, never "fit to page", or the bars come out the wrong size.
+the list is showing. Each sticker is the barcode with the serial printed under
+it. Pick the label size by what it goes on, and **print at 100%**, never "fit
+to page", or the bars come out the wrong size.
 
 - Matte labels, not glossy. Glossy ones reflect the lamp and will not scan.
 - Put them where hands do not rub: the underside of a camera, the end of a
@@ -103,7 +104,8 @@ rename the columns to match, delete the rest, and save as CSV.
   anyone, and then offers to print their ID cards.
 
 If your students' ID cards have no barcode, **Print ID cards** makes a sheet of
-cards that do, for everyone the list is showing. Search first to print a few.
+cards that do, for everyone the list is showing. Each card has the student's
+name, the barcode and the number. Search first to print a few.
 
 **Forgotten password?** The key icon on the student's row is **Set password**.
 It signs them out everywhere. Remind them that scanning the card never needs

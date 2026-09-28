@@ -421,3 +421,9 @@ ROADMAP A4's two user items, as one dialog: Admin → Users → Paste names.
 - [x] **It only adds.** A number that already belongs to somebody is an error on that line. Updating names is the roster import's job, and a paste that renamed an account would hand that person's loans to someone else.
 - [x] **It previews, then adds every line or none**, in one transaction under an advisory lock, so two admins can't be handed the same numbers. Any edit to the text throws the preview away.
 - [x] **It ends by offering the new people's ID cards.** Someone numbered from a range has no card, and typing a number needs a password they haven't set.
+
+**Closed (2026-09-28, what a label and an ID card show)**
+The owner's request.
+- [x] **An item label shows the barcode and the serial under it, and nothing else.** The item's name is gone. The bars take the height it used, which helps most on a lens barrel, where only a narrow band of a curved label faces the scanner. A printed name also went stale when an item was renamed and the sticker stayed. This reverses the name line from Phase B (2026-09-22) and the rule that dropped it only when the bars fell under 6mm.
+- [x] **An ID card shows the name, the barcode and the number.** The "Stockroom - scan to sign in" line is gone, the bars grew from 20mm to 24mm, and the three lines sit centred on the card.
+- [x] **The scan rules stay as they were**: a module at least 0.25mm wide and a quiet zone of 10 modules each side. The serial length each layout fits is unchanged, because it depends on width, not height.

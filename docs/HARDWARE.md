@@ -38,7 +38,7 @@ Then test it:
 
 ## Labels
 
-**Admin → Assets → Print labels** prints Code 128 barcode stickers on standard label sheets. It offers three sizes, named by what they go on, in US Letter (Avery 5167, 5160, 5162) and A4 (Avery L7651, L7160, L7163) versions. Any brand that matches those layouts works.
+**Admin → Assets → Print labels** prints Code 128 barcode stickers on standard label sheets. It offers three sizes, named by what they go on, in US Letter (Avery 5167, 5160, 5162) and A4 (Avery L7651, L7160, L7163) versions. Any brand that matches those layouts works. Each sticker holds the barcode and the serial under it, with no item name.
 
 - **Matte labels.** Glossy ones reflect the light and won't scan.
 - **Print at 100%**, never "fit to page", or the bars come out the wrong size.

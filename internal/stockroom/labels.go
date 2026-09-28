@@ -65,7 +65,7 @@ func (db *DB) AssetLabelsPDF(ctx context.Context, actor Actor, req LabelRequest)
 		if a.SerialNumber == nil || strings.TrimSpace(*a.SerialNumber) == "" {
 			return nil, fmt.Errorf("%w: %q has no serial number, so it cannot have a barcode", ErrInvalid, a.Name)
 		}
-		cells = append(cells, labelCell{Code: *a.SerialNumber, Title: a.Name})
+		cells = append(cells, labelCell{Code: *a.SerialNumber})
 	}
 	return renderLabelSheet(layout, cells, req.StartAt)
 }
@@ -112,7 +112,8 @@ func (db *DB) assetsForLabels(ctx context.Context, ids []string) ([]Asset, error
 	return out, nil
 }
 
-// labelCell is one sticker: what it encodes, and what a human reads on it.
+// labelCell is one sticker: what it encodes, and on an ID card the name
+// printed above the bars. Item labels leave Title empty.
 type labelCell struct {
 	Code  string
 	Title string
@@ -162,9 +163,10 @@ func renderLabelSheet(layout LabelLayout, cells []labelCell, startAt int) ([]byt
 
 // drawLabel draws one sticker at (x, y).
 //
-// The layout inside a label is: the item's name across the top in small type,
-// the bars, then the serial in readable text underneath. The serial appears
-// twice on purpose -- once for the scanner and once for a person -- because
+// The layout inside a label is the bars, then the serial in readable text
+// underneath, and nothing else. The owner asked for no item name: the bars
+// get the height the name used to take, and a name goes stale when an item is
+// renamed while the sticker stays on it. The serial appears twice on purpose -- once for the scanner and once for a person -- because
 // the recovery path when a barcode stops scanning is somebody reading the
 // number off and typing it, and a label that only a machine can read has no
 // such path.
@@ -236,43 +238,15 @@ func drawLabel(pdf *fpdf.Fpdf, tr translator, layout LabelLayout, x, y float64, 
 			ErrInvalid, cell.Code, layout.Key, moduleW, minModuleMM)
 	}
 
-	// Type sizes and bar height are derived from the label, so the 44mm
+	// Type size and bar height are derived from the label, so the 44mm
 	// battery label and the 66mm lens label are the same design at two sizes
-	// rather than two designs.
-	titleH := availH * 0.22
+	// rather than two designs. The serial line takes a fifth of the height and
+	// the bars take the rest. Tall bars matter most on a lens barrel, where the
+	// label curves away and only a narrow band faces the scanner.
 	textH := availH * 0.22
-	barH := availH - titleH - textH
-
-	// minBarMM is the height below which the item name is dropped to buy the
-	// barcode more room.
-	//
-	// Bar height is not decoration: a scanner reads a horizontal slice, so a
-	// short symbol has to be crossed almost exactly square to be read at all.
-	// That is fine on a flat camera body and is the failure case on **a lens
-	// barrel**, where the label curves away and only a narrow band of it faces
-	// the scanner at any angle. 6mm rather than the 4mm this started at,
-	// because the small layouts are precisely the ones that go on curved
-	// things: on the 80-per-sheet label it moves the bars from 5.8mm to 8.0mm,
-	// which is the difference between "hold it just right" and "wave it past".
-	//
-	// The name is what gets dropped because the serial printed underneath is
-	// what a person needs (and stays), while the bars are what the scanner
-	// needs. A label that a machine cannot read has no recovery path; one
-	// without the item's name on it is merely less pleasant.
-	const minBarMM = 6.0
-	if barH < minBarMM {
-		titleH = 0
-		barH = availH - textH
-	}
+	barH := availH - textH
 
 	cur := y + padY
-
-	if titleH > 0 && cell.Title != "" {
-		pdf.SetFont("Helvetica", "", ptFor(titleH))
-		pdf.SetXY(x+padX, cur)
-		pdf.CellFormat(availW, titleH, truncateForLabel(pdf, tr, cell.Title, availW), "", 0, "C", false, 0, "")
-		cur += titleH
-	}
 
 	// The bars. Each run of set modules is one filled rectangle; adjacent set
 	// modules are merged into a single wide bar rather than drawn one at a
@@ -457,7 +431,8 @@ func renderCardSheet(cards []labelCell) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// drawCard draws one ID card: a cut guide, the name, the barcode, the number.
+// drawCard draws one ID card: a cut guide, the name, the barcode, the number,
+// and nothing else.
 //
 // The cut guide is a hairline rectangle rather than crop marks. Crop marks are
 // what a print shop wants; a teacher with scissors wants a line to cut along,
@@ -477,20 +452,18 @@ func drawCard(pdf *fpdf.Fpdf, tr translator, layout LabelLayout, x, y float64, c
 
 	pdf.SetTextColor(0, 0, 0)
 	pdf.SetFont("Helvetica", "B", 13)
-	pdf.SetXY(x+pad, y+pad)
+	// Name 7mm, a 2mm gap, bars 24mm, a 1mm gap, the number 5mm: 39mm in all,
+	// centred on the card so the cut leaves even margins.
+	const contentH = 7 + 2 + 24 + 1 + 5
+	top := y + (layout.LabelH-contentH)/2
+	pdf.SetXY(x+pad, top)
 	pdf.CellFormat(availW, 7, truncateForLabel(pdf, tr, card.Title, availW), "", 0, "C", false, 0, "")
-
-	pdf.SetFont("Helvetica", "", 8)
-	pdf.SetTextColor(110, 110, 110)
-	pdf.SetXY(x+pad, y+pad+7)
-	pdf.CellFormat(availW, 4, tr("Stockroom - scan to sign in"), "", 0, "C", false, 0, "")
-	pdf.SetTextColor(0, 0, 0)
 
 	const quietModules = 10
 	totalModules := float64(len(modules) + 2*quietModules)
 	moduleW := availW / totalModules
-	barY := y + pad + 13
-	barH := 20.0
+	barY := top + 9
+	barH := 24.0
 
 	pdf.SetFillColor(0, 0, 0)
 	barX := x + pad + float64(quietModules)*moduleW

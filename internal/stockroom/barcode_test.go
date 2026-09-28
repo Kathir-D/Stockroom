@@ -19,7 +19,7 @@ func TestLabelSheetRenders(t *testing.T) {
 	// the shelf.
 	cells := make([]labelCell, layout.Cols*layout.Rows+1)
 	for i := range cells {
-		cells[i] = labelCell{Code: "SR-000" + string(rune('0'+i%10)), Title: "Test item"}
+		cells[i] = labelCell{Code: "SR-000" + string(rune('0'+i%10))}
 	}
 
 	pdf, err := renderLabelSheet(layout, cells, 0)
