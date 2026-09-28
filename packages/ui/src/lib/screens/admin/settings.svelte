@@ -203,7 +203,7 @@
     try {
       const input = build()
       adopt(await api.saveSettings(input))
-      // The loan rules, the idle timeout and the scanner speed are read from
+      // The checkout rules, the idle timeout and the scanner speed are read from
       // the rules store everywhere else, so this machine follows at once.
       void rules.load(true)
       toast.success("Settings saved")
@@ -226,7 +226,7 @@
       }
       return {
         due_time: value,
-        max_checkout_days: whole(draft.max_checkout_days, "Longest loan", 1, 60),
+        max_checkout_days: whole(draft.max_checkout_days, "Longest checkout", 1, 60),
         overdue_blocks_checkout: draft.overdue_blocks_checkout,
         closed_dates: parseClosedDates(draft.closed_dates),
       }
@@ -412,7 +412,7 @@
     <section class="flex flex-col gap-3 rounded-xl border border-line-strong bg-surface p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-fg">
         <ClockIcon class="size-4 text-fg-muted" aria-hidden="true" />
-        Loans
+        Checkouts
       </h2>
       <p class="text-xs text-fg-muted">
         A student picks the last day they need an item. It is due back at this time on the next school
@@ -425,7 +425,7 @@
           <Input id="due-time" bind:value={draft.due_time} inputmode="numeric" placeholder="15:30" />
         </div>
         <div class="flex w-40 flex-col gap-1.5">
-          <Label for="max-checkout-days">Longest loan (days)</Label>
+          <Label for="max-checkout-days">Longest checkout (days)</Label>
           <Input id="max-checkout-days" bind:value={draft.max_checkout_days} inputmode="numeric" placeholder="7" />
         </div>
       </div>
@@ -447,7 +447,7 @@
           class="font-mono text-sm"
         />
         <p class="text-xs text-fg-faint">
-          One date or range per line. A loan never falls due on one of these days; it moves to the
+          One date or range per line. A checkout never falls due on one of these days; it moves to the
           first school day after. Weekends are always closed, so leave them out.
         </p>
       </div>
@@ -456,7 +456,7 @@
       {/if}
       <div>
         <Button disabled={saving === "checkout"} onclick={saveCheckout}>
-          {saving === "checkout" ? "Saving…" : "Save loan rules"}
+          {saving === "checkout" ? "Saving…" : "Save checkout rules"}
         </Button>
       </div>
     </section>

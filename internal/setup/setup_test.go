@@ -172,7 +172,7 @@ func TestSetupFreshLinuxInstall(t *testing.T) {
 	}
 
 	unit, err := os.ReadFile(env.Paths.LocalUnit)
-	if err != nil || !strings.Contains(string(unit), "ExecStart=/usr/bin/stockroom serve --config /etc/stockroom/stockroom.env") {
+	if err != nil || !strings.Contains(string(unit), "ExecStart=/usr/bin/stockroom serve --config "+env.Paths.ConfigFile+"\n") {
 		t.Errorf("no local unit for a binary outside the package: %v\n%s", err, unit)
 	}
 	dropIn, _ := os.ReadFile(env.Paths.DropIn)
@@ -196,7 +196,7 @@ func TestSetupRunsAgainAsARepair(t *testing.T) {
 	before, _ := os.ReadFile(env.Paths.ConfigFile)
 
 	os.MkdirAll(filepath.Dir(env.Paths.PackagedUnit), 0o755)
-	os.WriteFile(env.Paths.PackagedUnit, []byte(systemdUnit("/usr/bin/stockroom")), 0o644)
+	os.WriteFile(env.Paths.PackagedUnit, []byte(systemdUnit("/usr/bin/stockroom", linuxConfigFile)), 0o644)
 	os.Remove(env.Paths.LocalUnit)
 	run.cmds = nil
 	if err := Setup(context.Background(), env, nonInteractive()); err != nil {
@@ -211,6 +211,56 @@ func TestSetupRunsAgainAsARepair(t *testing.T) {
 	}
 	if _, err := os.Stat(env.Paths.LocalUnit); err == nil {
 		t.Error("wrote a local unit although the package installed one")
+	}
+}
+
+// TestSetupWithAConfigFlag: setup --config writes the config there and points
+// the packaged unit at it through the drop-in, and a repair run without the
+// flag keeps using it.
+func TestSetupWithAConfigFlag(t *testing.T) {
+	env, _, out := testEnv(t)
+	os.MkdirAll(filepath.Dir(env.Paths.PackagedUnit), 0o755)
+	os.WriteFile(env.Paths.PackagedUnit, []byte(systemdUnit("/usr/bin/stockroom", linuxConfigFile)), 0o644)
+	defaultConfig := env.Paths.ConfigFile
+	cfg := filepath.Join(t.TempDir(), "school", "stockroom.env")
+	opts := nonInteractive()
+	opts.ConfigFile = cfg
+	if err := Setup(context.Background(), env, opts); err != nil {
+		t.Fatalf("Setup: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(cfg); err != nil {
+		t.Fatalf("no config at --config: %v", err)
+	}
+	if _, err := os.Stat(defaultConfig); err == nil {
+		t.Error("wrote the default config as well")
+	}
+	want := "ExecStart=\nExecStart=/usr/bin/stockroom serve --config " + cfg + "\nReadWritePaths=" + filepath.Dir(cfg) + "\n"
+	if dropIn, _ := os.ReadFile(env.Paths.DropIn); !strings.Contains(string(dropIn), want) {
+		t.Errorf("drop-in = %q, want it to contain %q", dropIn, want)
+	}
+
+	env.Paths.ConfigFile = defaultConfig
+	if err := Setup(context.Background(), env, nonInteractive()); err != nil {
+		t.Fatalf("repair Setup: %v\n%s", err, out)
+	}
+	if env.Paths.ConfigFile != cfg {
+		t.Errorf("the repair run used %s, want the --config file %s", env.Paths.ConfigFile, cfg)
+	}
+	if _, err := os.Stat(defaultConfig); err == nil {
+		t.Error("the repair run wrote the default config")
+	}
+}
+
+func TestCheckConfigPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("setup runs on Linux and macOS")
+	}
+	if _, err := checkConfigPath("/srv/my school/stockroom.env"); err == nil {
+		t.Error("accepted a path with a space, which ExecStart would split")
+	}
+	got, err := checkConfigPath("stockroom.env")
+	if err != nil || !filepath.IsAbs(got) {
+		t.Errorf("checkConfigPath(relative) = %q, %v; want an absolute path", got, err)
 	}
 }
 
@@ -379,7 +429,7 @@ func TestPackagedUnitMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := systemdUnit("/usr/bin/stockroom"); string(raw) != want {
+	if want := systemdUnit("/usr/bin/stockroom", linuxConfigFile); string(raw) != want {
 		t.Errorf("packaging/linux/stockroom.service differs from systemdUnit:\n%s\nwant:\n%s", raw, want)
 	}
 }

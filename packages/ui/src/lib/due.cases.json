@@ -1,0 +1,22 @@
+{
+  "_comment": "Due dates both due.go and due.ts must agree on. due_test.go and due.test.ts each run every case. Times are wall-clock, no zone.",
+  "dueFor": [
+    { "name": "Monday to Tuesday", "lastDay": "2026-09-28", "dueTime": "15:30", "closed": [], "want": "2026-09-29T15:30" },
+    { "name": "Friday to Monday", "lastDay": "2026-10-02", "dueTime": "15:30", "closed": [], "want": "2026-10-05T15:30" },
+    { "name": "Saturday to Monday", "lastDay": "2026-10-03", "dueTime": "08:05", "closed": [], "want": "2026-10-05T08:05" },
+    { "name": "Sunday to Monday", "lastDay": "2026-10-04", "dueTime": "15:30", "closed": [], "want": "2026-10-05T15:30" },
+    { "name": "two closed days after Monday", "lastDay": "2026-09-28", "dueTime": "15:30", "closed": ["2026-09-29", "2026-09-30"], "want": "2026-10-01T15:30" },
+    { "name": "a closed Monday after Friday", "lastDay": "2026-10-02", "dueTime": "15:30", "closed": ["2026-10-05"], "want": "2026-10-06T15:30" },
+    { "name": "a closed day that is not next is ignored", "lastDay": "2026-09-28", "dueTime": "15:30", "closed": ["2026-09-30"], "want": "2026-09-29T15:30" },
+    { "name": "the winter break", "lastDay": "2026-12-18", "dueTime": "15:30", "closed": ["2026-12-21", "2026-12-22", "2026-12-23", "2026-12-24", "2026-12-25", "2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01"], "want": "2027-01-04T15:30" },
+    { "name": "across a month end", "lastDay": "2026-10-30", "dueTime": "07:45", "closed": [], "want": "2026-11-02T07:45" },
+    { "name": "across a leap day", "lastDay": "2028-02-28", "dueTime": "15:30", "closed": ["2028-02-29"], "want": "2028-03-01T15:30" }
+  ],
+  "latestDue": [
+    { "name": "seven days from a Monday", "now": "2026-09-28T10:00", "maxDays": 7, "dueTime": "15:30", "closed": [], "want": "2026-10-06T15:30" },
+    { "name": "seven days, late in the day", "now": "2026-09-28T16:00", "maxDays": 7, "dueTime": "15:30", "closed": [], "want": "2026-10-06T15:30" },
+    { "name": "the cap moves past closed dates", "now": "2026-09-28T10:00", "maxDays": 7, "dueTime": "15:30", "closed": ["2026-10-06"], "want": "2026-10-07T15:30" },
+    { "name": "one day from a Friday", "now": "2026-10-02T09:00", "maxDays": 1, "dueTime": "15:30", "closed": [], "want": "2026-10-05T15:30" },
+    { "name": "a longer cap", "now": "2026-09-28T10:00", "maxDays": 14, "dueTime": "12:00", "closed": [], "want": "2026-10-13T12:00" }
+  ]
+}

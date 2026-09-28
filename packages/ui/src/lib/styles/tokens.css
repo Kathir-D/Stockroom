@@ -200,6 +200,7 @@
 /* Cap Tailwind's radius ramp so nothing in the app can exceed 10px, and pin
    the fonts and the status hues as real utilities. */
 @theme {
+  --radius-xs: 2px; /* the photo wall's film frames and sprocket holes */
   --radius-sm: 4px; /* chips, thumbnails, checkboxes */
   --radius-md: 6px;
   --radius-lg: 6px; /* buttons, inputs, rows: shadcn reaches for rounded-lg */

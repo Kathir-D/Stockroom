@@ -85,7 +85,7 @@ func DefaultPaths(goos string) Paths {
 		}
 		return Paths{
 			ConfigFile:    filepath.Join(prefix, "var", "stockroom", "stockroom.env"),
-			DataDir:       filepath.Join(prefix, "var", "stockroom"),
+			DataDir:       stockroom.InstallDataDir("darwin"),
 			Binary:        bin,
 			CameraDir:     camera,
 			BrewPrefix:    prefix,
@@ -94,8 +94,8 @@ func DefaultPaths(goos string) Paths {
 		}
 	default:
 		return Paths{
-			ConfigFile:   "/etc/stockroom/stockroom.env",
-			DataDir:      "/var/lib/stockroom",
+			ConfigFile:   linuxConfigFile,
+			DataDir:      stockroom.InstallDataDir("linux"),
 			Binary:       bin,
 			PackagedUnit: "/lib/systemd/system/stockroom.service",
 			LocalUnit:    "/etc/systemd/system/stockroom.service",

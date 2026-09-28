@@ -484,8 +484,19 @@ func (db *DB) RebuildPhotoWallManifest(ctx context.Context, actor Actor) (PhotoW
 	if source == nil {
 		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall is not running. Sign in with Google first", ErrNotConfigured)
 	}
+	if err := db.logPhotoWallAction(ctx, actor, "signin_photo_wall_rebuild", "Re-listed the sign-in photo wall folder"); err != nil {
+		return PhotoWallStatus{}, err
+	}
 	source.Rebuild()
 	return db.photoWallStatus(ctx, f), nil
+}
+
+// logPhotoWallAction records an admin action on the wall that changes only
+// memory, in a transaction of its own (docs/adr/0003).
+func (db *DB) logPhotoWallAction(ctx context.Context, actor Actor, action, summary string) error {
+	return db.withLoggedTx(ctx, actorLogID(actor), "record "+action, func(tx pgx.Tx) error {
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: action, ActorID: actorLogID(actor), Summary: summary})
+	})
 }
 
 // SetPhotoWallSize is PUT /admin/photo-wall/size: how many photographs the
@@ -497,20 +508,15 @@ func (db *DB) SetPhotoWallSize(ctx context.Context, actor Actor, size int) (Phot
 	if size < MinPhotoWallSize || size > MaxPhotoWallSize {
 		return PhotoWallStatus{}, fmt.Errorf("%w: the wall holds between %d and %d photographs", ErrInvalid, MinPhotoWallSize, MaxPhotoWallSize)
 	}
-	tx, err := db.Pool.Begin(ctx)
+	err := db.withLoggedTx(ctx, actorLogID(actor), "save the photo wall size", func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `update app_settings set photo_wall_size = $1 where id = true`, size); err != nil {
+			return mapPgError("save the photo wall size", err)
+		}
+		return writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "signin_photo_wall_size", ActorID: actorLogID(actor),
+			Summary: fmt.Sprintf("Set the sign-in photo wall to %d photographs", size), Details: map[string]any{"size": size}})
+	})
 	if err != nil {
-		return PhotoWallStatus{}, fmt.Errorf("save the photo wall size: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `update app_settings set photo_wall_size = $1 where id = true`, size); err != nil {
-		return PhotoWallStatus{}, mapPgError("save the photo wall size", err)
-	}
-	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: "signin_photo_wall_size", ActorID: actorLogID(actor),
-		Summary: fmt.Sprintf("Set the sign-in photo wall to %d photographs", size), Details: map[string]any{"size": size}}); err != nil {
 		return PhotoWallStatus{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return PhotoWallStatus{}, fmt.Errorf("save the photo wall size: %w", err)
 	}
 	db.SignInPhotoWall().SetSize(size)
 
@@ -531,6 +537,11 @@ func (db *DB) ReshufflePhotoWall(ctx context.Context, actor Actor) (PhotoWallSta
 	wall := db.SignInPhotoWall()
 	if wall == nil {
 		return PhotoWallStatus{}, fmt.Errorf("%w: the sign-in photo wall is not running. Sign in with Google first", ErrNotConfigured)
+	}
+	// The row is written before the reshuffle, which cannot be undone, so a
+	// failed write refuses the action rather than leaving it unrecorded.
+	if err := db.logPhotoWallAction(ctx, actor, "signin_photo_wall_reshuffle", "Reshuffled the sign-in photo wall"); err != nil {
+		return PhotoWallStatus{}, err
 	}
 	wall.Reshuffle()
 	f, err := db.loadPhotoWallFolder(ctx)

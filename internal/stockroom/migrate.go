@@ -97,28 +97,43 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]string, err
 	return ran, nil
 }
 
-// ErrDatabaseNewer is a database that records a migration newer than any this
-// binary carries: somebody installed an older Stockroom over a newer one.
-// Serving would run old queries against a schema they were never written for.
+// ErrDatabaseNewer is a database that records a migration this binary does
+// not carry: somebody installed an older Stockroom over a newer one, or a
+// different build over this database. Serving would run queries against a
+// schema they were never written for.
 var ErrDatabaseNewer = errors.New("the database is newer than this version of Stockroom")
 
-// checkNotNewer refuses a database whose newest recorded version is past the
-// newest embedded file. A recorded version that is older and simply missing
-// from the set (a migration squashed away) is not this failure.
+// checkNotNewer refuses a database that records a migration version the
+// embedded set doesn't contain (ROADMAP §1). The one exception is a version
+// older than every embedded file: that is history a squash folded into the
+// first file, and the schema it built is already there.
 func checkNotNewer(files []migrationFile, applied map[string]bool) error {
-	newest := files[len(files)-1].version
-	var ahead []string
+	oldest, newest := files[0].version, files[len(files)-1].version
+	known := make(map[string]bool, len(files))
+	for _, f := range files {
+		known[f.version] = true
+	}
+	var ahead, unknown []string
 	for v := range applied {
-		if v > newest {
+		switch {
+		case known[v] || v < oldest:
+		case v > newest:
 			ahead = append(ahead, v)
+		default:
+			unknown = append(unknown, v)
 		}
 	}
-	if len(ahead) == 0 {
-		return nil
-	}
 	sort.Strings(ahead)
-	return fmt.Errorf("%w: it records migration %s and this binary stops at %s. Install the newer version of Stockroom",
-		ErrDatabaseNewer, ahead[len(ahead)-1], newest)
+	sort.Strings(unknown)
+	switch {
+	case len(ahead) > 0:
+		return fmt.Errorf("%w: it records migration %s and this binary stops at %s. Install the newer version of Stockroom",
+			ErrDatabaseNewer, ahead[len(ahead)-1], newest)
+	case len(unknown) > 0:
+		return fmt.Errorf("%w: it records migration %s, which this binary doesn't carry. A different build of Stockroom migrated it; install that build",
+			ErrDatabaseNewer, unknown[0])
+	}
+	return nil
 }
 
 // EmbeddedSchemaVersion is the newest migration version in fsys, the schema

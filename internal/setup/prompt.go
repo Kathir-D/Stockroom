@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"stockroom/internal/stockroom"
 )
 
 // Prompter asks the person running setup a question.
@@ -91,7 +93,7 @@ func checkFailsafe(f failsafe) error {
 	if n := len(f.password); n < 8 || n > 72 {
 		return errors.New("the failsafe admin password must be 8 to 72 characters")
 	}
-	if strings.ContainsAny(f.password, "'\r\n") {
+	if !stockroom.EnvValueWritable(f.password) {
 		return errors.New("the failsafe admin password cannot contain a single quote (') or a line break")
 	}
 	return nil

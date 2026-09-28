@@ -405,7 +405,7 @@ ROADMAP A4.
   - the config
   - the service's last 2,000 log lines
 - [x] **Secrets are removed**: the values of config keys named like a password, secret, token, key or student number, a password inside a URL, GitHub and Google tokens, and bearer headers. The failsafe admin's number counts as a secret, because a student number is a working scan login.
-- [x] **Nothing from the database goes in.** A bundle is for an issue tracker, and the database holds the roster.
+- [x] **No records from the database go in.** A bundle is for an issue tracker, and the database holds the roster. Doctor's report does read the database, and the bundle keeps what it says: the PostgreSQL version, whether the schema is current, the folders chosen in the admin panel and the age of the last backup. That is settings, not records (corrected 2026-09-28).
 - [x] **A config that doesn't load still goes in**, raw and redacted, along with the service log, because that is when a bundle is most needed.
 - [x] **Linux needs sudo** to read the system journal. The zip is then handed to the account that ran sudo.
 
@@ -435,3 +435,18 @@ ROADMAP A4. Admin → Assets → Photo is now `asset-photo-dialog.svelte`, which
 - [x] **The webcam is a snapshot through a canvas, saved as a JPEG at quality 0.9.** It asks for 1280×960 and takes what the camera gives.
 - [x] **The camera stops whenever the dialog closes**, by Cancel, Escape, Save, or leaving the screen. A webcam left open keeps its light on and blocks the closet camera and video calls.
 - [x] **A camera error says what to do**: a blocked permission points at the site settings, a busy camera at the program holding it, and a missing one at choosing a file.
+
+**Closed (2026-09-28, fixes from the two-axis review of #54)**
+A standards and spec review of `feat/roadmap-production-path`.
+- [x] **Doctor's PostgreSQL query moved into `internal/stockroom`** (`DB.ServerInfo`), so `internal/setup` reads the database only through the package (CLAUDE.md §4).
+- [x] **Setup's config is written by `envfile.go`** (`CreateEnvFile`, `EnvQuote`), which stays the only writer of a `.env`. The rule refusing a single quote or a line break in a value is now in one place, and the failsafe check uses it.
+- [x] **Reshuffle and Re-list on the photo wall write an activity row**, in a transaction of their own before the in-memory change, as every admin action must (`docs/adr/0003`). Setting the size uses `withLoggedTx` like the rest of the package.
+- [x] **"Loan" became "checkout"** in the Settings screen (the card is **Checkouts**, with **Longest checkout (days)**), in the Go names (`checkoutRules`), and in the docs this branch touched, per `CONTEXT.md`. The migration keeps its filename, since a renamed migration is a different migration to every database that ran it.
+- [x] **`due.go` and `due.ts` run the same cases**, `packages/ui/src/lib/due.cases.json`, so the two copies of the due-date rule can't drift apart.
+- [x] **`--config` works on every subcommand.** `setup --config` writes the config there and, on Linux, adds `ExecStart=` to the drop-in so the packaged unit reads it. A repair run without the flag finds it in the drop-in and keeps it. `version --config` prints which file it would read. The path can't contain anything a unit's `ExecStart` would split or expand.
+- [x] **`serve` refuses any recorded migration the binary doesn't carry**, as ROADMAP §1 asked, not only one past the newest. A gap in the middle means a different build migrated the database. A version older than the first embedded file still passes, because that is history a squash folded away.
+- [x] **An installed config that leaves out `UPLOADS_DIR` or `SIGNIN_PHOTOS_DIR` gets absolute defaults** under the install's data directory, the same folders setup writes, instead of the working copy's relative ones, which it then refused. A relative value somebody wrote is still refused.
+- [x] **`apt purge` also removes setup's drop-in**, and the config a `--config` drop-in names, because that file holds the database password too.
+- [x] **`get.sh` judges a derivative by its base**: an Ubuntu codename before noble, or a numbered `/etc/debian_version` before 12, is too old. A testing or rolling base passes.
+- [x] **Two claims were narrowed to what is true.** The support bundle holds no records, but doctor's report does say what it read from the database. The release split keeps the tokens away from dependency scripts; it does not vouch for the files the build made.
+- [x] **Left as they are**: the label and ID card changes and pasting an asset photo, which the owner asked for, and `SIGNIN_PHOTOS_DIR` staying (2026-09-27, above).

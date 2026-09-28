@@ -13,10 +13,11 @@ import (
 // key that is not there yet, and leaves every other line -- comments,
 // DATABASE_URL, blank lines -- byte for byte as it was.
 //
-// This is the only code that writes the file, and it exists for exactly one
+// This file is the only code that writes a .env. setEnvValues exists for one
 // thing: the failsafe admin, which must survive the database being lost and so
 // cannot live in it (CLAUDE.md §7). Everything else that used to be in .env
-// moved into app_settings in Phase 7.
+// moved into app_settings in Phase 7. CreateEnvFile is the other writer, for
+// `stockroom setup`'s first and only write of an install's config.
 //
 // The write is a temp file in the same directory and a rename, so a crash
 // mid-write leaves the old file rather than half of a new one -- and a
@@ -28,7 +29,7 @@ import (
 // line break cannot be represented that way and is refused.
 func setEnvValues(path string, values map[string]string) error {
 	for k, v := range values {
-		if strings.ContainsAny(v, "'\r\n") {
+		if !EnvValueWritable(v) {
 			return fmt.Errorf("%w: %s cannot contain a single quote or a line break", ErrInvalid, k)
 		}
 	}
@@ -50,7 +51,7 @@ func setEnvValues(path string, values map[string]string) error {
 		line := sc.Text()
 		key := envKey(line)
 		if v, ok := values[key]; ok && !done[key] {
-			out = append(out, key+"='"+v+"'")
+			out = append(out, key+"="+envQuote(v))
 			done[key] = true
 			continue
 		}
@@ -66,7 +67,7 @@ func setEnvValues(path string, values map[string]string) error {
 	}
 	for _, k := range sortedKeys(values) {
 		if !done[k] {
-			out = append(out, k+"='"+values[k]+"'")
+			out = append(out, k+"="+envQuote(values[k]))
 		}
 	}
 
@@ -94,6 +95,44 @@ func setEnvValues(path string, values map[string]string) error {
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
+	}
+	return nil
+}
+
+// EnvValueWritable reports whether v can be written to a .env: a single quote
+// or a line break cannot be single-quoted.
+func EnvValueWritable(v string) bool { return !strings.ContainsAny(v, "'\r\n") }
+
+// EnvQuote is v single-quoted for a KEY=value line, or ErrInvalid when
+// EnvValueWritable refuses it.
+func EnvQuote(v string) (string, error) {
+	if !EnvValueWritable(v) {
+		return "", fmt.Errorf("%w: a value cannot contain a single quote or a line break", ErrInvalid)
+	}
+	return envQuote(v), nil
+}
+
+func envQuote(v string) string { return "'" + v + "'" }
+
+// CreateEnvFile writes body to a new file at path with the given mode, and
+// refuses when path already exists: an install's config is written once and
+// never overwritten. The data is synced before the file is closed, for the
+// same reason as setEnvValues.
+func CreateEnvFile(path, body string, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(body)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path)
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

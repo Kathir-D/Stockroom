@@ -330,7 +330,7 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	if err != nil {
 		return CheckoutResult{}, err
 	}
-	rules := db.loanRules(ctx)
+	rules := db.checkoutRules(ctx)
 	dueAt, err := checkDueAt(in.DueAt, time.Now(), rules)
 	if err != nil {
 		return CheckoutResult{}, err
@@ -642,7 +642,7 @@ func normalizeCartIDs(ids []string) ([]string, error) {
 // at or after it. The picker already sends one, which this leaves alone; a
 // client sending Saturday 02:00 gets Monday's closing time rather than a loan
 // that falls overdue before anybody could bring it back.
-func checkDueAt(dueAt, now time.Time, r loanRules) (time.Time, error) {
+func checkDueAt(dueAt, now time.Time, r checkoutRules) (time.Time, error) {
 	if dueAt.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: a due date is required", ErrInvalid)
 	}

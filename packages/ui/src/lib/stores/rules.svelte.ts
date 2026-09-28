@@ -1,7 +1,7 @@
 /**
  * The install's rules the UI has to agree with, from the one public read the
  * sign-in screen already makes (`GET /signin/config`): what a student number
- * looks like, how long an idle session lasts, when a loan is due, and how
+ * looks like, how long an idle session lasts, when a checkout is due, and how
  * fast a scanner types.
  *
  * Every value has a default that matches a fresh install, so a screen that
@@ -20,9 +20,9 @@ class RulesStore {
   idleSeconds = $state(600)
   /** How many days after today the last day of use may be. */
   maxCheckoutDays = $state(api.MAX_CHECKOUT_DAYS)
-  /** "HH:MM": a loan is due at this time on the next school day. */
+  /** "HH:MM": a checkout is due at this time on the next school day. */
   dueTime = $state(DEFAULT_DUE_TIME)
-  /** Dates the school is closed, "YYYY-MM-DD"; a loan never falls due on one. */
+  /** Dates the school is closed, "YYYY-MM-DD"; a checkout never falls due on one. */
   closedDates = $state<string[]>([])
   /** Whether anything overdue stops a checkout. */
   overdueBlocks = $state(true)
