@@ -44,9 +44,11 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Due date / due at.** The instant a checkout must be returned by: the closing time on the next school day after the borrower's last day of use.
 
-**Last day of use.** The date a borrower picks at checkout, at most seven days out. The item is **due** at the closing time (`due_time`, 15:30 unless changed) on the next weekday after it.
+**School day.** A weekday that isn't one of the **closed dates** an admin keeps in Admin → Settings (`app_settings.closed_dates`). Nothing falls due on a day that isn't one.
 
-**Overdue.** An open custody event whose `due_at` has passed. Defined once, by the `overdue_custody` view; the sign-in warning, the checkout block and the admin list all read it. An **overdue block** refuses a checkout to a custodian with anything overdue; an admin may **override** it per checkout.
+**Last day of use.** The date a borrower picks at checkout, at most `max_checkout_days` (seven unless changed) after today. The item is **due** at the closing time (`due_time`, 15:30 unless changed) on the next school day after it.
+
+**Overdue.** An open custody event whose `due_at` has passed. Defined once, by the `overdue_custody` view; the sign-in warning, the checkout block and the admin list all read it. An **overdue block** refuses a checkout to a custodian with anything overdue; an admin may **override** it per checkout, or turn it off for everyone in Settings (`overdue_blocks_checkout`).
 
 **Check-in / return.** Closing an open custody event. Any signed-in user may return any item. An optional **damage note** lands on the event's `condition_in`.
 
@@ -54,7 +56,7 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Needs attention.** A return an admin should look at: one with a **damage report** (the item stays available and shows the report everywhere until reviewed), or a student's return no scan backs up. Cleared by an admin marking it **reviewed**.
 
-**Lost.** A loan an admin closed without the item. The item becomes unavailable and the borrower is no longer overdue on it.
+**Lost.** A checkout an admin closed without the item. The item becomes unavailable and the borrower is no longer overdue on it.
 
 **Archived account.** An account that can no longer sign in, kept for its custody history. How a graduate leaves, since an account with history cannot be deleted.
 

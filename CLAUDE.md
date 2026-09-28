@@ -21,7 +21,7 @@ This file describes the system as it stands today. Three other files carry the r
 
 ## 2. Scope
 
-The system must know what equipment exists and who has it, check items in and out in seconds, keep the full custody history of every item and every person, and surface overdue loans in the app. Daily use needs no internet. A nightly backup goes off-site to Google Drive, GitHub, or both (§11).
+The system must know what equipment exists and who has it, check items in and out in seconds, keep the full custody history of every item and every person, and surface overdue checkouts in the app. Daily use needs no internet. A nightly backup goes off-site to Google Drive, GitHub, or both (§11).
 
 Platforms, in order: a Linux closet PC first, then macOS, then Windows through WSL 2 only. Development happens on macOS.
 
@@ -39,7 +39,7 @@ Development and production run different stacks on purpose.
 
 **An install** is the operating system's PostgreSQL, one binary and one OS service. The binary holds the API, the web UI and every migration. It dumps the database and applies pending migrations at boot, and serves the UI at `/` on the same origin as the API. The service restarts it if it dies, and it is required, because the nightly backup is a goroutine inside the server. Supabase never ships to a school, because it would put Studio on the closet PC with no authentication and full access to the roster.
 
-The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`).
+The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`). `setup --config` writes the config there instead and points the service at it, and a later `setup` or `service install` without the flag keeps that file. `serve` refuses a database that records a migration the binary doesn't carry.
 
 - Linux (Debian 12, Ubuntu 24.04 and newer) runs `curl … scripts/get.sh | sudo bash`, which installs the `.deb` from GitHub releases and runs `stockroom setup`. The package depends on the distribution's `postgresql (>= 14)` and `rclone (>= 1.60)` and ships a systemd unit. Setup runs the service as the account that ran `sudo`, creates the `stockroom` role and database, and writes `/etc/stockroom/stockroom.env`. Data lives in `/var/lib/stockroom`.
 - macOS runs `brew install kathir-d/stockroom/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
@@ -85,7 +85,7 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 - `profiles.is_admin` is the only permission flag. The `role` column and the `user_role` enum are unused. `password_hash` is null until the owner or an admin sets one.
 - `assets.status` uses `available`, `checked_out` and `unavailable`. The open custody row decides whether an item is out, not the status column.
 - `activity_log` is append-only. Triggers refuse update, delete and truncate, and it has no foreign keys, so rows outlive the asset or account they name (`docs/adr/0003`).
-- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, the loan rules (due time, longest loan, the overdue block, closed dates), the idle timeout and scanner speed, setup state, the Google client, the photo wall's folder and size. Secret columns are redacted from exports.
+- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, the checkout rules (due time, longest checkout, the overdue block, closed dates), the idle timeout and scanner speed, setup state, the Google client, the photo wall's folder and size. Secret columns are redacted from exports.
 - `kits` names are unique ignoring case, and `kit_items.asset_id` is unique.
 - Unused tables: `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, and `assets.custom_fields` and `assets.location_id`.
 
@@ -116,12 +116,12 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 **Sessions** live in memory, so a restart signs everyone out. A session sends its token as a bearer header or the `stockroom_session` HttpOnly cookie. It expires after `app_settings.session_idle_minutes`, or `SESSION_IDLE_MINUTES` (10) when that is null, counted from the last request. A change applies to live sessions at once. The UI pings the server on real interaction and returns to sign-in when the server drops the session. The actor's profile reloads on every request, so a changed admin flag or a deleted account takes effect at once. The cart survives a page reload and clears on sign-out or timeout.
 
 **Checkout and returns.**
-- A loan is due at the closing time (`app_settings.due_time`, 15:30) on the first school day after the last day of use. A school day is a weekday that isn't in `app_settings.closed_dates`, which an admin keeps in Settings. The server moves any `due_at` a client sends to the next closing time on a school day. `due.go` and `due.ts` hold the same rule.
+- A checkout is due at the closing time (`app_settings.due_time`, 15:30) on the first school day after the last day of use. A school day is a weekday that isn't in `app_settings.closed_dates`, which an admin keeps in Settings. The server moves any `due_at` a client sends to the next closing time on a school day. `due.go` and `due.ts` hold the same rule.
 - The last day of use is at most `max_checkout_days` (7) after today.
 - A person with anything overdue can't check out. The UI and `CheckOutAssets` both enforce it, and an admin can override it per checkout. `overdue_blocks_checkout` turns the block off for everyone; the overdue notice still shows.
 - A damage note, or a student's return with no scan behind it (a typed serial, a Check in button, a whole-kit return), goes to Admin → Needs attention. The item stays available and shows the report until an admin clears it. A student may add a note only within 30 minutes of the return.
 - Scanning an item you checked out in the last ten minutes asks "Return it?" instead of returning it.
-- Mark lost closes the loan as lost, makes the item unavailable, and stops the borrower being overdue on it.
+- Mark lost closes the checkout as lost, makes the item unavailable, and stops the borrower being overdue on it.
 
 ## 8. Repository layout
 
@@ -147,7 +147,7 @@ Where things live in `internal/stockroom`:
 | Area | Files |
 |---|---|
 | Handle, config, errors | `db.go`, `config.go`, `errors.go`, `pgerr.go`, `types.go`, `migrate.go`, `premigrate.go`, `rclone.go`, `version.go`, `doctor.go` |
-| Accounts | `auth.go`, `sessions.go`, `login_guard.go`, `password.go`, `student_number.go`, `users.go`, `roster.go`, `failsafe.go`, `envfile.go` (the only writer of `.env`), `setup.go` |
+| Accounts | `auth.go`, `sessions.go`, `login_guard.go`, `password.go`, `student_number.go`, `users.go`, `users_bulk.go`, `roster.go`, `failsafe.go`, `envfile.go` (the only writer of `.env`, including the config `stockroom setup` creates), `setup.go` |
 | Catalogue | `categories*.go` (`categoryTree` is the only in-memory shape of the table), `assets*.go`, `photos.go`, `barcode.go`, `labels.go` |
 | Custody | `custody.go` (`openCustodySQL` is the one definition of "out"), `due.go`, `review.go`, `kits.go` |
 | Backup | `backup.go`, `export.go` (`takeSnapshot` is the one archive builder), `archive.go`, `restore.go` (the one `RestoreFromZip`), `backup_status.go`, `scheduler.go`, `photos_backup.go`, `target*.go`, `settings.go` |
@@ -174,7 +174,7 @@ By hand: `supabase start`, then `go run ./server`, then `npm run dev:web` or `cd
 
 Neither account starts without a password, so to exercise the first-scan password flow, create a user in the admin panel and scan their number.
 
-`.env` (copy `.env.example`). An install reads the same keys from `/etc/stockroom/stockroom.env` or `$(brew --prefix)/var/stockroom/stockroom.env`, which setup writes, and refuses relative data paths there:
+`.env` (copy `.env.example`). An install reads the same keys from `/etc/stockroom/stockroom.env` or `$(brew --prefix)/var/stockroom/stockroom.env`, which setup writes. It refuses a relative data path there, and an unset `UPLOADS_DIR` or `SIGNIN_PHOTOS_DIR` gets a folder under the install's data directory rather than the relative default below:
 
 | Var | Purpose | Local default |
 |---|---|---|

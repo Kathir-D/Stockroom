@@ -89,6 +89,7 @@ The closet camera doesn't run under WSL.
 | `--non-interactive` | fail instead of asking anything |
 | `--service-user <name>` | Linux: the account the service runs as. `stockroom` creates a system account |
 | `--addr <host:port>` | listen address. Default `127.0.0.1:8080` |
+| `--config <file>` | where to write the config and point the service at it. Default: the one the service already reads, else the system path. The path can't contain spaces, quotes or `$ % ; \` `` ` `` |
 | `--no-service` | don't install or start the service, for a machine without systemd |
 | `--no-open` | don't open a browser at the end |
 | `--with-camera` | also start the closet camera's detector, which needs Docker |
@@ -139,7 +140,7 @@ After editing the config, restart the service with `sudo stockroom service resta
 | `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE`, `SIGNIN_PHOTOS_FOLDER_ID` | No. Read on the first start only, then managed in the admin panel |
 | `DATABASE_URL` | Only together with the database role's password |
 
-Data paths in an installed config must be absolute. The server refuses to start on a relative one and names the variable.
+Data paths in an installed config must be absolute. The server refuses to start on a relative one and names the variable. Leaving `UPLOADS_DIR` or `SIGNIN_PHOTOS_DIR` out is fine: they default to `uploads` and `cache` under `/var/lib/stockroom` (Linux) or `$(brew --prefix)/var/stockroom` (macOS).
 
 ## The kiosk screen
 
@@ -170,7 +171,7 @@ Alt+F4 (Cmd+Q on a Mac) leaves kiosk mode.
 
 Run the install command again: `get.sh` on Linux and WSL, `brew upgrade stockroom` on macOS. Installing the newer package restarts the service. Before the new binary applies a migration, it dumps the database with `pg_dump` into `backups/pre-migrate/` (mode 600, newest 10 kept). If the dump fails, the server refuses to migrate and says why, so an upgrade never changes the schema without a copy.
 
-A database migrated by a newer Stockroom refuses to start an older one. Install the newer version again, or restore the pre-migrate dump into an empty database.
+A database migrated by a newer Stockroom, or by a different build, refuses to start one that lacks any of its migrations. Install the newer version again, or restore the pre-migrate dump into an empty database.
 
 ### PostgreSQL major versions
 
@@ -187,7 +188,7 @@ Linux and WSL:
 
 ```bash
 sudo apt remove stockroom   # stops the service, keeps the config and all data
-sudo apt purge stockroom    # also removes /etc/stockroom
+sudo apt purge stockroom    # also removes /etc/stockroom, setup's drop-in and a --config file
 ```
 
 Neither touches the database or `/var/lib/stockroom`. To delete everything, after exporting anything you want to keep:
@@ -239,7 +240,7 @@ To ask for help, attach a support bundle to the issue:
 sudo stockroom support-bundle      # Linux; on macOS, no sudo
 ```
 
-It writes `stockroom-support-<date>.zip` in the current folder. The zip holds doctor's report, the version, the config and the last 2,000 lines of the service log. Passwords, tokens and the failsafe admin's number are removed, and nothing from the database is in it. Read it before you send it.
+It writes `stockroom-support-<date>.zip` in the current folder. The zip holds doctor's report, the version, the config and the last 2,000 lines of the service log. Passwords, tokens and the failsafe admin's number are removed, and no records from the database are in it: doctor's report says only the PostgreSQL version, whether the schema is current, the folders chosen in the admin panel and the age of the last backup. Read it before you send it.
 
 If no admin can sign in and the failsafe admin isn't set, `stockroom restore` loads a backup archive from the command line with no session. `stockroom restore -h` lists its flags.
 

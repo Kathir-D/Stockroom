@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest"
 import { dueFor, formatClosedDates, isSelectableLastDay, latestDue, parseClosedDates } from "./due"
+import cases from "./due.cases.json"
+
+/** A local Date from "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", read as wall-clock time. */
+function wall(text: string): Date {
+  const [day, time = "00:00"] = text.split("T")
+  const [y, mo, d] = day.split("-").map(Number)
+  const [h, mi] = time.split(":").map(Number)
+  return new Date(y, mo - 1, d, h, mi)
+}
+
+// The same file due_test.go runs, so the two copies of the rule can't drift.
+describe("due.cases.json, shared with due.go", () => {
+  it.each(cases.dueFor)("dueFor: $name", (c) => {
+    expect(dueFor(wall(c.lastDay), c.dueTime, c.closed)).toEqual(wall(c.want))
+  })
+
+  it.each(cases.latestDue)("latestDue: $name", (c) => {
+    expect(latestDue(c.maxDays, c.dueTime, c.closed, wall(c.now))).toEqual(wall(c.want))
+  })
+})
 
 describe("dueFor", () => {
   it("is the closing time on the next weekday", () => {

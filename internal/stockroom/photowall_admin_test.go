@@ -329,6 +329,44 @@ func TestPhotoWallAdminOnly(t *testing.T) {
 	if _, err := db.PhotoWallPreview(ctx, student, 6); !errors.Is(err, ErrForbidden) {
 		t.Errorf("PhotoWallPreview as a student = %v, want ErrForbidden", err)
 	}
+	if _, err := db.ReshufflePhotoWall(ctx, student); !errors.Is(err, ErrForbidden) {
+		t.Errorf("ReshufflePhotoWall as a student = %v, want ErrForbidden", err)
+	}
+}
+
+// A reshuffle changes only memory, but it is still an admin action and writes
+// its activity row (docs/adr/0003); a refused one writes none.
+func TestPhotoWallReshuffleIsLogged(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := insertTestProfile(t, db, true, "admin-pw")
+	student := insertTestProfile(t, db, false, "student-pw")
+
+	prev := db.photoWall.Load()
+	t.Cleanup(func() { db.photoWall.Store(prev) })
+	wall, _ := newTestWall(t, PhotoWallOptions{Size: 4, Source: &stubSource{data: []byte("tile")}})
+	db.SetPhotoWall(wall, nil)
+
+	count := func(actorID string) int {
+		t.Helper()
+		var n int
+		if err := db.Pool.QueryRow(ctx, `select count(*) from activity_log where action = 'signin_photo_wall_reshuffle' and actor_id = $1`, actorID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := db.ReshufflePhotoWall(ctx, actorFor(student)); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ReshufflePhotoWall as a student = %v, want ErrForbidden", err)
+	}
+	if n := count(student.ID); n != 0 {
+		t.Errorf("a refused reshuffle wrote %d rows", n)
+	}
+	if _, err := db.ReshufflePhotoWall(ctx, actorFor(admin)); err != nil {
+		t.Fatalf("ReshufflePhotoWall: %v", err)
+	}
+	if n := count(admin.ID); n != 1 {
+		t.Errorf("a reshuffle wrote %d activity rows, want 1", n)
+	}
 }
 
 /* --------------------------------------------------------- the preview ---- */

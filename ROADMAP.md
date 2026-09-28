@@ -89,7 +89,7 @@ The film strip and the in-memory set are built (`docs/decisions.md`, 2026-09-27)
 
 ## A3. Repository
 
-- [ ] **Branch protection on `main`**, requiring `tests`, `tests-windows`, the four `tests-postgres` jobs and the two `package-linux` jobs. [`CI.md`](CI.md) has the exact `gh api` command. The owner has to run it, or an agent with admin rights on the repository.
+- [ ] **Branch protection on `main`**, requiring `tests`, the four `tests-postgres` jobs and the two `package-linux` jobs. [`CI.md`](CI.md) has the exact `gh api` command. The owner has to run it, or an agent with admin rights on the repository.
 - [ ] **Add screenshots or a short recording to the README**, with the example data loaded (setup wizard → Load examples). Show sign-in, browse, the cart, and Admin → Activity. Put the images in `docs/images/`.
 
 ## A4. Product work for later
@@ -192,7 +192,7 @@ Written, and never run on Windows, because nothing here has one:
 - [ ] **Clean install and reboot test on a real Windows 11 machine**, by hand. GitHub's Windows runners can't run WSL. Run `get.ps1` on a machine that has never had WSL, including the restart Windows asks for. Reboot without logging in, then log in and confirm Stockroom answered from boot: check `journalctl -u stockroom` inside WSL for the start time. Fix `get.ps1` where it breaks.
 - [ ] **Check the Windows browser reaches the server** at `http://localhost:8080` through WSL's localhost forwarding. Test with the default networking and with `networkingMode=mirrored` in `.wslconfig`. The server's loopback `Host` check (`withHostCheck` in `server/router.go`) already accepts `localhost`.
 - [ ] **Test Google sign-in early.** `rclone authorize` listens on `127.0.0.1:53682` inside WSL, and Google redirects the Windows browser there. If forwarding doesn't carry it, the paste-a-code fallback in the sign-in dialog ("Signing in on a different computer?") has to work, and the docs have to point at it.
-- [ ] **Decide what happens to native Windows development leftovers.** Keep `scripts/dev.ps1` and the `tests-windows` CI job as a development convenience, or delete them. The owner decides. Record it in `docs/decisions.md`, and update `CI.md` and the branch-protection check list to match.
+- [x] **Native Windows CI was removed.** `tests-windows` is deleted from the workflow and from the branch-protection checklist in `CI.md`. `scripts/dev.ps1` stays for Windows-through-WSL setup and development support.
 
 # Not planned
 

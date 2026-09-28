@@ -2,6 +2,7 @@ package stockroom
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/fstest"
 
@@ -80,6 +81,34 @@ func TestEmbeddedMigrationsAreOrdered(t *testing.T) {
 		seen[f.version] = true
 		if i > 0 && files[i-1].version >= f.version {
 			t.Errorf("migrations out of order: %s before %s", files[i-1].version, f.version)
+		}
+	}
+}
+
+// checkNotNewer refuses any recorded version the embedded set lacks, whether
+// past its end or in its middle, and lets history older than the first file
+// through as squashed.
+func TestCheckNotNewer(t *testing.T) {
+	files := []migrationFile{{version: "20260101000000"}, {version: "20260201000000"}, {version: "20260301000000"}}
+	cases := []struct {
+		name    string
+		applied []string
+		refuse  bool
+	}{
+		{"current", []string{"20260101000000", "20260201000000", "20260301000000"}, false},
+		{"behind", []string{"20260101000000"}, false},
+		{"squashed history", []string{"20251201000000", "20260101000000"}, false},
+		{"ahead", []string{"20260101000000", "20260401000000"}, true},
+		{"a gap in the middle", []string{"20260101000000", "20260115000000", "20260201000000"}, true},
+	}
+	for _, c := range cases {
+		applied := map[string]bool{}
+		for _, v := range c.applied {
+			applied[v] = true
+		}
+		err := checkNotNewer(files, applied)
+		if refused := errors.Is(err, ErrDatabaseNewer); refused != c.refuse {
+			t.Errorf("%s: err = %v, want refused=%v", c.name, err, c.refuse)
 		}
 	}
 }

@@ -253,10 +253,44 @@ func LoadConfigFrom(flagPath string) (Config, error) {
 		return Config{}, err
 	}
 
+	cfg.defaultInstalledPaths()
 	if err := cfg.checkInstalledPaths(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// InstallDataDir is where an install keeps its data: the folders setup
+// creates, and the defaults for the data paths an installed config leaves
+// unset. "" on a platform with no install.
+func InstallDataDir(goos string) string {
+	switch goos {
+	case "linux":
+		return "/var/lib/stockroom"
+	case "darwin":
+		return filepath.Join(BrewPrefix(), "var", "stockroom")
+	}
+	return ""
+}
+
+// defaultInstalledPaths gives an installed config that leaves UPLOADS_DIR or
+// SIGNIN_PHOTOS_DIR unset the absolute paths setup would have written, rather
+// than the working copy's relative defaults, which checkInstalledPaths
+// refuses. A relative value somebody did write is still refused.
+func (c *Config) defaultInstalledPaths() {
+	if !c.Installed() {
+		return
+	}
+	dir := InstallDataDir(runtime.GOOS)
+	if dir == "" {
+		dir = filepath.Dir(c.EnvPath)
+	}
+	if os.Getenv("UPLOADS_DIR") == "" {
+		c.UploadsDir = filepath.Join(dir, "uploads")
+	}
+	if os.Getenv("SIGNIN_PHOTOS_DIR") == "" {
+		c.SignInPhotosDir = filepath.Join(dir, "cache")
+	}
 }
 
 // checkInstalledPaths refuses a relative data path in an installed config.

@@ -14,7 +14,7 @@ Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` a
 | `POST /scan` | any full | `{serial, via_scanner?}`; out -> checked in, else -> detail, and `confirm_return` (nothing done) for an item the scanner checked out in the last ten minutes. `via_scanner: false` marks a student's return for review. See Section 1 step 5 |
 | `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
 | `POST /assets/{id}/checkin` | any full | optional `{note, scanned}` (the damage note; `scanned` confirms a `confirm_return`; an empty body is fine). A student's unscanned return, or any note, goes to Needs attention |
-| `POST /assets/{id}/lost` | admin | optional `{note}`; closes the open loan as lost and makes the item unavailable |
+| `POST /assets/{id}/lost` | admin | optional `{note}`; closes the open checkout as lost and makes the item unavailable |
 | `GET /custody/review`, `POST /custody/{id}/reviewed` | admin | returns with a damage note or no scan behind them, and clearing one |
 | `POST /custody/{id}/note` | any full | `{note}` onto a **closed** event's `condition_in`. A scan checks an item in before the "Add a note" surface renders, so the note has no check-in call left to ride; an open event or a lost loan is 409. A student gets 403 past 30 minutes or once an admin has reviewed the return |
 | `GET /kits`, `GET /kits/{id}` | any full | the kit with its units as browse rows, plus `available`/`checked_out`/`unavailable` and `checkable` |
