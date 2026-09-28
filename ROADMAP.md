@@ -96,9 +96,7 @@ The film strip and the in-memory set are built (`docs/decisions.md`, 2026-09-27)
 
 None of this is needed for v1.0. Pick any of it up when track B is waiting on hardware or people.
 
-- [ ] **`docs/HARDWARE.md`.** A scanner buying guide (plain USB HID keyboard-wedge, sends Enter after each code) and the physical setup: placement, counter height, sleep settings, kiosk browser.
 - [ ] **`docs/UPGRADING.md`**, once there are two released versions.
-- [ ] **`docs/FAQ.md`.**
 - [ ] **Asset photos from a webcam, and by drag and drop.**
 - [ ] **Assign student numbers from a range** for groups that have no ID numbers.
 - [ ] **Add users by pasting a list of names**, without a CSV.

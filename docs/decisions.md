@@ -408,3 +408,8 @@ ROADMAP A4.
 - [x] **Nothing from the database goes in.** A bundle is for an issue tracker, and the database holds the roster.
 - [x] **A config that doesn't load still goes in**, raw and redacted, along with the service log, because that is when a bundle is most needed.
 - [x] **Linux needs sudo** to read the system journal. The zip is then handed to the account that ran sudo.
+
+**Closed (2026-09-27, the hardware guide and the FAQ)**
+ROADMAP A4. `docs/HARDWARE.md` and `docs/FAQ.md`, linked from the README.
+- [x] **The guide recommends a 2D imager over a laser scanner.** An imager reads the barcode the Barcode button shows on screen, and QR codes on ID cards. No model is named until one is bought and tested (ROADMAP §8).
+- [x] **The guide says no screen lock**, because a locked screen sends every scan into the password box. A school that requires one gets a closet-only account.

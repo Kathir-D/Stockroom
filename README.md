@@ -96,7 +96,7 @@ Sample files for every import are in [`examples/`](examples/).
 3. Pick a due date and check out.
 4. To return something, scan its sticker from any screen.
 
-Any USB barcode scanner that works as a keyboard (HID keyboard-wedge) is supported. See the [admin guide](docs/ADMIN-GUIDE.md) for setting up equipment, students and labels, and the [student guide](docs/STUDENT-GUIDE.md) for a printable one-pager.
+Any USB barcode scanner that works as a keyboard (HID keyboard-wedge) is supported. See the [admin guide](docs/ADMIN-GUIDE.md) for setting up equipment, students and labels, and the [student guide](docs/STUDENT-GUIDE.md) for a printable one-pager. [HARDWARE.md](docs/HARDWARE.md) covers choosing and setting up the scanner, labels and the closet computer, and [FAQ.md](docs/FAQ.md) answers the common questions.
 
 ## Configuration
 
