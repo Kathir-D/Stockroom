@@ -55,6 +55,7 @@ jobs:
               - '.github/workflows/**'
               # Fixtures: examples_test.go imports every file in here.
               - 'examples/**'
+              - 'packaging/**'
 
       - name: Set up Go
         if: steps.changes.outputs.code == 'true'
@@ -194,6 +195,7 @@ jobs:
               - '.githooks/**'
               - '.github/workflows/**'
               - 'examples/**'
+              - 'packaging/**'
 
       # dev.ps1 has never run on real Windows hardware (CLAUDE.md §12,
       # open questions). Parsing it is the least this job can do; a syntax error there is

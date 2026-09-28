@@ -44,6 +44,17 @@ EOF
     ;;
 esac
 
+# Older releases package an rclone older than 1.60, which the .deb needs.
+case "${ID:-}" in
+  ubuntu) oldest=24.04 ;;
+  debian) oldest=12 ;;
+  *) oldest= ;;
+esac
+if [ -n "$oldest" ] && [ -n "${VERSION_ID:-}" ] &&
+  [ "$(printf '%s\n%s\n' "$oldest" "$VERSION_ID" | sort -V | head -1)" != "$oldest" ]; then
+  die "${PRETTY_NAME:-this system} is too old: Stockroom needs Debian 12 or Ubuntu 24.04 or newer"
+fi
+
 # 3. The architecture, named the way the release names its files.
 arch=$(dpkg --print-architecture)
 case "$arch" in

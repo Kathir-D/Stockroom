@@ -68,6 +68,14 @@ func DefaultPaths(goos string) Paths {
 	switch goos {
 	case "darwin":
 		prefix := stockroom.BrewPrefix()
+		// The cask unpacks the release archive, deploy/camera included, next
+		// to the real binary.
+		camera := filepath.Join(prefix, "share", "stockroom", "camera")
+		if real, err := filepath.EvalSymlinks(bin); err == nil {
+			if dir := filepath.Join(filepath.Dir(real), "deploy", "camera"); isDir(dir) {
+				camera = dir
+			}
+		}
 		// A Homebrew binary runs from its Caskroom (or Cellar), whose path
 		// changes with every upgrade. The daemon points at the stable link.
 		for _, dir := range []string{"Caskroom", "Cellar"} {
@@ -79,7 +87,7 @@ func DefaultPaths(goos string) Paths {
 			ConfigFile:    filepath.Join(prefix, "var", "stockroom", "stockroom.env"),
 			DataDir:       filepath.Join(prefix, "var", "stockroom"),
 			Binary:        bin,
-			CameraDir:     filepath.Join(prefix, "share", "stockroom", "camera"),
+			CameraDir:     camera,
 			BrewPrefix:    prefix,
 			LaunchDaemons: "/Library/LaunchDaemons",
 			LogFile:       filepath.Join(prefix, "var", "log", "stockroom.log"),
@@ -95,6 +103,11 @@ func DefaultPaths(goos string) Paths {
 			CameraDir:    "/usr/share/stockroom/camera",
 		}
 	}
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func startsWithDotDot(rel string) bool {

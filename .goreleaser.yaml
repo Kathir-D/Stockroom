@@ -36,6 +36,8 @@ archives:
       - README.md
       - LICENSE*
       - docs/INSTALL.md
+      # setup --with-camera on macOS runs the cask's copy (the .deb has its own).
+      - deploy/camera/**/*
 
 checksum:
   name_template: checksums.txt

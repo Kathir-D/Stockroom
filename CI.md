@@ -1,6 +1,6 @@
 # CI
 
-One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), runs on every pull request against `main` and every push to `main`. It has two jobs, `tests` (Ubuntu) and `tests-windows`. A new push to a pull request cancels the run already in progress. [`TESTING.md`](TESTING.md) describes the suites themselves.
+One GitHub Actions workflow, [`.github/workflows/tests.yml`](.github/workflows/tests.yml), runs on every pull request against `main` and every push to `main`. It has four jobs: `tests` (Ubuntu), `tests-windows`, `tests-postgres` and `package-linux`. A new push to a pull request cancels the run already in progress. [`TESTING.md`](TESTING.md) describes the suites themselves.
 
 ## `tests` (Ubuntu)
 
@@ -24,11 +24,37 @@ It also parses `scripts/dev.ps1` with PowerShell's parser.
 
 Native Windows is not a supported platform: Windows runs Stockroom only through WSL 2 (`ROADMAP.md` section 11). Whether this job stays, as a cheap portability check, or goes is decided in that section.
 
+## `tests-postgres`
+
+A matrix over the `postgres:14`, `15`, `16` and `17` service containers, one job each. It builds the binary, starts it against the empty database so it applies the migrations itself, waits for `/health`, loads `supabase/seed.sql` with `psql`, and runs `go test ./... -count=1 -p 1`. 14 is the oldest version Stockroom supports, and the `.deb` depends on `postgresql (>= 14)`.
+
+## `package-linux`
+
+A matrix of two, `ubuntu-24.04` and `debian-12`. Each builds two `.deb` packages with `goreleaser release --snapshot`. The second is the first plus a dummy migration. Then it runs [`packaging/linux/smoke.sh`](packaging/linux/smoke.sh), which:
+
+1. installs the first package with apt,
+2. runs `stockroom setup --non-interactive` with a failsafe admin, then again to check a second run repairs rather than reinstalls,
+3. restarts the service and checks `/health`,
+4. installs the second package over the first and checks a dump appeared in `backups/pre-migrate/`,
+5. runs `stockroom doctor`, which must exit 0.
+
+The `ubuntu-24.04` variant runs on the runner itself, a full VM with systemd, so it tests the real service. `debian-12` runs in a container with no systemd, so it uses `setup --no-service` and starts `stockroom serve` by hand. On a failure the ubuntu variant prints the service's journal.
+
+To run it locally, build the packages the same way and use a throwaway container: `docker run --rm -v "$PWD/pkgs:/pkgs:ro" -v "$PWD/packaging/linux/smoke.sh:/smoke.sh:ro" debian:12 bash -c 'apt-get update && apt-get install -y curl procps && bash /smoke.sh /pkgs/first.deb /pkgs/second.deb --no-service'`.
+
+## Releases
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a `v*` tag. Its `build` job has a read-only token and runs `goreleaser release --clean --skip=publish`, which builds the binaries, both `.deb` files, `checksums.txt` and the Homebrew cask into `dist/`. It checks the Linux binary runs `stockroom version`. The `publish` job has `contents: write` and runs no third-party code. It creates the GitHub release with `gh`, marking a tag with a hyphen (`v0.9.0-rc.1`) as a prerelease so `releases/latest` skips it, and commits the cask to `Kathir-D/homebrew-stockroom` for a full release.
+
+The tap push needs `HOMEBREW_TAP_TOKEN`, a fine-grained token with contents write on `Kathir-D/homebrew-stockroom` only. Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
+
 ## Docs-only changes
 
 Every step after the change check is conditional on `dorny/paths-filter` reporting a code change. These paths count as code:
 
-`go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/`, `examples/`
+`go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/`, `examples/`, `packaging/`
+
+`packaging/` is included because a Go test checks the packaged systemd unit matches the one setup writes. `tests-postgres` and `package-linux` also count `.goreleaser.yaml`, and `package-linux` counts `deploy/camera/`, which the `.deb` ships.
 
 `examples/` is included because `examples_test.go` imports every file in it. Any other change finishes in a few seconds with a green result.
 
@@ -51,19 +77,21 @@ The hook fails if Postgres is not running. Run `supabase start` first.
 To require the checks, go to Settings → Rules → Rulesets → New branch ruleset, target the default branch, and enable:
 
 - Require a pull request before merging
-- Require status checks to pass (`tests` and `tests-windows`)
+- Require status checks to pass: `tests`, `tests-windows`, the four `tests-postgres (…)` jobs and the two `package-linux (…)` jobs
 - Require branches to be up to date before merging
 
 A check appears in the search box only after the workflow has run once.
 
-The packaging work in `ROADMAP.md` track B adds jobs, such as a Postgres version matrix and a `.deb` build and install test. Add each to the required checks once it has run on `main`.
+A matrix job reports one check per entry, named like `tests-postgres (14)` and `package-linux (debian-12)`.
 
 With `gh`, as classic branch protection:
 
 ```bash
 gh api -X PUT repos/Kathir-D/Stockroom/branches/main/protection --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["tests", "tests-windows"] },
+  "required_status_checks": { "strict": true, "contexts": ["tests", "tests-windows",
+    "tests-postgres (14)", "tests-postgres (15)", "tests-postgres (16)", "tests-postgres (17)",
+    "package-linux (ubuntu-24.04)", "package-linux (debian-12)"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },
   "restrictions": null

@@ -37,15 +37,15 @@ Development and production run different stacks on purpose.
 
 **Development** runs the Supabase CLI's Docker stack, but only for Postgres, migrations, `seed.sql`, pgTAP and Studio. Its REST, Auth, Realtime and Storage services are unused. The Go server runs from the repo, and the two frontends (the Wails window and the web app on `localhost:5173`) each render `<StockroomApp>` from `packages/ui` and call the server over HTTP. `scripts/dev.sh` runs all of it.
 
-**An install** is one Postgres, one binary and one OS service. The binary holds the API, the web UI and every migration. It applies pending migrations at boot and serves the UI at `/` on the same origin as the API. The service restarts it if it dies, and it is required, because the nightly backup is a goroutine inside the server. Supabase never ships to a school, because it would put Studio on the closet PC with no authentication and full access to the roster.
+**An install** is the operating system's PostgreSQL, one binary and one OS service. The binary holds the API, the web UI and every migration. It dumps the database and applies pending migrations at boot, and serves the UI at `/` on the same origin as the API. The service restarts it if it dies, and it is required, because the nightly backup is a goroutine inside the server. Supabase never ships to a school, because it would put Studio on the closet PC with no authentication and full access to the roster.
 
-Today that install is `scripts/install.sh` with a `postgres:17` container (`deploy/`, `docs/INSTALL.md`). It builds from a checkout, so the machine needs Go and Node. `ROADMAP.md` track B replaces it:
+The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`).
 
-- Linux (Debian 12, Ubuntu 24.04) runs `curl … scripts/get.sh | sudo bash`, which installs a `.deb` from GitHub releases. The package depends on the distribution's `postgresql` and `rclone` and ships a systemd unit that runs as the teacher's account. `stockroom setup` creates the database, writes the config and starts the service.
-- macOS runs `brew install kathir-d/stockroom/stockroom && stockroom setup`, over Homebrew's `postgresql@17`, with LaunchDaemons so it starts at boot with nobody logged in.
-- Windows runs the Linux package inside Ubuntu under WSL 2. There is no native Windows installer or service.
+- Linux (Debian 12, Ubuntu 24.04 and newer) runs `curl … scripts/get.sh | sudo bash`, which installs the `.deb` from GitHub releases and runs `stockroom setup`. The package depends on the distribution's `postgresql (>= 14)` and `rclone (>= 1.60)` and ships a systemd unit. Setup runs the service as the account that ran `sudo`, creates the `stockroom` role and database, and writes `/etc/stockroom/stockroom.env`. Data lives in `/var/lib/stockroom`.
+- macOS runs `brew install kathir-d/stockroom/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
+- Windows runs `scripts/get.ps1`, which installs Ubuntu under WSL 2, turns systemd on, runs `get.sh` inside it, and registers a `Stockroom WSL` boot task. There is no native Windows installer or service.
 
-After that, Docker is only for development and the camera. `scripts/install.sh`, `deploy/docker-compose.yml`, `deploy/stockroom-run.sh` and the two service templates get deleted once the packages pass on Linux and macOS. `deploy/camera/` stays.
+`docs/INSTALL.md` is the guide. `.goreleaser.yaml` builds every release artefact and `packaging/linux/` holds the unit and maintainer scripts. The older installer, `scripts/install.sh` with a `postgres:17` container (`deploy/`), still works from a checkout. It gets deleted, with `deploy/docker-compose.yml`, `deploy/stockroom-run.sh` and the two service templates, once the packages pass on a real Linux machine and a real Mac. `deploy/camera/` stays.
 
 ## 4. Backend architecture
 
@@ -63,7 +63,7 @@ Rules that follow from this:
 
 | Layer | Technology |
 |---|---|
-| Database | PostgreSQL 17. Supabase CLI in development, a `postgres:17` container in today's install, the OS package once track B lands |
+| Database | PostgreSQL 14 or newer (the CI matrix runs 14 to 17). Supabase CLI in development, the OS package in an install |
 | Schema | `supabase/migrations/*.sql`, read by the CLI in development and by `stockroom.Migrate` at boot (embedded through `supabase/embed.go`). Both record into `supabase_migrations.schema_migrations` |
 | DB access | Go, `pgx/v5` and `pgxpool` |
 | API | Go `net/http` on localhost, JSON. Logic in `internal/stockroom` |
@@ -72,7 +72,8 @@ Rules that follow from this:
 | Files | Photos in `uploads/`, served at `/files/` |
 | Scanner | A USB HID keyboard-wedge scanner (§10) |
 | Backup | A goroutine in the server, CSV per table in a zip, pushed with `rclone` to Drive and/or the GitHub REST API (§11) |
-| Config | `.env` for the install-time values (§9). Everything an admin can change lives in `app_settings` |
+| Config | `.env` in development, `stockroom.env` at the system path in an install (§9). Everything an admin can change lives in `app_settings` |
+| Packaging | GoReleaser: `.deb` through nfpm, a Homebrew cask, release assets without a version in the name |
 
 ## 6. Database schema
 
@@ -125,14 +126,17 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 
 ```
 internal/stockroom/   all business logic, the only code that touches Postgres
-server/               net/http handlers, the router, the embedded UI at /
-cmd/restore/          the disaster restore CLI (§11)
+server/               the stockroom binary: net/http handlers, the router, the embedded UI at /, subcommand dispatch
+internal/setup/       stockroom setup, service and doctor, behind a command runner so tests need no root
+internal/cli/         stockroom restore; cmd/restore/ wraps it for go run
+internal/platform/    WSL and systemd detection, opening a browser
 packages/ui/          every screen, component, store, the API client and the scanner
 desktop-app/          Wails host, a window around <StockroomApp>
 web-app/              Vite host; its build is embedded in the binary
 supabase/             migrations/, seed.sql, tests/ (pgTAP), embed.go
-deploy/               today's install: postgres compose file, service templates, camera/
-scripts/              dev.sh (development), install.sh (today's install)
+packaging/linux/      the .deb's systemd unit, maintainer scripts and smoke.sh
+deploy/               the older checkout install (compose file, service templates) and camera/
+scripts/              get.sh and get.ps1 (install), dev.sh (development), install.sh (older install)
 examples/             fake example data the setup wizard can load (embedded)
 docs/                 api.md, decisions.md, adr/, design/, agents/, and the guides
 ```
@@ -141,7 +145,7 @@ Where things live in `internal/stockroom`:
 
 | Area | Files |
 |---|---|
-| Handle, config, errors | `db.go`, `config.go`, `errors.go`, `pgerr.go`, `types.go`, `migrate.go` |
+| Handle, config, errors | `db.go`, `config.go`, `errors.go`, `pgerr.go`, `types.go`, `migrate.go`, `premigrate.go`, `rclone.go`, `version.go`, `doctor.go` |
 | Accounts | `auth.go`, `sessions.go`, `login_guard.go`, `password.go`, `student_number.go`, `users.go`, `roster.go`, `failsafe.go`, `envfile.go` (the only writer of `.env`), `setup.go` |
 | Catalogue | `categories*.go` (`categoryTree` is the only in-memory shape of the table), `assets*.go`, `photos.go`, `barcode.go`, `labels.go` |
 | Custody | `custody.go` (`openCustodySQL` is the one definition of "out"), `due.go`, `review.go`, `kits.go` |
@@ -169,7 +173,7 @@ By hand: `supabase start`, then `go run ./server`, then `npm run dev:web` or `cd
 
 Neither account starts without a password, so to exercise the first-scan password flow, create a user in the admin panel and scan their number.
 
-`.env` (copy `.env.example`):
+`.env` (copy `.env.example`). An install reads the same keys from `/etc/stockroom/stockroom.env` or `$(brew --prefix)/var/stockroom/stockroom.env`, which setup writes, and refuses relative data paths there:
 
 | Var | Purpose | Local default |
 |---|---|---|
@@ -178,6 +182,8 @@ Neither account starts without a password, so to exercise the first-scan passwor
 | `ADMIN_STUDENT_NUMBER`, `ADMIN_PASSWORD` | the failsafe admin (§7) | none |
 | `UPLOADS_DIR` | photos | `./uploads` |
 | `SESSION_IDLE_MINUTES` | idle timeout from the last request | `10` |
+| `PRE_MIGRATE_DUMP`, `PRE_MIGRATE_DIR`, `PG_DUMP` | the dump before a migration: `required` or `off`, where, and which `pg_dump` | `off` |
+| `RCLONE_BINARY` | rclone's path, when `PATH` doesn't have it | found at start |
 | `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE`, `SIGNIN_PHOTOS_FOLDER_ID` | first-boot seeds only | none |
 
 The last row seeds empty `app_settings` columns on the first start against a fresh database, and is ignored after that. The admin panel owns those values, so editing `.env` later changes nothing. That is deliberate: a value an admin typed must never revert on a restart.
@@ -197,8 +203,8 @@ Which endpoint a code goes to depends on the screen and a lookup, never a guess.
 - A goroutine in the server (`scheduler.go`) runs the backup nightly at `schedule_hour`, and at boot if the last success is stale. There is no OS scheduler. An advisory lock makes a second concurrent run a skip.
 - One run writes every table as CSV from a single repeatable-read snapshot, plus sequences, readable `inventory.csv` and `accounts.csv`, a manifest with a SHA-256 per file, and `RESTORE.md`, zipped and optionally AES-256-GCM encrypted. It then pushes to each configured target: Google Drive through `rclone` (dated folders) and GitHub through its REST API (a fixed `backup/` path, history capped at `keep_days`). GitHub is labelled experimental. A failed push never fails the run, and it shows on the backup screen.
 - Secret columns are redacted from the export, and a restore keeps the live secrets.
-- Every restore goes through one `RestoreFromZip`: an uploaded zip, a date on Drive, a date on GitHub, or `cmd/restore`. It checks checksums before opening a transaction, loads with foreign keys suspended, then checks row counts, every foreign key and every sequence before committing. It writes sequences last, because `setval` is not transactional. It ends by clearing every session.
-- `cmd/restore` needs no session. It is the way back when the database holds no accounts.
+- Every restore goes through one `RestoreFromZip`: an uploaded zip, a date on Drive, a date on GitHub, or `stockroom restore`. It checks checksums before opening a transaction, loads with foreign keys suspended, then checks row counts, every foreign key and every sequence before committing. It writes sequences last, because `setval` is not transactional. It ends by clearing every session.
+- `stockroom restore` (and `cmd/restore`) needs no session. It is the way back when the database holds no accounts.
 - Admin → Export everything downloads the same archive, unencrypted, without needing a backup folder.
 - Photos are mirrored to a local folder only, rolling to a frozen generation every `keep_days`. Nothing deletes them automatically. The backup screen warns on low disk space or too many generations.
 - Staleness shows on the backup screen, at an admin's sign-in, and at every user's sign-in, naming admins to tell.
@@ -209,14 +215,14 @@ Which endpoint a code goes to depends on the screen and a lookup, never a guess.
 Things that only a person, hardware or the school can settle. Each has a ROADMAP entry.
 
 - The live webcam has not run through go2rtc on macOS or Linux, the school has not approved recording students, and the QuickCam and closet PC tuning are unmeasured (ROADMAP A1).
-- No tag has been pushed, so no release exists. The package path is ROADMAP §1 to §6.
-- No machine has been rebooted to prove the service comes back after a power cut with nobody logged in (ROADMAP §5, §6).
+- No tag has been pushed, so no release exists and the Homebrew tap doesn't exist (ROADMAP §3, §6).
+- The packages are proven in containers only. No VM or real machine has been rebooted to prove the service comes back after a power cut with nobody logged in, and macOS setup has never run (ROADMAP §5, §6).
 - The barcode scanner isn't bought, so the scan threshold is untuned (ROADMAP §8).
 - The closet PC's backup folders, photo-mirror disk and target credentials wait on the PC (ROADMAP §9).
 - GitHub backup has never run against a real repository. Drive has.
 - The school hasn't created its own Google OAuth client. Stockroom supports one (`docs/BACKUP-SETUP.md` step 3c), and its consent screen must be Published, because Testing expires refresh tokens after seven days.
 - Whether the photo mirror gets a second physical disk (`docs/design/backup.md` §H).
-- WSL is the last main-track section (ROADMAP §11). `dev.ps1` has never run on real Windows.
+- WSL is the last main-track section (ROADMAP §11). `get.ps1` and `dev.ps1` have never run on real Windows.
 
 ---
 
