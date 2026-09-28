@@ -32,6 +32,8 @@ func run(args []string) int {
 		return cmdService(args)
 	case "doctor":
 		return cmdDoctor(args)
+	case "support-bundle":
+		return cmdSupportBundle(args)
 	case "restore":
 		return cli.Restore("stockroom restore", args)
 	case "version":
@@ -54,6 +56,9 @@ func usage(w io.Writer) {
   setup     install on this machine: database, config, service (run with sudo)
   service   install|uninstall|start|stop|status the background service
   doctor    check this install and say how to fix what is wrong
+  support-bundle
+            write doctor's report, the config and the recent log, secrets
+            removed, into one zip to attach to an issue (sudo on Linux)
   restore   load a backup archive into the database
   version   print the version, commit and schema version
   open      open Stockroom in the browser

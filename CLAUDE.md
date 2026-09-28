@@ -39,7 +39,7 @@ Development and production run different stacks on purpose.
 
 **An install** is the operating system's PostgreSQL, one binary and one OS service. The binary holds the API, the web UI and every migration. It dumps the database and applies pending migrations at boot, and serves the UI at `/` on the same origin as the API. The service restarts it if it dies, and it is required, because the nightly backup is a goroutine inside the server. Supabase never ships to a school, because it would put Studio on the closet PC with no authentication and full access to the roster.
 
-The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`).
+The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`).
 
 - Linux (Debian 12, Ubuntu 24.04 and newer) runs `curl … scripts/get.sh | sudo bash`, which installs the `.deb` from GitHub releases and runs `stockroom setup`. The package depends on the distribution's `postgresql (>= 14)` and `rclone (>= 1.60)` and ships a systemd unit. Setup runs the service as the account that ran `sudo`, creates the `stockroom` role and database, and writes `/etc/stockroom/stockroom.env`. Data lives in `/var/lib/stockroom`.
 - macOS runs `brew install kathir-d/stockroom/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
@@ -128,7 +128,7 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 ```
 internal/stockroom/   all business logic, the only code that touches Postgres
 server/               the stockroom binary: net/http handlers, the router, the embedded UI at /, subcommand dispatch
-internal/setup/       stockroom setup, service and doctor, behind a command runner so tests need no root
+internal/setup/       stockroom setup, service, doctor and support-bundle, behind a command runner so tests need no root
 internal/cli/         stockroom restore; cmd/restore/ wraps it for go run
 internal/platform/    WSL and systemd detection, opening a browser
 packages/ui/          every screen, component, store, the API client and the scanner

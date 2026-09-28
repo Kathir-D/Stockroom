@@ -206,10 +206,10 @@ More detail: [TESTING.md](TESTING.md), [CI.md](CI.md), [CONTEXT.md](CONTEXT.md) 
 | Components render but do not update | A nested `node_modules` is shadowing the workspace. Run `./scripts/dev.sh deps` |
 | Port 5173 in use | Free it with `./scripts/dev.sh stop`. Vite will not pick another port, because the API would reject it |
 | "Something holds :8080 but does not answer /health" | The server is running without a database. Run `./scripts/dev.sh stop`, then `./scripts/dev.sh` |
-| A scan asks for a password | The scan was read as typing. Press Ctrl+Shift+D to see key timings and adjust `SCAN_KEY_THRESHOLD_MS` in `packages/ui/src/lib/scanner.ts` |
+| A scan asks for a password | The scan was read as typing. Press Ctrl+Shift+D to see key timings and raise the scanner speed in Admin → Settings |
 | A scan does nothing | Scan into a text editor. If nothing appears, the scanner is not in keyboard mode. If no new line appears, configure it to send Enter after each code |
 | Locked out of the admin panel | Set `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in the config (`.env` in development) and restart the server |
-| Something is wrong with an install | Run `stockroom doctor`. It names each problem and how to fix it |
+| Something is wrong with an install | Run `stockroom doctor`. It names each problem and how to fix it. `stockroom support-bundle` zips its report and the log, secrets removed, for an issue |
 | Cannot delete a user | Users holding items cannot be deleted. Check the items in first |
 | Backups reported as stale | Admin → Backup shows the last error for each target and the backup log |
 

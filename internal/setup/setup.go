@@ -545,7 +545,7 @@ func (in *installer) startService(ctx context.Context) error {
 	}
 	e.say("  waiting for http://%s/health ...", in.addr)
 	if err := e.waitHealthy(ctx, in.addr); err != nil {
-		e.say("%s", svc.recentLog(ctx))
+		e.say("%s", svc.recentLog(ctx, 40))
 		return err
 	}
 	e.ok("Stockroom answers at http://%s", in.addr)

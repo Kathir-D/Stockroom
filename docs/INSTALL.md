@@ -233,6 +233,14 @@ stockroom service status
 
 Linux logs: `journalctl -u stockroom -n 100`. macOS logs: `$(brew --prefix)/var/log/stockroom.log`.
 
+To ask for help, attach a support bundle to the issue:
+
+```bash
+sudo stockroom support-bundle      # Linux; on macOS, no sudo
+```
+
+It writes `stockroom-support-<date>.zip` in the current folder. The zip holds doctor's report, the version, the config and the last 2,000 lines of the service log. Passwords, tokens and the failsafe admin's number are removed, and nothing from the database is in it. Read it before you send it.
+
 If no admin can sign in and the failsafe admin isn't set, `stockroom restore` loads a backup archive from the command line with no session. `stockroom restore -h` lists its flags.
 
 Running `stockroom setup` again repairs a broken install.

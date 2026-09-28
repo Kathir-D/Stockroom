@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"stockroom/internal/setup"
+	"stockroom/internal/stockroom"
+	"stockroom/supabase"
 )
 
 func cmdSetup(args []string) int {
@@ -75,5 +77,30 @@ func cmdDoctor(args []string) int {
 	if setup.Doctor(ctx, setup.NewEnv(), *configPath) > 0 {
 		return 1
 	}
+	return 0
+}
+
+func cmdSupportBundle(args []string) int {
+	fs := flag.NewFlagSet("stockroom support-bundle", flag.ContinueOnError)
+	configPath := fs.String("config", "", configFlagHelp)
+	out := fs.String("out", "", "zip to write (default: stockroom-support-<date>.zip here)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	schema, err := stockroom.EmbeddedSchemaVersion(supabase.Migrations)
+	if err != nil {
+		schema = "unknown (" + err.Error() + ")"
+	}
+	path, err := setup.SupportBundle(ctx, setup.NewEnv(), *configPath, setup.BundleInfo{
+		Version: fmt.Sprintf("stockroom %s\ncommit    %s\nschema    %s\n", version, orNone(commit), schema),
+		Out:     *out,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stockroom support-bundle: %v\n", err)
+		return 1
+	}
+	fmt.Printf("Wrote %s. Read it before you send it: secrets are removed, but check.\n", path)
 	return 0
 }

@@ -99,7 +99,6 @@ None of this is needed for v1.0. Pick any of it up when track B is waiting on ha
 - [ ] **`docs/HARDWARE.md`.** A scanner buying guide (plain USB HID keyboard-wedge, sends Enter after each code) and the physical setup: placement, counter height, sleep settings, kiosk browser.
 - [ ] **`docs/UPGRADING.md`**, once there are two released versions.
 - [ ] **`docs/FAQ.md`.**
-- [ ] **A support bundle.** A `stockroom support-bundle` subcommand that writes `doctor` output (section 4) and the recent log with secrets removed into one zip.
 - [ ] **Asset photos from a webcam, and by drag and drop.**
 - [ ] **Assign student numbers from a range** for groups that have no ID numbers.
 - [ ] **Add users by pasting a list of names**, without a CSV.
@@ -160,7 +159,7 @@ Depends on section 5. Blocked on the school providing the PC and the scanner.
   - time zone set to the school's. Due times (`app_settings.due_time`, 15:30) and the nightly backup hour use the server's local clock.
   - NTP on
 - [ ] **Kiosk browser.** Set it up as `docs/INSTALL.md` (The kiosk screen) describes, and fix the guide where the real PC differs.
-- [ ] **Buy a plain USB HID keyboard-wedge barcode scanner** that sends Enter after each code. Tune `SCAN_KEY_THRESHOLD_MS` (50 ms today, in `packages/ui/src/lib/scanner.ts`) with the Ctrl+Shift+D diagnostic, and record the model and value in `CLAUDE.md` §10.
+- [ ] **Buy a plain USB HID keyboard-wedge barcode scanner** that sends Enter after each code. Tune the scanner speed in Admin → Settings (50 ms by default) with the Ctrl+Shift+D diagnostic, set the default in `scanner.ts` and the migration to match, and record the model and value in `CLAUDE.md` §10.
 - [ ] **Choose the photo-mirror disk.** Decide whether it gets a second physical disk. The mirror is the only copy of item photos besides `uploads/` (`docs/design/backup.md` §H).
 - [ ] **Enter the real inventory.** Import categories, then assets (Admin → Assets → Import CSV or Add several). Print labels at 100% and stick them on. Import the roster.
 

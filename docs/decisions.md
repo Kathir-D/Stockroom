@@ -395,3 +395,16 @@ ROADMAP A4's first two items. Admin → Settings has a Loans card and a Sign-out
 - [x] **The box takes ranges.** It accepts `2026-12-21 to 2027-01-01` and stores only the weekdays in it, so a winter break costs ten dates of the 400. It shows a run broken only by weekends as one range again.
 - [x] **Turning off the overdue block keeps the overdue notice at sign-in**, reworded from "bring it back before checking anything else out" to a request. The block is the rule; knowing about it is still useful.
 - [x] **`/signin/config` carries all of it**: `scan_threshold_ms` beside `session_idle_seconds`, and the closed dates and the block under `checkout`. After a save the admin's screen reloads the rules, so the machine follows at once. Every other screen picks them up at its next sign-in.
+
+**Closed (2026-09-27, the support bundle)**
+ROADMAP A4.
+- [x] **`stockroom support-bundle` writes one zip**:
+  - doctor's report
+  - the version and schema
+  - the machine
+  - the config
+  - the service's last 2,000 log lines
+- [x] **Secrets are removed**: the values of config keys named like a password, secret, token, key or student number, a password inside a URL, GitHub and Google tokens, and bearer headers. The failsafe admin's number counts as a secret, because a student number is a working scan login.
+- [x] **Nothing from the database goes in.** A bundle is for an issue tracker, and the database holds the roster.
+- [x] **A config that doesn't load still goes in**, raw and redacted, along with the service log, because that is when a bundle is most needed.
+- [x] **Linux needs sudo** to read the system journal. The zip is then handed to the account that ran sudo.

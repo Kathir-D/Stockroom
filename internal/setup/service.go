@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -19,7 +20,8 @@ type service interface {
 	stop(ctx context.Context) error
 	restart(ctx context.Context) error
 	status(ctx context.Context) (string, error)
-	recentLog(ctx context.Context) string
+	// recentLog is the service's last lines of output.
+	recentLog(ctx context.Context, lines int) string
 }
 
 func newService(e *Env) service {
@@ -103,8 +105,8 @@ func (s *systemdService) status(ctx context.Context) (string, error) {
 	return out, err
 }
 
-func (s *systemdService) recentLog(ctx context.Context) string {
-	out, err := s.env.Run.Run(ctx, Cmd{Name: "journalctl", Args: []string{"-u", "stockroom", "-n", "40", "--no-pager"}, Root: true})
+func (s *systemdService) recentLog(ctx context.Context, lines int) string {
+	out, err := s.env.Run.Run(ctx, Cmd{Name: "journalctl", Args: []string{"-u", "stockroom", "-n", strconv.Itoa(lines), "--no-pager"}, Root: true})
 	if err != nil {
 		return "journalctl -u stockroom: " + err.Error()
 	}
@@ -192,8 +194,8 @@ func (s *launchdService) status(ctx context.Context) (string, error) {
 	return strings.Join(parts, "\n"), nil
 }
 
-func (s *launchdService) recentLog(ctx context.Context) string {
-	out, err := s.env.Run.Run(ctx, Cmd{Name: "tail", Args: []string{"-n", "40", s.env.Paths.LogFile}})
+func (s *launchdService) recentLog(ctx context.Context, lines int) string {
+	out, err := s.env.Run.Run(ctx, Cmd{Name: "tail", Args: []string{"-n", strconv.Itoa(lines), s.env.Paths.LogFile}})
 	if err != nil {
 		return "tail " + s.env.Paths.LogFile + ": " + err.Error()
 	}
