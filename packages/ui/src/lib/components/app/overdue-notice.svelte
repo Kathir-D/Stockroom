@@ -14,6 +14,7 @@
   import type { CustodyRecord } from "../../api/types"
   import { shortDate } from "../../status"
   import Serial from "./serial.svelte"
+  import { rules } from "../../stores/rules.svelte"
 
   let {
     open = $bindable(false),
@@ -34,8 +35,10 @@
         {items.length === 1 ? "You have an overdue item" : `You have ${items.length} overdue items`}
       </Dialog.Title>
       <Dialog.Description>
-        Bring {items.length === 1 ? "it" : "them"} back before checking anything else out. Scan the
-        sticker at this machine to return {items.length === 1 ? "it" : "them"}.
+        {rules.overdueBlocks
+          ? `Bring ${items.length === 1 ? "it" : "them"} back before checking anything else out.`
+          : `Please bring ${items.length === 1 ? "it" : "them"} back.`}
+        Scan the sticker at this machine to return {items.length === 1 ? "it" : "them"}.
       </Dialog.Description>
     </Dialog.Header>
 

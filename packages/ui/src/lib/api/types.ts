@@ -463,6 +463,16 @@ export interface Settings {
   student_number_pattern: string;
   /** "HH:MM": a loan is due at this time on the next school day after its last day of use. */
   due_time: string;
+  /** How many days after today the last day of use may be, 1 to 60. */
+  max_checkout_days: number;
+  /** Whether anything overdue stops a new checkout. */
+  overdue_blocks_checkout: boolean;
+  /** Dates the school is closed, "YYYY-MM-DD", sorted. */
+  closed_dates: string[];
+  /** Minutes an idle session lasts; 0 means SESSION_IDLE_MINUTES in .env. */
+  session_idle_minutes: number;
+  /** The longest gap between keys that still reads as a scanner. */
+  scan_threshold_ms: number;
   updated_at: string;
   github_token_set: boolean;
   archive_passphrase_set: boolean;

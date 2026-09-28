@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Backup settings live in the database so no admin ever edits a file
@@ -86,6 +87,12 @@ func TestSettingsBoundsAreReadable(t *testing.T) {
 		{"hour 24", SettingsInput{ScheduleHour: intPtr(24)}, "schedule_hour"},
 		{"negative headroom", SettingsInput{PhotoMinFreeGB: intPtr(-1)}, "photo_min_free_gb"},
 		{"zero generations", SettingsInput{PhotoMaxGenerations: intPtr(0)}, "photo_max_generations"},
+		{"zero checkout days", SettingsInput{MaxCheckoutDays: intPtr(0)}, "max_checkout_days"},
+		{"61 checkout days", SettingsInput{MaxCheckoutDays: intPtr(61)}, "max_checkout_days"},
+		{"idle of 241", SettingsInput{SessionIdleMinutes: intPtr(241)}, "session_idle_minutes"},
+		{"negative idle", SettingsInput{SessionIdleMinutes: intPtr(-1)}, "session_idle_minutes"},
+		{"scan gap of 5", SettingsInput{ScanThresholdMs: intPtr(5)}, "scan_threshold_ms"},
+		{"a closed date that is not one", SettingsInput{ClosedDates: &[]string{"2026-02-30"}}, "closed_dates"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -99,6 +106,73 @@ func TestSettingsBoundsAreReadable(t *testing.T) {
 	// Midnight and a zero free-space threshold are ordinary, not bugs.
 	restore := withTestSettings(t, db, admin, SettingsInput{ScheduleHour: intPtr(0), PhotoMinFreeGB: intPtr(0)})
 	restore()
+}
+
+// The loan rules round-trip, closed dates come back sorted and once each, and
+// the idle timeout reaches the live session store and goes back to the .env
+// value when cleared.
+func TestLoanRuleSettings(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	base := db.Sessions.Idle()
+
+	restore := withTestSettings(t, db, admin, SettingsInput{
+		MaxCheckoutDays:       intPtr(3),
+		OverdueBlocksCheckout: boolPtr(false),
+		ClosedDates:           &[]string{"2026-12-25", " 2026-12-24", "2026-12-25"},
+		SessionIdleMinutes:    intPtr(30),
+		ScanThresholdMs:       intPtr(35),
+	})
+	defer restore()
+
+	got, err := db.GetSettings(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxCheckoutDays != 3 || got.OverdueBlocksCheckout || got.SessionIdleMinutes != 30 || got.ScanThresholdMs != 35 {
+		t.Errorf("settings = %+v", got)
+	}
+	if want := []string{"2026-12-24", "2026-12-25"}; fmt.Sprint(got.ClosedDates) != fmt.Sprint(want) {
+		t.Errorf("closed dates = %v, want %v", got.ClosedDates, want)
+	}
+	if db.Sessions.Idle() != 30*time.Minute {
+		t.Errorf("session idle = %v, want 30m", db.Sessions.Idle())
+	}
+	rules := db.CheckoutRules(ctx)
+	if rules.MaxCheckoutDays != 3 || rules.OverdueBlocksCheckout || len(rules.ClosedDates) != 2 {
+		t.Errorf("checkout rules = %+v", rules)
+	}
+	if db.ScanThresholdMs(ctx) != 35 {
+		t.Errorf("scan threshold = %d, want 35", db.ScanThresholdMs(ctx))
+	}
+
+	if _, err := db.SaveSettings(ctx, admin, SettingsInput{SessionIdleMinutes: intPtr(0)}); err != nil {
+		t.Fatal(err)
+	}
+	if db.Sessions.Idle() != base {
+		t.Errorf("session idle after clearing = %v, want the .env value %v", db.Sessions.Idle(), base)
+	}
+}
+
+// With the overdue block off, a student with an overdue loan may still check
+// out; with it on, they may not.
+func TestOverdueBlockSetting(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
+	student := insertTestProfile(t, db, false, "student-pw")
+	late, _ := insertScannableAsset(t, db, student, StatusAvailable)
+	openCustody(t, db, late, student, student, time.Now().Add(-24*time.Hour))
+	next, _ := insertScannableAsset(t, db, student, StatusAvailable)
+	if _, err := db.CheckOutAssets(ctx, actorFor(student), CheckoutInput{AssetIDs: []string{next}, DueAt: soon()}); !errors.Is(err, ErrOverdueBlocked) {
+		t.Fatalf("with the block on = %v, want ErrOverdueBlocked", err)
+	}
+	restore := withTestSettings(t, db, admin, SettingsInput{OverdueBlocksCheckout: boolPtr(false)})
+	defer restore()
+	if _, err := db.CheckOutAssets(ctx, actorFor(student), CheckoutInput{AssetIDs: []string{next}, DueAt: soon()}); err != nil {
+		t.Fatalf("with the block off = %v, want ok", err)
+	}
 }
 
 // A folder typed without its leading separator is the mistake that produces a

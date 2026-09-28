@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,6 +70,19 @@ type Settings struct {
 	// DueTime is when a loan is due, "HH:MM", on the next school day after
 	// the last day of use the borrower picks (due.go).
 	DueTime string `json:"due_time"`
+
+	// The loan rules (due.go, custody.go): how many days out the last day of
+	// use may be, whether anything overdue blocks a new checkout, and the
+	// dates the school is closed, as "2006-01-02", sorted.
+	MaxCheckoutDays       int      `json:"max_checkout_days"`
+	OverdueBlocksCheckout bool     `json:"overdue_blocks_checkout"`
+	ClosedDates           []string `json:"closed_dates"`
+
+	// SessionIdleMinutes overrides SESSION_IDLE_MINUTES when it is not 0.
+	SessionIdleMinutes int `json:"session_idle_minutes"`
+	// ScanThresholdMs is the scanner's key gap (scanner.ts), sent to the UI
+	// in /signin/config.
+	ScanThresholdMs int `json:"scan_threshold_ms"`
 
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -137,13 +151,22 @@ type SettingsInput struct {
 	StudentNumberPattern *string `json:"student_number_pattern"`
 
 	DueTime *string `json:"due_time"`
+
+	MaxCheckoutDays       *int      `json:"max_checkout_days"`
+	OverdueBlocksCheckout *bool     `json:"overdue_blocks_checkout"`
+	ClosedDates           *[]string `json:"closed_dates"`
+	// 0 clears the override, so SESSION_IDLE_MINUTES applies again.
+	SessionIdleMinutes *int `json:"session_idle_minutes"`
+	ScanThresholdMs    *int `json:"scan_threshold_ms"`
 }
 
 const settingsColumns = `backup_dir, photo_backup_dir, keep_days, stale_hours, schedule_hour,
 	drive_enabled, drive_remote, drive_path, google_client_id, google_client_secret,
 	github_enabled, github_repo, github_token, archive_passphrase,
 	photo_min_free_gb, photo_max_generations,
-	student_number_format, student_number_pattern, due_time, updated_at`
+	student_number_format, student_number_pattern, due_time,
+	max_checkout_days, overdue_blocks_checkout, closed_dates::text[],
+	session_idle_minutes, scan_threshold_ms, updated_at`
 
 func scanSettings(row pgx.Row) (Settings, error) {
 	var s Settings
@@ -152,11 +175,14 @@ func scanSettings(row pgx.Row) (Settings, error) {
 	// distinguishes an unset path from a blank one.
 	var backupDir, photoDir, driveRemote, drivePath, repo, token, passphrase *string
 	var snPattern, clientID, clientSecret *string
+	var idle *int
 	err := row.Scan(&backupDir, &photoDir, &s.KeepDays, &s.StaleHours, &s.ScheduleHour,
 		&s.DriveEnabled, &driveRemote, &drivePath, &clientID, &clientSecret,
 		&s.GitHubEnabled, &repo, &token, &passphrase,
 		&s.PhotoMinFreeGB, &s.PhotoMaxGenerations,
-		&s.StudentNumberFormat, &snPattern, &s.DueTime, &s.UpdatedAt)
+		&s.StudentNumberFormat, &snPattern, &s.DueTime,
+		&s.MaxCheckoutDays, &s.OverdueBlocksCheckout, &s.ClosedDates,
+		&idle, &s.ScanThresholdMs, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, ErrNotFound
 	}
@@ -173,6 +199,12 @@ func scanSettings(row pgx.Row) (Settings, error) {
 	s.GitHubRepo = deref(repo)
 	s.GitHubToken = deref(token)
 	s.ArchivePassphrase = deref(passphrase)
+	if idle != nil {
+		s.SessionIdleMinutes = *idle
+	}
+	if s.ClosedDates == nil {
+		s.ClosedDates = []string{}
+	}
 	return s, nil
 }
 
@@ -318,6 +350,25 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			return Settings{}, err
 		}
 	}
+	if in.MaxCheckoutDays != nil {
+		next.MaxCheckoutDays = *in.MaxCheckoutDays
+	}
+	if in.OverdueBlocksCheckout != nil {
+		next.OverdueBlocksCheckout = *in.OverdueBlocksCheckout
+	}
+	if in.ClosedDates != nil {
+		dates, err := normalizeClosedDates(*in.ClosedDates)
+		if err != nil {
+			return Settings{}, err
+		}
+		next.ClosedDates = dates
+	}
+	if in.SessionIdleMinutes != nil {
+		next.SessionIdleMinutes = *in.SessionIdleMinutes
+	}
+	if in.ScanThresholdMs != nil {
+		next.ScanThresholdMs = *in.ScanThresholdMs
+	}
 
 	// Compiled and checked before the write; *installed* after the commit.
 	// A pattern that does not compile locks every account out of sign-in, and
@@ -390,6 +441,9 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 			student_number_format = $15, student_number_pattern = $16,
 			google_client_id = $17, google_client_secret = $18,
 			due_time = $19,
+			max_checkout_days = $20, overdue_blocks_checkout = $21,
+			closed_dates = $22::text[]::date[],
+			session_idle_minutes = nullif($23, 0), scan_threshold_ms = $24,
 			updated_at = now()
 		where id = true`,
 		nullable(next.BackupDir), nullable(next.PhotoBackupDir),
@@ -400,7 +454,9 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		next.PhotoMinFreeGB, next.PhotoMaxGenerations,
 		next.StudentNumberFormat, nullable(next.StudentNumberPattern),
 		nullable(next.GoogleClientID), nullable(next.GoogleClientSecret),
-		next.DueTime)
+		next.DueTime,
+		next.MaxCheckoutDays, next.OverdueBlocksCheckout, next.ClosedDates,
+		next.SessionIdleMinutes, next.ScanThresholdMs)
 	if err != nil {
 		return Settings{}, mapPgError("save settings", err)
 	}
@@ -425,6 +481,7 @@ func (db *DB) SaveSettings(ctx context.Context, actor Actor, in SettingsInput) (
 		log.Printf("warning: saved student-number format %q but could not apply it: %v",
 			next.StudentNumberFormat, err)
 	}
+	db.applySessionIdle(next.SessionIdleMinutes)
 	return db.GetSettings(ctx, actor)
 }
 
@@ -463,8 +520,59 @@ func (s Settings) validate() error {
 		return fmt.Errorf("%w: photo_min_free_gb cannot be negative; 0 turns the free-space warning off", ErrInvalid)
 	case s.PhotoMaxGenerations < 1:
 		return fmt.Errorf("%w: photo_max_generations must be at least 1", ErrInvalid)
+	case s.MaxCheckoutDays < 1 || s.MaxCheckoutDays > 60:
+		return fmt.Errorf("%w: max_checkout_days must be between 1 and 60, got %d", ErrInvalid, s.MaxCheckoutDays)
+	case s.SessionIdleMinutes != 0 && (s.SessionIdleMinutes < 1 || s.SessionIdleMinutes > 240):
+		return fmt.Errorf("%w: session_idle_minutes must be between 1 and 240, or 0 to use SESSION_IDLE_MINUTES, got %d", ErrInvalid, s.SessionIdleMinutes)
+	case s.ScanThresholdMs < 10 || s.ScanThresholdMs > 200:
+		return fmt.Errorf("%w: scan_threshold_ms must be between 10 and 200, got %d", ErrInvalid, s.ScanThresholdMs)
 	}
 	return nil
+}
+
+// applySessionIdle makes the session store follow session_idle_minutes, or
+// SESSION_IDLE_MINUTES when the setting is 0.
+func (db *DB) applySessionIdle(minutes int) {
+	db.Sessions.SetIdle(time.Duration(minutes) * time.Minute)
+}
+
+// DefaultScanThresholdMs is the scanner's key gap before an admin tunes it.
+const DefaultScanThresholdMs = 50
+
+// ScanThresholdMs reads the scanner's key gap. Public: /signin/config carries
+// it, and a failed read gives the default rather than no scanner.
+func (db *DB) ScanThresholdMs(ctx context.Context) int {
+	var ms int
+	if err := db.Pool.QueryRow(ctx, `select scan_threshold_ms from app_settings where id = true`).Scan(&ms); err != nil {
+		return DefaultScanThresholdMs
+	}
+	return ms
+}
+
+// maxClosedDates matches the column's check.
+const maxClosedDates = 400
+
+// normalizeClosedDates parses each date, drops duplicates and sorts them, so
+// the list reads the same however an admin typed it.
+func normalizeClosedDates(in []string) ([]string, error) {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		d, err := time.Parse(time.DateOnly, strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fmt.Errorf("%w: closed_dates must be dates as YYYY-MM-DD, got %q", ErrInvalid, raw)
+		}
+		key := d.Format(time.DateOnly)
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, key)
+		}
+	}
+	if len(out) > maxClosedDates {
+		return nil, fmt.Errorf("%w: closed_dates holds at most %d dates, got %d", ErrInvalid, maxClosedDates, len(out))
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // validateDir refuses a folder that is not a full path.
@@ -586,7 +694,12 @@ func (db *DB) EnsureSettings(ctx context.Context, cfg Config) (Settings, error) 
 	if err != nil {
 		return Settings{}, fmt.Errorf("seed the photo wall folder from environment: %w", err)
 	}
-	return db.loadSettings(ctx)
+	st, err := db.loadSettings(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	db.applySessionIdle(st.SessionIdleMinutes)
+	return st, nil
 }
 
 // absoluteDir resolves a folder from .env against the working directory, so the

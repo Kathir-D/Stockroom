@@ -18,10 +18,10 @@ import (
 // who is signed in. Custody history reads sit here too, because they read the
 // same rows these writes produce.
 
-// MaxCheckoutDays bounds how far ahead the last day of use may be; the due
-// time is the closing time on the school day after it (due.go). The frontend
-// caps its date picker at the same number; this is the copy that decides,
-// because a client can send anything (CLAUDE.md §7).
+// MaxCheckoutDays is how far ahead the last day of use may be on a fresh
+// install; app_settings.max_checkout_days holds the number in force (due.go).
+// The frontend caps its date picker at the same number; the server is the
+// copy that decides, because a client can send anything (CLAUDE.md §7).
 const MaxCheckoutDays = 7
 
 // openCustodySQL is the one definition of "this asset is out": an unreturned
@@ -305,8 +305,9 @@ func (db *DB) ScanItemVia(ctx context.Context, actor Actor, serial string, viaSc
 // the UI, because the UI is a client like any other:
 //
 //   - a non-admin may only check out to themselves
-//   - the due date must be in the future and at most MaxCheckoutDays away
+//   - the due date must be in the future and at most max_checkout_days away
 //   - a custodian with anything overdue is refused, unless an admin overrides
+//     or the setting that makes overdue a block is off
 //   - every asset must be available, or the whole cart fails naming which
 //     ones weren't
 func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput) (CheckoutResult, error) {
@@ -329,7 +330,8 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 	if err != nil {
 		return CheckoutResult{}, err
 	}
-	dueAt, err := checkDueAt(in.DueAt, time.Now(), db.dueTime(ctx))
+	rules := db.loanRules(ctx)
+	dueAt, err := checkDueAt(in.DueAt, time.Now(), rules)
 	if err != nil {
 		return CheckoutResult{}, err
 	}
@@ -370,7 +372,7 @@ func (db *DB) CheckOutAssets(ctx context.Context, actor Actor, in CheckoutInput)
 		return CheckoutResult{}, fmt.Errorf("%w: that account is archived", ErrConflict)
 	}
 
-	if !(actor.IsAdmin && in.OverrideOverdue) {
+	if rules.overdueBlocks && !(actor.IsAdmin && in.OverrideOverdue) {
 		overdue, err := listCustody(ctx, tx, `ce.id in (select id from overdue_custody) and ce.custodian_id = $1`,
 			`ce.due_at`, custodianID)
 		if err != nil {
@@ -640,22 +642,18 @@ func normalizeCartIDs(ids []string) ([]string, error) {
 // at or after it. The picker already sends one, which this leaves alone; a
 // client sending Saturday 02:00 gets Monday's closing time rather than a loan
 // that falls overdue before anybody could bring it back.
-func checkDueAt(dueAt, now time.Time, dueTime string) (time.Time, error) {
+func checkDueAt(dueAt, now time.Time, r loanRules) (time.Time, error) {
 	if dueAt.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: a due date is required", ErrInvalid)
 	}
 	if !dueAt.After(now) {
 		return time.Time{}, fmt.Errorf("%w: due date must be in the future", ErrInvalid)
 	}
-	h, m, err := parseDueTime(dueTime)
-	if err != nil {
-		h, m, _ = parseDueTime(DefaultDueTime)
-	}
-	due := closingAtOrAfter(dueAt.In(now.Location()), h, m)
-	latest := latestDueAt(now, h, m)
+	due := r.closingAtOrAfter(dueAt.In(now.Location()))
+	latest := r.latestDueAt(now)
 	if due.After(latest) {
 		return time.Time{}, fmt.Errorf("%w: the last day of use must be within %d days, so the latest due time is %s",
-			ErrInvalid, MaxCheckoutDays, latest.Format("Mon Jan 2 15:04"))
+			ErrInvalid, r.maxDays, latest.Format("Mon Jan 2 15:04"))
 	}
 	return due, nil
 }

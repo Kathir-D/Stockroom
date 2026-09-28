@@ -96,8 +96,6 @@ The film strip and the in-memory set are built (`docs/decisions.md`, 2026-09-27)
 
 None of this is needed for v1.0. Pick any of it up when track B is waiting on hardware or people.
 
-- [ ] **Settings for the remaining hardcoded rules.** The maximum checkout length (7 days), whether being overdue blocks checkout, the session idle timeout (`SESSION_IDLE_MINUTES` today), and the scanner threshold (`SCAN_KEY_THRESHOLD_MS` in `packages/ui/src/lib/scanner.ts`). Store them in `app_settings` like `due_time`, expose them through `GET /signin/config` where the sign-in screen needs them, and add them to Admin → Settings.
-- [ ] **School holidays.** A loan is due on the next weekday after its last day of use (`internal/stockroom/due.go`), so a loan ending before a holiday falls due on the holiday. Add a list of closed dates, maintained by an admin, that `due.go` and `packages/ui/src/lib/due.ts` both skip.
 - [ ] **`docs/HARDWARE.md`.** A scanner buying guide (plain USB HID keyboard-wedge, sends Enter after each code) and the physical setup: placement, counter height, sleep settings, kiosk browser.
 - [ ] **`docs/UPGRADING.md`**, once there are two released versions.
 - [ ] **`docs/FAQ.md`.**

@@ -36,6 +36,7 @@
     ruleFrom,
     type StudentNumberRule,
   } from "../student-number"
+  import { rules } from "../stores/rules.svelte"
   import { session } from "../stores/session.svelte"
 
   type Step = "number" | "password" | "set-password"
@@ -191,6 +192,7 @@
     return attachScanner({
       target,
       captureInsideFields: true,
+      thresholdMs: rules.scanThresholdMs,
       /**
        * A scan is the only thing in this app that signs somebody in without a
        * password, so it has to clear the higher bar: the keystrokes arrived at

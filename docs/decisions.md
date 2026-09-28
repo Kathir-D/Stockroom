@@ -381,3 +381,17 @@ ROADMAP A2, apart from what needs the real Drive folder. `docs/design/signin-pho
 - [x] **The repository has a description and nine topics**, set with `gh repo edit`.
 - [x] **`./scripts/dev.sh test` passes twice in a row** with no `supabase db reset` between.
 
+
+**Closed (2026-09-27, loan rules in settings and school holidays)**
+ROADMAP A4's first two items. Admin → Settings has a Loans card and a Sign-out and scanner card.
+- [x] **Five columns on `app_settings`**:
+  - `max_checkout_days` (7, 1 to 60)
+  - `overdue_blocks_checkout` (true)
+  - `closed_dates` (a `date[]` of at most 400)
+  - `session_idle_minutes` (null, or 1 to 240)
+  - `scan_threshold_ms` (50, 10 to 200)
+- [x] **`session_idle_minutes` is null by default, not 10.** Null means `SESSION_IDLE_MINUTES` from `.env` still applies, so an install that tuned it there keeps its value. A change applies at boot and on save to every live session, since expiry is measured when it is checked.
+- [x] **A closed date is not a school day**, so a loan never falls due on one, and the cap moves with it. `due.go` and `due.ts` skip closed dates the same way. Both stop after 120 days, so a list that closes the whole year can't hang a checkout.
+- [x] **The box takes ranges.** It accepts `2026-12-21 to 2027-01-01` and stores only the weekdays in it, so a winter break costs ten dates of the 400. It shows a run broken only by weekends as one range again.
+- [x] **Turning off the overdue block keeps the overdue notice at sign-in**, reworded from "bring it back before checking anything else out" to a request. The block is the rule; knowing about it is still useful.
+- [x] **`/signin/config` carries all of it**: `scan_threshold_ms` beside `session_idle_seconds`, and the closed dates and the block under `checkout`. After a save the admin's screen reloads the rules, so the machine follows at once. Every other screen picks them up at its next sign-in.

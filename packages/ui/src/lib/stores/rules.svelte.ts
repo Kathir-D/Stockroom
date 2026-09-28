@@ -1,7 +1,8 @@
 /**
  * The install's rules the UI has to agree with, from the one public read the
  * sign-in screen already makes (`GET /signin/config`): what a student number
- * looks like, how long an idle session lasts, and when a loan is due.
+ * looks like, how long an idle session lasts, when a loan is due, and how
+ * fast a scanner types.
  *
  * Every value has a default that matches a fresh install, so a screen that
  * renders before the answer arrives, or on a server that cannot give one,
@@ -10,6 +11,7 @@
 
 import * as api from "../api/index"
 import { DEFAULT_DUE_TIME } from "../due"
+import { SCAN_KEY_THRESHOLD_MS } from "../scanner"
 import { DIGITS_RULE, ruleFrom, type StudentNumberRule } from "../student-number"
 
 class RulesStore {
@@ -20,6 +22,12 @@ class RulesStore {
   maxCheckoutDays = $state(api.MAX_CHECKOUT_DAYS)
   /** "HH:MM": a loan is due at this time on the next school day. */
   dueTime = $state(DEFAULT_DUE_TIME)
+  /** Dates the school is closed, "YYYY-MM-DD"; a loan never falls due on one. */
+  closedDates = $state<string[]>([])
+  /** Whether anything overdue stops a checkout. */
+  overdueBlocks = $state(true)
+  /** The longest gap between keys that still reads as a scanner. */
+  scanThresholdMs = $state(SCAN_KEY_THRESHOLD_MS)
 
   private loaded = false
 
@@ -44,6 +52,13 @@ class RulesStore {
     if (typeof checkout?.due_time === "string" && /^\d{2}:\d{2}$/.test(checkout.due_time)) {
       this.dueTime = checkout.due_time
     }
+    if (Array.isArray(checkout?.closed_dates)) {
+      this.closedDates = checkout.closed_dates.filter((d): d is string => typeof d === "string")
+    }
+    if (typeof checkout?.overdue_blocks_checkout === "boolean") {
+      this.overdueBlocks = checkout.overdue_blocks_checkout
+    }
+    if (typeof raw?.scan_threshold_ms === "number") this.scanThresholdMs = raw.scan_threshold_ms
   }
 }
 

@@ -22,6 +22,7 @@
   import type { AssetListItem, CustodyRecord } from "../../api/types"
   import { shortDate } from "../../status"
   import { cart } from "../../stores/cart.svelte"
+  import { rules } from "../../stores/rules.svelte"
   import PhotoFrame from "./photo-frame.svelte"
 
   let {
@@ -42,7 +43,7 @@
   /** Up to five overlapping thumbnails, per §8.4. */
   const THUMB_LIMIT = 5
 
-  const blocked = $derived(overdueItems.length > 0)
+  const blocked = $derived(rules.overdueBlocks && overdueItems.length > 0)
   const thumbs = $derived(
     cart.ids
       .map((id) => knownAssets.find((a) => a.id === id))

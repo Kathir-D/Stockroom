@@ -15,7 +15,7 @@ This file describes the system as it stands today. Three other files carry the r
 1. **Sign in.** Scanning a student ID card signs a student in with no password. Typing the same number asks for a password. An admin always finishes with a password, even after a scan.
 2. **Browse.** Filters on the left (Type → Category → Model, plus search), matching items on the right.
 3. **Add to cart.** Clicking an item opens its detail dialog, which has Add to cart. The cart lives in the frontend until checkout. Kits add all their units at once.
-4. **Check out.** The borrower picks the last day they need the items, at most seven days out. Every item in the cart checks out in one transaction. The UI then signs the person out after a ten-second countdown unless they press Keep going.
+4. **Check out.** The borrower picks the last day they need the items, at most seven days out unless an admin changed that. Every item in the cart checks out in one transaction. The UI then signs the person out after a ten-second countdown unless they press Keep going.
 5. **Scan an item.** Every item carries a barcode sticker holding its serial. Scanning a checked-out item returns it at once, whoever borrowed it. Scanning an available item opens its detail dialog. Scanning a student card on any screen switches to that account.
 6. **Admin panel.** Assets, categories, users and roster import, kits, overdue and everything out, Needs attention, backup and restore, settings, the photo wall, and the activity log.
 
@@ -85,7 +85,7 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 - `profiles.is_admin` is the only permission flag. The `role` column and the `user_role` enum are unused. `password_hash` is null until the owner or an admin sets one.
 - `assets.status` uses `available`, `checked_out` and `unavailable`. The open custody row decides whether an item is out, not the status column.
 - `activity_log` is append-only. Triggers refuse update, delete and truncate, and it has no foreign keys, so rows outlive the asset or account they name (`docs/adr/0003`).
-- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, due time, setup state, the Google client, the photo wall's folder and size. Secret columns are redacted from exports.
+- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, the loan rules (due time, longest loan, the overdue block, closed dates), the idle timeout and scanner speed, setup state, the Google client, the photo wall's folder and size. Secret columns are redacted from exports.
 - `kits` names are unique ignoring case, and `kit_items.asset_id` is unique.
 - Unused tables: `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, and `assets.custom_fields` and `assets.location_id`.
 
@@ -113,11 +113,12 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 - Archived accounts can't sign in and drop out of pickers, but keep their history. Archiving is how a graduate leaves, because an account that ever borrowed anything can't be deleted.
 - The failsafe admin comes from `ADMIN_STUDENT_NUMBER` and `ADMIN_PASSWORD` in `.env`. Every start makes sure that account exists, is an admin, is not archived and has that password. It is best-effort, so a bad value logs a warning and the server still starts.
 
-**Sessions** live in memory, so a restart signs everyone out. A session sends its token as a bearer header or the `stockroom_session` HttpOnly cookie. It expires `SESSION_IDLE_MINUTES` (10) after the last request. The UI pings the server on real interaction and returns to sign-in when the server drops the session. The actor's profile reloads on every request, so a changed admin flag or a deleted account takes effect at once. The cart survives a page reload and clears on sign-out or timeout.
+**Sessions** live in memory, so a restart signs everyone out. A session sends its token as a bearer header or the `stockroom_session` HttpOnly cookie. It expires after `app_settings.session_idle_minutes`, or `SESSION_IDLE_MINUTES` (10) when that is null, counted from the last request. A change applies to live sessions at once. The UI pings the server on real interaction and returns to sign-in when the server drops the session. The actor's profile reloads on every request, so a changed admin flag or a deleted account takes effect at once. The cart survives a page reload and clears on sign-out or timeout.
 
 **Checkout and returns.**
-- A loan is due at the closing time (`app_settings.due_time`, 15:30) on the weekday after the last day of use. The server moves any `due_at` a client sends to the next closing time on a weekday. It doesn't know about holidays.
-- A person with anything overdue can't check out. The UI and `CheckOutAssets` both enforce it, and an admin can override it per checkout.
+- A loan is due at the closing time (`app_settings.due_time`, 15:30) on the first school day after the last day of use. A school day is a weekday that isn't in `app_settings.closed_dates`, which an admin keeps in Settings. The server moves any `due_at` a client sends to the next closing time on a school day. `due.go` and `due.ts` hold the same rule.
+- The last day of use is at most `max_checkout_days` (7) after today.
+- A person with anything overdue can't check out. The UI and `CheckOutAssets` both enforce it, and an admin can override it per checkout. `overdue_blocks_checkout` turns the block off for everyone; the overdue notice still shows.
 - A damage note, or a student's return with no scan behind it (a typed serial, a Check in button, a whole-kit return), goes to Admin → Needs attention. The item stays available and shows the report until an admin clears it. A student may add a note only within 30 minutes of the return.
 - Scanning an item you checked out in the last ten minutes asks "Return it?" instead of returning it.
 - Mark lost closes the loan as lost, makes the item unavailable, and stops the borrower being overdue on it.
@@ -181,7 +182,7 @@ Neither account starts without a password, so to exercise the first-scan passwor
 | `SERVER_ADDR` | listen address | `127.0.0.1:8080` |
 | `ADMIN_STUDENT_NUMBER`, `ADMIN_PASSWORD` | the failsafe admin (§7) | none |
 | `UPLOADS_DIR` | photos | `./uploads` |
-| `SESSION_IDLE_MINUTES` | idle timeout from the last request | `10` |
+| `SESSION_IDLE_MINUTES` | idle timeout from the last request, unless Admin → Settings sets one | `10` |
 | `PRE_MIGRATE_DUMP`, `PRE_MIGRATE_DIR`, `PG_DUMP` | the dump before a migration: `required` or `off`, where, and which `pg_dump` | `off` |
 | `RCLONE_BINARY` | rclone's path, when `PATH` doesn't have it | found at start |
 | `BACKUP_DIR`, `PHOTO_BACKUP_DIR`, `RCLONE_REMOTE`, `SIGNIN_PHOTOS_FOLDER_ID` | first-boot seeds only | none |
@@ -192,7 +193,7 @@ The last row seeds empty `app_settings` columns on the first start against a fre
 
 A USB HID keyboard-wedge scanner types the code and then Enter into whatever has focus. It needs no driver. Two kinds of code arrive through the same keyboard buffer: student cards and item serials.
 
-`packages/ui/src/lib/scanner.ts` decides whether a burst was a scan or typing. A scan's keys arrive within `SCAN_KEY_THRESHOLD_MS` (50 ms, untuned) of each other. Any edit (Backspace, a chord, a caret key) makes the burst typed, and the sign-in screen treats a burst as a scan only when the field's value matches it. Ctrl+Shift+D shows a diagnostic for tuning against real hardware.
+`packages/ui/src/lib/scanner.ts` decides whether a burst was a scan or typing. A scan's keys arrive within `app_settings.scan_threshold_ms` (50 ms, untuned, set in Admin → Settings and sent in `/signin/config`) of each other. Any edit (Backspace, a chord, a caret key) makes the burst typed, and the sign-in screen treats a burst as a scan only when the field's value matches it. Ctrl+Shift+D shows a diagnostic for tuning against real hardware.
 
 Which endpoint a code goes to depends on the screen and a lookup, never a guess. On the sign-in screen a code is a login. On other screens it is an item scan, unless no item has that serial and it has the shape of a student number, in which case it switches accounts. Keep a visible input focused, so typing always works as a fallback.
 

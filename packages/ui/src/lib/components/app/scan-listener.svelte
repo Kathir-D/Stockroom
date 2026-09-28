@@ -10,6 +10,7 @@
    * by the payload (§9.2).
    */
   import { attachScanner, type ScanBurst } from "../../scanner"
+  import { rules } from "../../stores/rules.svelte"
 
   let {
     onBurst,
@@ -29,6 +30,7 @@
   // exact, so there is never more than one listener attached at a time.
   $effect(() => {
     const capture = captureInsideFields
-    return attachScanner({ onBurst: (burst) => onBurst(burst), captureInsideFields: capture })
+    const thresholdMs = rules.scanThresholdMs
+    return attachScanner({ onBurst: (burst) => onBurst(burst), captureInsideFields: capture, thresholdMs })
   })
 </script>

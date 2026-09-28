@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { dueFor, isSelectableLastDay, latestDue } from "./due"
+import { dueFor, formatClosedDates, isSelectableLastDay, latestDue, parseClosedDates } from "./due"
 
 describe("dueFor", () => {
   it("is the closing time on the next weekday", () => {
@@ -16,6 +16,13 @@ describe("dueFor", () => {
     const now = new Date(2026, 8, 28, 23, 0)
     expect(dueFor(now, "15:30").getTime()).toBeGreaterThan(now.getTime())
   })
+
+  it("skips closed dates, as due.go does", () => {
+    const closed = ["2026-09-29", "2026-09-30", "2026-10-05"]
+    expect(dueFor(new Date(2026, 8, 28), "15:30", closed)).toEqual(new Date(2026, 9, 1, 15, 30))
+    expect(dueFor(new Date(2026, 9, 2), "15:30", closed)).toEqual(new Date(2026, 9, 6, 15, 30))
+    expect(latestDue(7, "15:30", closed, new Date(2026, 8, 28, 10, 0))).toEqual(new Date(2026, 9, 6, 15, 30))
+  })
 })
 
 describe("isSelectableLastDay", () => {
@@ -28,6 +35,29 @@ describe("isSelectableLastDay", () => {
   })
 
   it("matches latestDue for the last selectable day", () => {
-    expect(latestDue(7, "15:30", now)).toEqual(new Date(2026, 9, 6, 15, 30))
+    expect(latestDue(7, "15:30", [], now)).toEqual(new Date(2026, 9, 6, 15, 30))
+  })
+})
+
+describe("closed dates", () => {
+  it("reads single dates and ranges, leaving weekends out", () => {
+    expect(parseClosedDates("2026-12-24\n\n 2026-12-25 to 2026-12-29 \n2026-12-24")).toEqual([
+      "2026-12-24",
+      "2026-12-25",
+      "2026-12-28",
+      "2026-12-29",
+    ])
+  })
+
+  it("names a line it can't read", () => {
+    expect(() => parseClosedDates("2026-02-30")).toThrow(/2026-02-30/)
+    expect(() => parseClosedDates("Christmas")).toThrow(/Christmas/)
+    expect(() => parseClosedDates("2026-12-29 to 2026-12-21")).toThrow(/ends before/)
+  })
+
+  it("shows a run across a weekend as one range", () => {
+    const dates = parseClosedDates("2026-12-21 to 2027-01-01\n2027-02-15")
+    expect(formatClosedDates(dates)).toBe("2026-12-21 to 2027-01-01\n2027-02-15")
+    expect(parseClosedDates(formatClosedDates(dates))).toEqual(dates)
   })
 })
