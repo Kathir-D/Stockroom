@@ -24,6 +24,7 @@ Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` a
 | `GET /users/{id}/history` | own, or admin | |
 | `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
 | `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo. The list includes archived accounts, flagged, last |
+| `POST /users/add-names/preview`, `POST /users/add-names` | admin | `{names, first_number}`: one person per line, with or without a number. Lines without one count up from `first_number`, skipping numbers in use. Preview writes nothing; add creates every line or none, and returns each row's `id` |
 | `POST /users/{id}/archive` | admin | `{archived}`; refused for yourself and while the account holds anything |
 | `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`, `archive_missing=1`) or a `text/csv` body (`?archive_missing=1`). Archiving is refused if any row failed |
 | `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}`. Delete is refused for anything ever checked out |

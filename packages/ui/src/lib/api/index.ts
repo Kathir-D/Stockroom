@@ -45,6 +45,8 @@ import type {
   Profile,
   RestoreResult,
   RosterResult,
+  AddNamesInput,
+  AddNamesResult,
   AssetImportResult,
   BulkAddInput,
   BulkPreview,
@@ -435,6 +437,16 @@ export function setUserPassword(id: string, password: string) {
  * Roster CSV import. Relative `photo_path` values in the CSV resolve against
  * `photoDir`, which is why a roster with photos has to come in as multipart.
  */
+/** What a pasted list of names would add; writes nothing. */
+export function previewAddNames(input: AddNamesInput) {
+  return request<AddNamesResult>("/users/add-names/preview", { method: "POST", body: input });
+}
+
+/** Add a pasted list of names, all or none. */
+export function addNames(input: AddNamesInput) {
+  return request<AddNamesResult>("/users/add-names", { method: "POST", body: input });
+}
+
 export function importRoster(file: File, photoDir?: string, archiveMissing = false) {
   const form = new FormData();
   form.set("file", file);

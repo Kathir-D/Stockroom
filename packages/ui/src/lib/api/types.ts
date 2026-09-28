@@ -370,6 +370,31 @@ export interface RosterRow {
   error?: string;
 }
 
+/** A pasted list of names, one person per line, and where numbering starts. */
+export interface AddNamesInput {
+  names: string;
+  /** The first number for lines without one, such as "900001". Blank: every line has its own. */
+  first_number: string;
+}
+
+export interface AddNamesRow {
+  /** The line in the pasted text, counting blank lines. */
+  line: number;
+  first_name: string;
+  last_name: string;
+  student_number: string;
+  /** Whether the number came from the range. */
+  assigned: boolean;
+  error?: string;
+  /** Set once the account exists. */
+  id?: string;
+}
+
+export interface AddNamesResult {
+  rows: AddNamesRow[];
+  failed: number;
+}
+
 export interface RosterResult {
   created: number;
   updated: number;

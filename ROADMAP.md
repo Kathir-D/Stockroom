@@ -98,8 +98,6 @@ None of this is needed for v1.0. Pick any of it up when track B is waiting on ha
 
 - [ ] **`docs/UPGRADING.md`**, once there are two released versions.
 - [ ] **Asset photos from a webcam, and by drag and drop.**
-- [ ] **Assign student numbers from a range** for groups that have no ID numbers.
-- [ ] **Add users by pasting a list of names**, without a CSV.
 - [ ] **A data-deletion flow for a student**, beyond archiving or deleting the account. The activity log is append-only by design (`docs/adr/0003`), so this needs a decision first.
 
 # Track B: the main path to production

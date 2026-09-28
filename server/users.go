@@ -47,6 +47,38 @@ func (d deps) handleCreateUser(w http.ResponseWriter, r *http.Request, actor sto
 	writeJSON(w, http.StatusCreated, p)
 }
 
+// POST /users/add-names/preview  body: stockroom.AddNamesInput
+// Every name and number a pasted list would add, writing nothing.
+func (d deps) handlePreviewAddNames(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in stockroom.AddNamesInput
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	res, err := d.db.PreviewAddNames(r.Context(), actor, in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// POST /users/add-names  body: stockroom.AddNamesInput
+// Adds the whole list, or nothing when any line has a problem.
+func (d deps) handleAddNames(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	var in stockroom.AddNamesInput
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeError(w, err)
+		return
+	}
+	res, err := d.db.AddNames(r.Context(), actor, in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
+}
+
 // PUT /users/{id}  body: stockroom.UserInput
 func (d deps) handleUpdateUser(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in stockroom.UserInput

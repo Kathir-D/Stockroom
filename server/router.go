@@ -204,6 +204,8 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /users", d.withSession(d.handleListUsers, fullOnly))
 	mux.Handle("POST /users", d.withSession(d.handleCreateUser, fullOnly))
 	mux.Handle("POST /users/import", d.withSession(d.handleImportRoster, fullOnly))
+	mux.Handle("POST /users/add-names/preview", d.withSession(d.handlePreviewAddNames, fullOnly))
+	mux.Handle("POST /users/add-names", d.withSession(d.handleAddNames, fullOnly))
 	mux.Handle("GET /users/{id}", d.withSession(d.handleGetUser, fullOnly))
 	mux.Handle("PUT /users/{id}", d.withSession(d.handleUpdateUser, fullOnly))
 	mux.Handle("DELETE /users/{id}", d.withSession(d.handleDeleteUser, fullOnly))

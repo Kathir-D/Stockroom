@@ -95,6 +95,12 @@ rename the columns to match, delete the rest, and save as CSV.
   asks them to choose one. That takes about ten seconds and needs nothing from
   you.
 - **One student?** **New user**, then fill in the form.
+- **A list of names and no spreadsheet?** **Paste names** takes one person per
+  line, as `Jane Doe` or `Doe, Jane`, with their number after a comma if they
+  have one. For a club or a camp with no ID numbers, fill in **Number people
+  without one from**, say `900001`, and it counts up from there, skipping
+  numbers already in use. It shows you every name and number before it adds
+  anyone, and then offers to print their ID cards.
 
 If your students' ID cards have no barcode, **Print ID cards** makes a sheet of
 cards that do, for everyone the list is showing. Search first to print a few.

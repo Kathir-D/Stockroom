@@ -413,3 +413,11 @@ ROADMAP A4.
 ROADMAP A4. `docs/HARDWARE.md` and `docs/FAQ.md`, linked from the README.
 - [x] **The guide recommends a 2D imager over a laser scanner.** An imager reads the barcode the Barcode button shows on screen, and QR codes on ID cards. No model is named until one is bought and tested (ROADMAP §8).
 - [x] **The guide says no screen lock**, because a locked screen sends every scan into the password box. A school that requires one gets a closet-only account.
+
+**Closed (2026-09-27, pasting names and numbering from a range)**
+ROADMAP A4's two user items, as one dialog: Admin → Users → Paste names.
+- [x] **One person per line.** Tabs split the fields when there are any, so spreadsheet columns paste; otherwise commas do. A field with a digit in it is the number, since names don't have digits. Two name fields split by a comma are "Last, First", as school exports write them. One field splits at its last space.
+- [x] **The range is a first number**, such as `900001` or `G0001`. Its trailing digits count up and keep their width, and it skips any number already in use by an account or as an item's serial. A first number that doesn't fit the student-number rule in Settings is refused before anything is worked out.
+- [x] **It only adds.** A number that already belongs to somebody is an error on that line. Updating names is the roster import's job, and a paste that renamed an account would hand that person's loans to someone else.
+- [x] **It previews, then adds every line or none**, in one transaction under an advisory lock, so two admins can't be handed the same numbers. Any edit to the text throws the preview away.
+- [x] **It ends by offering the new people's ID cards.** Someone numbered from a range has no card, and typing a number needs a password they haven't set.
