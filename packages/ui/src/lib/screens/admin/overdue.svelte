@@ -204,7 +204,7 @@
       <Dialog.Header>
         <Dialog.Title>Mark {lostTarget?.asset_name ?? "this item"} lost?</Dialog.Title>
         <Dialog.Description>
-          The loan to {lostTarget?.custodian_name ?? ""} closes as lost, and the item becomes unavailable.
+          The checkout to {lostTarget?.custodian_name ?? ""} closes as lost, and the item becomes unavailable.
           {lostTarget?.custodian_name ?? "They"} will no longer be overdue on it. If it turns up, mark it
           available again under Assets.
         </Dialog.Description>
