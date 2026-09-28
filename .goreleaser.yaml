@@ -57,7 +57,7 @@ nfpms:
     formats: [deb]
     vendor: Stockroom
     homepage: https://github.com/Kathir-D/Stockroom
-    maintainer: Kathir Dev <gokathird@gmail.com>
+    maintainer: Kathir-D <121499256+Kathir-D@users.noreply.github.com>
     description: |-
       Equipment checkout for a school media department.
       Students scan an ID card to sign in and scan item barcodes to borrow and

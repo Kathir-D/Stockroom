@@ -104,6 +104,10 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releasing) and re-run this job."
+            exit 1
+          fi
           git clone --depth 1 \
             "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Kathir-D/homebrew-stockroom.git" tap
           mkdir -p tap/Casks
@@ -112,5 +116,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Casks/stockroom.rb
+          # A re-run for the same tag has nothing new to commit.
+          if git diff --cached --quiet; then
+            echo "The tap already has stockroom ${TAG}."
+            exit 0
+          fi
           git commit -m "stockroom ${TAG}"
-          git push
+          # HEAD names the branch, so this works on a tap created empty (the
+          # first push makes the branch) as well as one with a README.
+          git push origin HEAD

@@ -48,6 +48,21 @@ To run it locally, build the packages the same way and use a throwaway container
 
 The tap push needs `HOMEBREW_TAP_TOKEN`, a fine-grained token with contents write on `Kathir-D/homebrew-stockroom` only. Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
 
+### Publishing a release, step by step
+
+These steps need the owner. An agent can't create repositories, secrets or tags on the owner's behalf.
+
+1. **Create the tap.** On GitHub, create the public repository `Kathir-D/homebrew-stockroom`. Tick "Add a README" so it has a `main` branch. Homebrew finds it from the name: `brew install kathir-d/stockroom/stockroom` looks in `Kathir-D/homebrew-stockroom`.
+2. **Create the token.** Settings → Developer settings → Fine-grained tokens → Generate new token. Repository access: only `Kathir-D/homebrew-stockroom`. Permissions: Contents, read and write. Nothing else.
+3. **Store it.** In this repository, Settings → Secrets and variables → Actions → New repository secret, named `HOMEBREW_TAP_TOKEN`.
+4. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
+5. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
+6. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install kathir-d/stockroom/stockroom && stockroom version` on a Mac.
+
+If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. A re-run with nothing new to commit succeeds without pushing.
+
+The cask is unsigned. Its post-install hook clears the quarantine flag so macOS runs it. `xattr -l $(brew --prefix)/bin/stockroom` should print nothing.
+
 ## Docs-only changes
 
 Every step after the change check is conditional on `dorny/paths-filter` reporting a code change. These paths count as code:
