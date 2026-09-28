@@ -56,6 +56,7 @@ jobs:
               # Fixtures: examples_test.go imports every file in here.
               - 'examples/**'
               - 'packaging/**'
+              - '.gitattributes'
 
       - name: Set up Go
         if: steps.changes.outputs.code == 'true'
@@ -196,6 +197,7 @@ jobs:
               - '.github/workflows/**'
               - 'examples/**'
               - 'packaging/**'
+              - '.gitattributes'
 
       # dev.ps1 has never run on real Windows hardware (CLAUDE.md §12,
       # open questions). Parsing it is the least this job can do; a syntax error there is
@@ -349,6 +351,7 @@ jobs:
               - '.github/workflows/**'
               - 'examples/**'
               - 'packaging/**'
+              - '.gitattributes'
               - '.goreleaser.yaml'
 
       - name: Set up Go
@@ -426,6 +429,7 @@ jobs:
               - 'examples/**'
               - 'deploy/camera/**'
               - 'packaging/**'
+              - '.gitattributes'
               - '.goreleaser.yaml'
 
       - uses: actions/setup-node@v4

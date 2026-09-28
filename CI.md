@@ -52,9 +52,9 @@ The tap push needs `HOMEBREW_TAP_TOKEN`, a fine-grained token with contents writ
 
 Every step after the change check is conditional on `dorny/paths-filter` reporting a code change. These paths count as code:
 
-`go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/`, `examples/`, `packaging/`
+`go.mod`, `go.sum`, `internal/`, `server/`, `cmd/`, `supabase/`, `packages/`, `desktop-app/`, `web-app/`, `package.json`, `package-lock.json`, `scripts/`, `.githooks/`, `.github/workflows/`, `examples/`, `packaging/`, `.gitattributes`
 
-`packaging/` is included because a Go test checks the packaged systemd unit matches the one setup writes. `tests-postgres` and `package-linux` also count `.goreleaser.yaml`, and `package-linux` counts `deploy/camera/`, which the `.deb` ships.
+`packaging/` is included because a Go test checks the packaged systemd unit matches the one setup writes. `.gitattributes` is included because it decides the line endings a checkout gets, and a Windows checkout with CRLF breaks that same test. `tests-postgres` and `package-linux` also count `.goreleaser.yaml`, and `package-linux` counts `deploy/camera/`, which the `.deb` ships.
 
 `examples/` is included because `examples_test.go` imports every file in it. Any other change finishes in a few seconds with a green result.
 
