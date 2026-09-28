@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // configVars is every environment variable LoadConfig reads. Tests isolate all
@@ -20,9 +19,7 @@ var configVars = []string{
 	"BACKUP_DIR",
 	"SESSION_IDLE_MINUTES",
 	"SIGNIN_PHOTOS_DIR",
-	"SIGNIN_PHOTOS_COUNT",
-	"SIGNIN_PHOTOS_BATCH",
-	"SIGNIN_PHOTOS_TTL_MINUTES",
+	"SIGNIN_PHOTOS_MANIFEST_HOURS",
 	"PHOTO_BACKUP_DIR",
 	"STOCKROOM_CONFIG",
 	"PRE_MIGRATE_DUMP",
@@ -105,22 +102,16 @@ func TestLoadConfigPhotoWallDefaults(t *testing.T) {
 	if cfg.SignInPhotosDir != DefaultPhotoWallDir {
 		t.Errorf("SignInPhotosDir = %q, want %q", cfg.SignInPhotosDir, DefaultPhotoWallDir)
 	}
-	if cfg.SignInPhotosCount != DefaultPhotoWallCount {
-		t.Errorf("SignInPhotosCount = %d, want %d", cfg.SignInPhotosCount, DefaultPhotoWallCount)
-	}
-	if cfg.SignInPhotosBatch != DefaultPhotoWallBatch {
-		t.Errorf("SignInPhotosBatch = %d, want %d", cfg.SignInPhotosBatch, DefaultPhotoWallBatch)
-	}
-	if want := int(DefaultPhotoWallTTL / time.Minute); cfg.SignInPhotosTTLMinutes != want {
-		t.Errorf("SignInPhotosTTLMinutes = %d, want %d", cfg.SignInPhotosTTLMinutes, want)
+	if cfg.SignInPhotosManifestHours != DefaultPhotoWallManifestHours {
+		t.Errorf("SignInPhotosManifestHours = %d, want %d", cfg.SignInPhotosManifestHours, DefaultPhotoWallManifestHours)
 	}
 }
 
 // TestLoadConfigRejectsABadPhotoWallNumber: a typo in .env that silently falls
-// back to the default is a typo nobody ever finds, so the numbers follow
-// SESSION_IDLE_MINUTES and refuse to start.
+// back to the default is a typo nobody ever finds, so the manifest interval
+// follows SESSION_IDLE_MINUTES and refuses to start.
 func TestLoadConfigRejectsABadPhotoWallNumber(t *testing.T) {
-	for _, key := range []string{"SIGNIN_PHOTOS_COUNT", "SIGNIN_PHOTOS_BATCH", "SIGNIN_PHOTOS_TTL_MINUTES"} {
+	for _, key := range []string{"SIGNIN_PHOTOS_MANIFEST_HOURS"} {
 		for _, bad := range []string{"none", "0", "-4"} {
 			t.Run(key+"="+bad, func(t *testing.T) {
 				isolateEnv(t)

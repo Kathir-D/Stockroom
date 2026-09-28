@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -33,7 +32,7 @@ type Config struct {
 	// The sign-in photo wall (docs/design/signin-photo-wall.html §8). It
 	// reads Drive through the one Google remote the application shares
 	// (google.go), so nothing here names a remote any more; the switch is an
-	// admin signing in to Google. Until somebody has, no reel is built and no
+	// admin signing in to Google. Until somebody has, no set is built and no
 	// goroutine starts.
 	//
 	// SignInPhotosFolderID is a first-boot seed rather than a setting, the
@@ -44,11 +43,11 @@ type Config struct {
 	// here. It is a capability, not a label -- see §7 on why it is never sent
 	// back to a client and must be redacted from the backup export the moment
 	// it reaches app_settings.
+	//
+	// SignInPhotosDir is where the Drive folder's manifest is kept. The
+	// photographs themselves live in memory only (photowall.go).
 	SignInPhotosFolderID      string
 	SignInPhotosDir           string
-	SignInPhotosCount         int
-	SignInPhotosBatch         int
-	SignInPhotosTTLMinutes    int
 	SignInPhotosManifestHours int
 
 	// PreMigrateDump is PRE_MIGRATE_DUMP: whether serve runs pg_dump before
@@ -246,24 +245,12 @@ func LoadConfigFrom(flagPath string) (Config, error) {
 	}
 	cfg.SessionIdleMinutes = n
 
-	// The photo wall's four numbers follow the same rule as the idle
-	// timeout: a value that does not parse is a typo in .env, and a typo that
-	// silently falls back to the default is one nobody ever finds.
-	for _, v := range []struct {
-		key string
-		def int
-		out *int
-	}{
-		{"SIGNIN_PHOTOS_COUNT", DefaultPhotoWallCount, &cfg.SignInPhotosCount},
-		{"SIGNIN_PHOTOS_BATCH", DefaultPhotoWallBatch, &cfg.SignInPhotosBatch},
-		{"SIGNIN_PHOTOS_TTL_MINUTES", int(DefaultPhotoWallTTL / time.Minute), &cfg.SignInPhotosTTLMinutes},
-		{"SIGNIN_PHOTOS_MANIFEST_HOURS", DefaultPhotoWallManifestHours, &cfg.SignInPhotosManifestHours},
-	} {
-		n, err := positiveInt(v.key, v.def)
-		if err != nil {
-			return Config{}, err
-		}
-		*v.out = n
+	// The manifest interval follows the same rule as the idle timeout: a
+	// value that does not parse is a typo in .env, and a typo that silently
+	// falls back to the default is one nobody ever finds. The photo wall's
+	// set size is an admin setting in app_settings, not a variable here.
+	if cfg.SignInPhotosManifestHours, err = positiveInt("SIGNIN_PHOTOS_MANIFEST_HOURS", DefaultPhotoWallManifestHours); err != nil {
+		return Config{}, err
 	}
 
 	if err := cfg.checkInstalledPaths(); err != nil {

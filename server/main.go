@@ -216,9 +216,6 @@ func serveWith(cfg stockroom.Config) error {
 	// breaks it hardest.
 	db.StartPhotoWall(ctx, stockroom.PhotoWallConfig{
 		Dir:              cfg.SignInPhotosDir,
-		Count:            cfg.SignInPhotosCount,
-		Batch:            cfg.SignInPhotosBatch,
-		TTL:              time.Duration(cfg.SignInPhotosTTLMinutes) * time.Minute,
 		ManifestInterval: time.Duration(cfg.SignInPhotosManifestHours) * time.Hour,
 	})
 

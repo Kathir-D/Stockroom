@@ -630,19 +630,21 @@ export interface HealthResult {
 }
 
 /**
- * The sign-in photo wall's batch (docs/design/signin-photo-wall.html §5).
+ * The sign-in photo wall's set (docs/design/signin-photo-wall.html §5).
  *
- * `photos` is always an array and is often empty -- the wall is off, the
- * manifest is still building, Drive is unreachable, or a burst of sign-ins
- * drained the reel. All of those mean the same thing to the only caller: draw
- * no columns. There is no error shape here because the endpoint never returns
- * one.
+ * `photos` is always an array and is often empty: the wall is off, the
+ * manifest is still building, or Drive is unreachable. All of those mean the
+ * same thing to the only caller: draw no strips. There is no error shape here
+ * because the endpoint never returns one.
  */
 export interface SignInPhotos {
-  /** Server-relative tile paths, e.g. `/signin-photos/9f2c….jpg`. */
+  /**
+   * Server-relative tile paths, e.g. `/signin-photos/9f2c….jpg`, in strip
+   * order. New photographs arrive at the end.
+   */
   photos: string[];
-  /** How long those URLs stay fetchable before the server deletes the files. */
-  ttl_seconds: number;
+  /** How many the set is filling to. More than `photos.length` while it fills. */
+  size: number;
 }
 
 /**
@@ -691,9 +693,10 @@ export interface PhotoWallStatus {
   photo_count: number;
   built_at: string | null;
 
-  /** Tiles waiting, and tiles out in a browser waiting to expire. */
+  /** Photographs in the set now, the set's size setting, and its ceiling. */
   ready: number;
-  served: number;
+  size: number;
+  max_size: number;
 
   last_error: string;
   last_error_at: string | null;

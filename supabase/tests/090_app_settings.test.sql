@@ -17,7 +17,7 @@ from unnest(array[
   'id','backup_dir','photo_backup_dir','keep_days','stale_hours','schedule_hour',
   'drive_enabled','drive_remote','drive_path',
   'github_enabled','github_repo','github_token','archive_passphrase',
-  'photo_min_free_gb','photo_max_generations','updated_at'
+  'photo_min_free_gb','photo_max_generations','photo_wall_size','updated_at'
 ]) as c;
 
 -- The single row the migration inserts.
@@ -59,6 +59,12 @@ select throws_ok(
 select throws_ok(
   $$update app_settings set photo_min_free_gb = -1$$, '23514', null,
   'a negative disk-headroom threshold has no reading');
+select throws_ok(
+  $$update app_settings set photo_wall_size = 401$$, '23514', null,
+  'photo_wall_size = 401 is refused: the set is held in memory, and 400 is the bound');
+select throws_ok(
+  $$update app_settings set photo_wall_size = 9$$, '23514', null,
+  'photo_wall_size = 9 is refused: two strips need more than that');
 
 select lives_ok(
   $$update app_settings set schedule_hour = 0, photo_min_free_gb = 0$$,

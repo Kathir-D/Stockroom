@@ -89,7 +89,7 @@ func TestPhotoWallProbeGatesTheWrite(t *testing.T) {
 
 	const oldID = "1OLDfolderIDaaaaaaaaaaaaaaa"
 	source := probeSource(t, oldID, nil)
-	wall, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: &stubSource{data: []byte("tile")}})
+	wall, _ := newTestWall(t, PhotoWallOptions{Size: 10, Source: &stubSource{data: []byte("tile")}})
 	db.SetPhotoWall(wall, source)
 	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
@@ -98,7 +98,7 @@ func TestPhotoWallProbeGatesTheWrite(t *testing.T) {
 		t.Fatalf("SetPhotoWallFolder: %v", err)
 	}
 	fill(t, wall)
-	before := len(tileFiles(t, wall))
+	before, _ := wall.Counts()
 	if before == 0 {
 		t.Fatal("the reel did not fill, so this test cannot tell a preserved reel from an empty one")
 	}
@@ -123,7 +123,7 @@ func TestPhotoWallProbeGatesTheWrite(t *testing.T) {
 	if gotID != oldID || gotLabel != "Last season" {
 		t.Errorf("app_settings now holds %q/%q; a failed probe must write nothing", gotID, gotLabel)
 	}
-	if got := len(tileFiles(t, wall)); got != before {
+	if got, _ := wall.Counts(); got != before {
 		t.Errorf("the reel went from %d tiles to %d; a failed probe must not tear it down", before, got)
 	}
 }
@@ -143,15 +143,11 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 		BuiltAt:  time.Now(),
 		Entries:  []photoEntry{{Path: "a.jpg", Size: 10}},
 	}
-	wall, clock := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 2, Source: &stubSource{data: []byte("tile")}})
+	wall, _ := newTestWall(t, PhotoWallOptions{Size: 10, Source: &stubSource{data: []byte("tile")}})
 	db.SetPhotoWall(wall, source)
 	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
 	fill(t, wall)
-	served, _ := wall.TakePhotos(2)
-	if len(served) != 2 {
-		t.Fatalf("took %d tiles, want 2", len(served))
-	}
 	genBefore := wall.gen
 
 	if _, err := db.SetPhotoWallFolder(ctx, admin,
@@ -159,15 +155,8 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 		t.Fatalf("SetPhotoWallFolder: %v", err)
 	}
 
-	ready, stillServed := wall.Counts()
-	if ready != 0 {
-		t.Errorf("%d ready tiles survived the switch; every one belongs to the replaced folder", ready)
-	}
-	// Served tiles are deliberately left to expire on their own TTL: their
-	// URLs sit in a browser that has already rendered them, and 404ing a live
-	// page to save fifteen minutes is the worse trade.
-	if stillServed != 2 {
-		t.Errorf("%d served tiles survived, want 2", stillServed)
+	if ready, _ := wall.Counts(); ready != 0 {
+		t.Errorf("%d tiles survived the switch; every one belongs to the replaced folder", ready)
 	}
 	if wall.gen == genBefore {
 		t.Error("the generation did not advance, so a fetch in flight would file a photograph from the old folder into the new reel")
@@ -177,14 +166,6 @@ func TestPhotoWallSwitchInvalidatesTheReel(t *testing.T) {
 	}
 	if len(source.rebuild) != 1 {
 		t.Error("no rebuild was queued, so the wall would stay empty until the weekly refresh")
-	}
-
-	// And the served tiles still expire on the old schedule rather than being
-	// stranded on disk by the switch.
-	*clock = clock.Add(DefaultPhotoWallTTL + time.Minute)
-	wall.reap()
-	if _, servedAfter := wall.Counts(); servedAfter != 0 {
-		t.Errorf("%d served tiles outlived their TTL", servedAfter)
 	}
 }
 
@@ -201,7 +182,7 @@ func TestPhotoWallRepastingTheLiveFolderKeepsTheReel(t *testing.T) {
 
 	const id = "1SAMEfolderIDbbbbbbbbbbbbbb"
 	source := probeSource(t, id, nil)
-	wall, _ := newTestWall(t, PhotoWallOptions{Count: 4, Batch: 2, Source: &stubSource{data: []byte("tile")}})
+	wall, _ := newTestWall(t, PhotoWallOptions{Size: 10, Source: &stubSource{data: []byte("tile")}})
 	db.SetPhotoWall(wall, source)
 	t.Cleanup(func() { db.SetPhotoWall(nil, nil) })
 
@@ -215,8 +196,8 @@ func TestPhotoWallRepastingTheLiveFolderKeepsTheReel(t *testing.T) {
 	if status.FolderLabel != "Renamed" {
 		t.Errorf("label = %q, want the new one", status.FolderLabel)
 	}
-	if ready, _ := wall.Counts(); ready != 4 {
-		t.Errorf("%d ready tiles after re-pasting the live folder, want all 4", ready)
+	if ready, _ := wall.Counts(); ready != 10 {
+		t.Errorf("%d tiles after re-pasting the live folder, want all 10", ready)
 	}
 	if wall.gen != genBefore {
 		t.Error("the generation advanced for a folder that did not change")
@@ -234,7 +215,7 @@ func TestPhotoWallRepastingTheLiveFolderKeepsTheReel(t *testing.T) {
 func TestPhotoWallStatusExplainsARestingReel(t *testing.T) {
 	portrait := fmt.Errorf("%w: 3024x4032 is 0.75:1, outside 1.33-1.60", errPhotoUnusable)
 	src := &stubSource{err: portrait}
-	w, _ := newTestWall(t, PhotoWallOptions{Count: 2, Source: src})
+	w, _ := newTestWall(t, PhotoWallOptions{Size: 10, Source: src})
 	captureLog(t)
 	db := &DB{}
 	db.SetPhotoWall(w, nil)
@@ -352,11 +333,10 @@ func TestPhotoWallAdminOnly(t *testing.T) {
 
 /* --------------------------------------------------------- the preview ---- */
 
-// A preview must not consume the buffer the sign-in screen is about to draw
-// from: an admin reloading the screen a few times would otherwise empty the
-// wall for the next person to walk up.
+// A preview reads the set and takes nothing from it: an admin reloading the
+// screen leaves the wall exactly as it was.
 func TestPhotoWallPreviewDoesNotConsume(t *testing.T) {
-	wall, _ := newTestWall(t, PhotoWallOptions{Count: 8, Batch: 8, Source: &stubSource{data: []byte("tile")}})
+	wall, _ := newTestWall(t, PhotoWallOptions{Size: 10, Source: &stubSource{data: []byte("tile")}})
 	fill(t, wall)
 
 	first := wall.PreviewPhotos(6)
@@ -364,14 +344,8 @@ func TestPhotoWallPreviewDoesNotConsume(t *testing.T) {
 	if len(first) != 6 || len(second) != 6 {
 		t.Fatalf("previews returned %d and %d tiles, want 6 each", len(first), len(second))
 	}
-	if ready, served := wall.Counts(); ready != 8 || served != 0 {
-		t.Errorf("after two previews the reel is %d ready / %d served, want 8/0", ready, served)
-	}
-
-	// And the tiles a preview named are still there for the sign-in screen.
-	batch, _ := wall.TakePhotos(8)
-	if len(batch) != 8 {
-		t.Errorf("the sign-in batch got %d tiles after two previews, want 8", len(batch))
+	if ready, _ := wall.Counts(); ready != 10 {
+		t.Errorf("after two previews the set holds %d, want 10", ready)
 	}
 }
 
@@ -382,8 +356,8 @@ func TestPhotoWallAdminSurvivesTheOffState(t *testing.T) {
 	if got := wall.PreviewPhotos(6); len(got) != 0 {
 		t.Errorf("PreviewPhotos on a nil reel = %v", got)
 	}
-	if ready, served := wall.Counts(); ready != 0 || served != 0 {
-		t.Errorf("Counts on a nil reel = %d/%d", ready, served)
+	if ready, size := wall.Counts(); ready != 0 || size != 0 {
+		t.Errorf("Counts on a nil set = %d/%d", ready, size)
 	}
 	var src *DrivePhotoSource
 	src.Rebuild() // must not panic

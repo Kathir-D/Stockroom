@@ -85,7 +85,7 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 - `profiles.is_admin` is the only permission flag. The `role` column and the `user_role` enum are unused. `password_hash` is null until the owner or an admin sets one.
 - `assets.status` uses `available`, `checked_out` and `unavailable`. The open custody row decides whether an item is out, not the status column.
 - `activity_log` is append-only. Triggers refuse update, delete and truncate, and it has no foreign keys, so rows outlive the asset or account they name (`docs/adr/0003`).
-- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, due time, setup state, the Google client. Secret columns are redacted from exports.
+- `app_settings` is one row holding everything an admin configures: backup targets, the student-number format, due time, setup state, the Google client, the photo wall's folder and size. Secret columns are redacted from exports.
 - `kits` names are unique ignoring case, and `kit_items.asset_id` is unique.
 - Unused tables: `locations`, `tags`, `asset_tags`, `bookings`, `saved_filters`, and `assets.custom_fields` and `assets.location_id`.
 
@@ -151,7 +151,7 @@ Where things live in `internal/stockroom`:
 | Custody | `custody.go` (`openCustodySQL` is the one definition of "out"), `due.go`, `review.go`, `kits.go` |
 | Backup | `backup.go`, `export.go` (`takeSnapshot` is the one archive builder), `archive.go`, `restore.go` (the one `RestoreFromZip`), `backup_status.go`, `scheduler.go`, `photos_backup.go`, `target*.go`, `settings.go` |
 | Google | `google.go`, `google_admin.go` (one Drive connection shared by backup and photo wall), `drive_authorize.go`, `local_folders.go` |
-| Photo wall | `photowall*.go` |
+| Photo wall | `photowall*.go` (the set in memory, the Drive source, the normalizer, the admin reads) |
 | Activity and camera | `activity.go`, `camera*.go` |
 
 In `packages/ui/src/lib`, `app.svelte` is the whole app (routing, the one scan listener, the 401 hook), `scanner.ts` tells a scan from typing, and `styles/tokens.css` is the only file allowed to define a colour, radius, shadow or duration. `docs/design/design-system.md` is the UI reference, and where it disagrees with this file about behaviour, this file wins.

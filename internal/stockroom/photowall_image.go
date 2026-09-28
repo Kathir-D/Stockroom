@@ -50,7 +50,7 @@ const (
 	photoRatioMax = 1.90
 
 	// photoJPEGQuality lands a 900x600 tile at roughly 120 KB, which is what
-	// the reel's ~6 MB disk budget is calculated from (§2).
+	// the set's memory bound is calculated from (§2).
 	photoJPEGQuality = 82
 
 	// photoMaxSourceBytes is the ceiling on one original. §3 skips anything

@@ -76,52 +76,21 @@ Hardware reference for the closet PC with the camera on:
 
 The camera isn't supported under WSL, which would need `usbipd-win` to pass the webcam through. It's also not supported on native Windows.
 
-## A2. Sign-in photo wall as a film strip
+## A2. Sign-in photo wall: what's left
 
-Today the wall hands out single-use tiles from a disk cache. It keeps 48 ready and gives out 32 per sign-in page load, deleting each tile 15 minutes after it was shown. The code:
+The film strip and the in-memory set are built (`docs/decisions.md`, 2026-09-27). What's left needs the real Drive folder or the closet PC.
 
-| File | Role |
-|---|---|
-| `internal/stockroom/photowall.go` | The reel: buffering, serving, and deleting after use |
-| `photowall_drive.go` | Listing the folder and fetching a photo with `rclone cat` |
-| `photowall_image.go` | EXIF, aspect-ratio gate, crop, resize to 900×600 JPEG |
-| `photowall_admin.go` | The admin screen |
-| `photowall_google.go` | Starting the wall after a Google sign-in |
-| `packages/ui/src/lib/components/app/photo-wall.svelte` | The sign-in screen's columns |
-| [`docs/design/signin-photo-wall.html`](docs/design/signin-photo-wall.html) | The design |
-
-The new design keeps a set of about 150 photos in memory and scrolls them as film strips.
-
-- [ ] **Replace the single-use reel with a photo set.** The set holds N photos (default 150, stored in `app_settings`, capped at a maximum you choose and write down, for example 400). Prepare the set once and cycle through it continuously.
-- [ ] **Pick at random across folders, with a per-folder cap.** Choose a folder first and then a photo inside it, or cap any one folder at a small share of the set. Either way, a folder of 200 photos from one event can't fill the wall.
-- [ ] **Keep the photos in memory only.** 150 tiles at about 100 KB each is about 15 MB of RAM. Serve tiles from memory at `/signin-photos/{id}.jpg` and never write them to disk. Rebuild the set after a restart. Fall back to a disk cache only if measurements show the rebuild costs too much time or bandwidth.
-- [ ] **Refresh gradually.** On a slow timer, swap one photo for a new random pick, so the strip changes over the day without downloading everything again.
-- [ ] **Drop photos that disappear from Drive** at the next listing.
-- [ ] **Fill in the background.** The strip shows whatever is ready and grows as more arrives.
-- [ ] **Keep the existing guards.** One download at a time with a delay between them. The same rclone remote as the backup. Sign-in must not change at all if Drive is unreachable. Never send the folder id or a Drive URL in any response (`docs/decisions.md`, 2026-09-18).
-- [ ] **Fill faster.** Today it takes one photo every 20 to 25 seconds, so about an hour for 150, repeated after every restart.
+- [ ] **Fill faster.** A real fetch takes 20 to 25 seconds, so about an hour for 150 photos after every restart.
   - Download by file id rather than by path, so rclone doesn't resolve every folder on each fetch. Try `rclone backend copyid` and `--drive-root-folder-id` set to the file's parent, and measure both.
   - Check whether `rclone lsjson --metadata` returns Drive's image width and height. If it does, skip portrait and panoramic photos without downloading them.
   - Measure fill time and total download size against the real folder.
-- [ ] **Film-strip columns on the sign-in screen.** Photo frames with sprocket-hole edges, scrolling at a steady, slow pace, cycling through the whole set. Load images lazily as they approach the visible area. Append new photos to the end of the strip with no visible jump.
-  - Replace the batch endpoint `GET /signin/photos` with one that returns the current set. It stays unauthenticated and returns only tile URLs.
-  - When the set is empty or the feature is off, draw no strips and leave the sign-in field alone.
-  - Respect `prefers-reduced-motion`.
-- [ ] **Admin → Photo wall.** Add a set-size setting, a fill-progress line ("112 of 150 ready") and a **Reshuffle now** button.
-- [ ] **Remove the old settings.** Delete `SIGNIN_PHOTOS_BATCH`, `SIGNIN_PHOTOS_TTL_MINUTES`, `SIGNIN_PHOTOS_DIR` and `SIGNIN_PHOTOS_COUNT` from `internal/stockroom/config.go` and `.env.example`, and remove the `.cache/signin-photos` directory handling.
-- [ ] **Tests.**
-  - Go tests for folder-balanced selection, the per-folder cap, gradual refresh, removing deleted photos, switching folders, and the memory cap. Use the fake rclone the existing photo-wall tests use.
-  - Update the frontend smoke tests for the new endpoint.
-  - By hand, unplug the network and confirm sign-in is unaffected, then watch a full cycle on the slowest machine available.
-- [ ] **Docs.** Update `docs/design/signin-photo-wall.html`, `docs/api.md` (the endpoint rows) and `docs/decisions.md`.
+- [ ] **By hand**, unplug the network and confirm sign-in is unaffected, then watch a full cycle of the strips on the slowest machine available.
 - [ ] **On the closet PC**, press **Sign in with Google** in Admin → Photo wall, then **Choose from Google Drive** and pick the student media photos folder. Blocked on section 8.
 
 ## A3. Repository
 
 - [ ] **Branch protection on `main`**, requiring `tests`, `tests-windows`, the four `tests-postgres` jobs and the two `package-linux` jobs. [`CI.md`](CI.md) has the exact `gh api` command. The owner has to run it, or an agent with admin rights on the repository.
-- [ ] **Set the repository description and topics.** Topics: `school`, `inventory`, `checkout`, `barcode`, `education`, `equipment`, `go`, `svelte`, `self-hosted`. Use `gh repo edit --description ... --add-topic ...`.
 - [ ] **Add screenshots or a short recording to the README**, with the example data loaded (setup wizard → Load examples). Show sign-in, browse, the cart, and Admin → Activity. Put the images in `docs/images/`.
-- [ ] **Make `./scripts/dev.sh test` repeatable.** A second run without `supabase db reset` fails `supabase/tests/080_seed.test.sql`, because the Go suite changes seed rows. Either make 080 assert only rows the Go suite never touches, or make the Go tests that change seed rows put them back. Done when `./scripts/dev.sh test` passes twice in a row.
 
 ## A4. Product work for later
 
