@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/Kathir-D/Stockroom/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/Kathir-D/Stockroom/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="https://github.com/Kathir-D/Stockroom/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/Kathir-D/Stockroom?include_prereleases&label=release"></a>
   <a href="LICENSE"><img alt="license: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
   <img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white">
   <img alt="Svelte 5" src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white">
@@ -33,6 +34,11 @@
 - [Project status](#project-status)
 - [What you need](#what-you-need)
 - [Install](#install)
+  - [Linux — Debian or Ubuntu (recommended)](#linux--debian-or-ubuntu-recommended)
+  - [macOS — Homebrew](#macos--homebrew)
+  - [Windows 10 or 11 — WSL 2](#windows-10-or-11--wsl-2)
+  - [From a checkout](#from-a-checkout)
+  - [After it installs](#after-it-installs)
 - [First-time setup](#first-time-setup)
 - [Daily use](#daily-use)
 - [Configuration](#configuration)
@@ -70,9 +76,20 @@ Everything runs on that one machine. There is no cloud account to create and no 
 
 ## Project status
 
-Stockroom runs end to end from a checkout, and the test suite covers Postgres 14 through 17. No release has been tagged yet, so the install commands below won't work until the first release ships. Until then, run it from a checkout (see [Development](#development)). The packages pass in containers but have not yet been proven on a real Linux machine or Mac. [ROADMAP.md](ROADMAP.md) tracks what's left.
+Stockroom runs end to end from a checkout, and the test suite covers Postgres 14 through 17. No
+release has been tagged yet, so the [install](#install) commands will not work until the first one
+ships — until then, run it from a checkout (see [From a checkout](#from-a-checkout)). The packages
+pass in containers but have not yet been proven on a real Linux machine or a real Mac.
+[ROADMAP.md](ROADMAP.md) tracks what's left.
 
 ## What you need
+
+| | |
+|---|---|
+| **Latest release** | [releases/latest](https://github.com/Kathir-D/Stockroom/releases/latest) — no tag yet |
+| **Install** | `curl … get.sh \| sudo bash` on Debian or Ubuntu, `brew install --cask kathir-d/tap/stockroom` on macOS, `irm … get.ps1 \| iex` on Windows |
+| **Requires** | Debian 12, Ubuntu 24.04 or newer, macOS, or Windows 10 or 11 through WSL 2. PostgreSQL 14+. A HID barcode scanner |
+| **Cost** | Free and AGPL-3.0. No account to create, no subscription, and no internet for daily use |
 
 | Item | Notes |
 |---|---|
@@ -85,27 +102,128 @@ Supported systems are Debian 12, Ubuntu 24.04 and newer, macOS, and Windows 10 o
 
 ## Install
 
-Linux (Debian 12, Ubuntu 24.04 or newer):
+Pick the line for your machine. Whichever one you use, you end up with the same thing: PostgreSQL
+and rclone installed, a database created, a config file written, and a service that starts Stockroom
+at boot with nobody logged in. Then open http://127.0.0.1:8080 and the setup wizard takes it from
+there.
+
+> **No release has shipped yet.** Every command below works once a `v*` tag exists. Until then, run it
+> from a checkout: see [From a checkout](#from-a-checkout).
+
+### Linux — Debian or Ubuntu (recommended)
+
+Debian 12, Ubuntu 24.04 or newer, on amd64 or arm64.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh | sudo bash
 ```
 
-macOS:
+`get.sh` downloads the `.deb` from the latest release, checks it against that release's
+`checksums.txt`, and installs it with apt, which pulls in PostgreSQL 14+ and rclone. It then runs
+`stockroom setup`, which creates the database, writes the config and starts the service. The service
+restarts the server if it dies, and it starts at boot whether or not anyone is logged in.
+
+**To update later, run the same command.** The server dumps the database with `pg_dump` before it
+applies a new migration, into `backups/pre-migrate/`, so a student's checkout history survives the
+jump. If that dump fails the server refuses to migrate and says why, so an upgrade never changes the
+schema without a copy of it.
+
+> **The script checks the release checksum, and refuses a distro it cannot support.** A `.deb` that
+> doesn't match `checksums.txt` is not installed and the script says so. So is Ubuntu before 24.04,
+> Debian 11, and anything that is not a Debian or Ubuntu derivative — the script reads
+> `/etc/os-release` and stops rather than installing something that will not start. Ubuntu 22.04 is
+> refused for a concrete reason: it packages rclone 1.53, and Stockroom needs 1.60.
+
+> **To install a particular release**, name it: `… | sudo STOCKROOM_VERSION=v1.0.0 bash`. To run the
+> service as a dedicated account rather than the one that ran `sudo` — a headless server, where that
+> account is `root` — pass one of setup's own flags: `… | sudo bash -s -- --service-user stockroom`.
+
+### macOS — Homebrew
 
 ```bash
-brew install kathir-d/tap/stockroom && stockroom setup
+brew install --cask kathir-d/tap/stockroom
+stockroom setup
 ```
 
-Windows 10 or 11, in an administrator PowerShell. This runs the Linux package inside Ubuntu under WSL 2:
+The cask pulls in `postgresql@17` and rclone. `stockroom setup` asks for your password once, because
+it writes two LaunchDaemons, `com.stockroom.postgresql` and `com.stockroom.server`, so both start at
+boot with nobody logged in. Run it as yourself, not with `sudo`.
+
+**To update later:**
+
+```bash
+brew update && brew upgrade --cask kathir-d/tap/stockroom
+```
+
+`brew update` refreshes the tap so Homebrew can see a new release. To check first without changing
+anything, `brew outdated --cask`. Or just watch the
+[releases page](https://github.com/Kathir-D/Stockroom/releases) — there is no in-app updater, so a
+release you did not come to Homebrew for will not announce itself.
+
+> **That is one line, and no `brew trust` in it.** Homebrew 7 refuses to load a cask from an untrusted
+> tap, and the fix people reach for is a `brew tap` plus a `brew trust` first. Neither is needed here,
+> because a *fully qualified* install trusts the cask as part of the install — naming the tap in the
+> command is what does it. `brew install kathir-d/tap/stockroom` on its own is correct, and
+> `brew trust Kathir-D/tap` is accepted but redundant.
+
+> **The binary is ad-hoc signed and not notarized, so the cask clears the quarantine attribute.**
+> Homebrew deliberately quarantines cask downloads, which would otherwise make every user approve the
+> binary by hand in System Settings. The cask removes the attribute in a `postflight` block that runs
+> *after* Homebrew has verified the SHA-256 — so the checksum is the integrity gate, and the quarantine
+> flag never was one. Homebrew's own `--no-quarantine` flag, which used to do this, was removed in 7.x
+> and has no cask DSL replacement. If a future Homebrew drops the block, installs still succeed and you
+> would get the ordinary one-time approval back.
+
+> **Why a personal tap rather than `homebrew/cask`?** Homebrew's policy for its official cask repo
+> requires that apps which Gatekeeper can assess pass its Gatekeeper checks. Stockroom's binary is
+> un-notarized, so `spctl` reports it as `rejected` and it would be ineligible. Their maintainers have
+> been explicit that this does not stop a developer maintaining their own tap of unsigned software —
+> which is what `Kathir-D/homebrew-tap` is, shared with Sonar and headless-spotify.
+
+### Windows 10 or 11 — WSL 2
+
+In an administrator PowerShell (right-click, Run as administrator):
 
 ```powershell
 irm https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.ps1 | iex
 ```
 
-Each one installs PostgreSQL and rclone, creates the database, writes the config, and installs a service that starts Stockroom at boot with nobody logged in. Then open http://127.0.0.1:8080 and the setup wizard takes it from there.
+`get.ps1` installs Ubuntu 24.04 under WSL if it is missing, turns systemd on, runs `get.sh` inside
+it, and registers a `Stockroom WSL` boot task that starts Ubuntu with nobody logged in. Open
+http://localhost:8080 in any Windows browser. The barcode scanner and the label printer stay on the
+Windows side and need nothing extra. Backups go to `Documents\Stockroom Backups` in your Windows
+profile, where Explorer finds them and where they survive the Ubuntu distribution being removed.
 
-To upgrade, run the same command again. The server dumps the database before applying a new migration. `stockroom doctor` checks an install and tells you how to fix what's wrong. [docs/INSTALL.md](docs/INSTALL.md) covers options, uninstalling and troubleshooting.
+> **This runs the Linux package inside Ubuntu under WSL 2.** There is no native Windows build and none
+> is planned. The closet camera does not work under WSL, since Docker there cannot reach a USB camera.
+
+> **The first run may ask for a restart.** A first WSL install usually does. Restart, then run the
+> command again. Ubuntu will ask for a new user name and password, and that account runs Stockroom.
+> Where WSL gives you no personal Linux account, `get.ps1` uses a dedicated `stockroom` service user
+> instead.
+
+### From a checkout
+
+```bash
+git clone https://github.com/Kathir-D/Stockroom.git
+cd Stockroom
+./scripts/dev.sh
+```
+
+Needs Docker, Go 1.25 or newer, Node.js 22 or newer and the Supabase CLI. That brings up the
+database, the API server, the web app and the desktop app, for developing against.
+[Development](#development) covers what you get, and [CONTRIBUTING.md](CONTRIBUTING.md#architecture)
+has the repository layout.
+
+To install on this machine the way an install works — a real service, a real config, but PostgreSQL
+in a `postgres:17` container — use `./scripts/install.sh` instead. That is the older path, and it is
+removed once the packages are proven on real machines.
+
+### After it installs
+
+`stockroom doctor` looks at a live install and tells you what is wrong with it, in words you can act
+on. `stockroom support-bundle` zips that report and the log, secrets removed, for an issue.
+[docs/INSTALL.md](docs/INSTALL.md) covers setup options, upgrading, uninstalling and troubleshooting.
 
 ## First-time setup
 

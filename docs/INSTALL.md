@@ -169,7 +169,7 @@ Alt+F4 (Cmd+Q on a Mac) leaves kiosk mode.
 
 ## Upgrading
 
-Run the install command again: `get.sh` on Linux and WSL, `brew upgrade stockroom` on macOS. Installing the newer package restarts the service. Before the new binary applies a migration, it dumps the database with `pg_dump` into `backups/pre-migrate/` (mode 600, newest 10 kept). If the dump fails, the server refuses to migrate and says why, so an upgrade never changes the schema without a copy.
+Run the install command again: `get.sh` on Linux and WSL, `brew update && brew upgrade --cask kathir-d/tap/stockroom` on macOS. Installing the newer package restarts the service. Before the new binary applies a migration, it dumps the database with `pg_dump` into `backups/pre-migrate/` (mode 600, newest 10 kept). If the dump fails, the server refuses to migrate and says why, so an upgrade never changes the schema without a copy.
 
 A database migrated by a newer Stockroom, or by a different build, refuses to start one that lacks any of its migrations. Install the newer version again, or restore the pre-migrate dump into an empty database.
 
