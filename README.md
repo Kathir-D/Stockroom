@@ -163,7 +163,7 @@ release you did not come to Homebrew for will not announce itself.
 > **That is one line, and no `brew trust` in it.** Homebrew 7 refuses to load a cask from an untrusted
 > tap, and the fix people reach for is a `brew tap` plus a `brew trust` first. Neither is needed here,
 > because a *fully qualified* install trusts the cask as part of the install — naming the tap in the
-> command is what does it. `brew install kathir-d/tap/stockroom` on its own is correct, and
+> command is what does it. `brew install --cask kathir-d/tap/stockroom` on its own is correct, and
 > `brew trust Kathir-D/tap` is accepted but redundant.
 
 > **The binary is ad-hoc signed and not notarized, so the cask clears the quarantine attribute.**

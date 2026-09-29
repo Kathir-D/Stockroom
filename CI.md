@@ -42,7 +42,7 @@ The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up. To r
 
 1. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
 2. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
-3. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install kathir-d/tap/stockroom && stockroom version` on a Mac.
+3. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install --cask kathir-d/tap/stockroom && stockroom version` on a Mac.
 
 If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. The re-run finds the release, replaces its files, and goes on to the tap. A re-run with nothing new to commit succeeds without pushing.
 

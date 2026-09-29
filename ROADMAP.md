@@ -26,7 +26,7 @@ There is no native Windows installer, service or package, and none is planned.
 curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh | sudo bash
 
 # macOS
-brew install kathir-d/tap/stockroom && stockroom setup
+brew install --cask kathir-d/tap/stockroom && stockroom setup
 ```
 
 `get.sh` installs a `.deb` that pulls in PostgreSQL and rclone, then runs `stockroom setup`. Setup creates the database, writes the config, installs and starts the service, and opens the web setup wizard that already exists (`packages/ui/src/lib/screens/setup.svelte`). Upgrading means installing the newer package. The server dumps the database before it applies a new migration.
