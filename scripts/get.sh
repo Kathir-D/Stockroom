@@ -37,7 +37,7 @@ case "${ID:-} ${ID_LIKE:-}" in
   *)
     cat >&2 <<EOF
 stockroom: this installer supports Debian and Ubuntu, and this is ${PRETTY_NAME:-an unknown system}.
-On macOS: brew install kathir-d/stockroom/stockroom && stockroom setup
+On macOS: brew install --cask kathir-d/tap/stockroom && stockroom setup
 Elsewhere, see https://github.com/$repo/blob/main/docs/INSTALL.md
 EOF
     exit 1

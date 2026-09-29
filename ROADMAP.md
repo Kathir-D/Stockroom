@@ -26,7 +26,7 @@ There is no native Windows installer, service or package, and none is planned.
 curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh | sudo bash
 
 # macOS
-brew install kathir-d/stockroom/stockroom && stockroom setup
+brew install --cask kathir-d/tap/stockroom && stockroom setup
 ```
 
 `get.sh` installs a `.deb` that pulls in PostgreSQL and rclone, then runs `stockroom setup`. Setup creates the database, writes the config, installs and starts the service, and opens the web setup wizard that already exists (`packages/ui/src/lib/screens/setup.svelte`). Upgrading means installing the newer package. The server dumps the database before it applies a new migration.
@@ -108,7 +108,7 @@ Do these in order. Each section's dependencies are listed at its start.
 Done on `feat/roadmap-production-path`, except what needs a tag or a real machine. `docs/decisions.md` (2026-09-27, one binary, the packages, setup and doctor) records what was decided. What's left:
 
 - [ ] **Test Google sign-in on rclone 1.60 against a real account.** Every rclone command Stockroom runs works on 1.60.1 offline. The browser flow through `rclone authorize` with the school's client id hasn't been tried. If it fails, the `.deb` moves rclone to `Recommends` and `get.sh` installs rclone.org's own `.deb`.
-- [ ] **Create the tap and its token.** The owner creates the repository `Kathir-D/homebrew-stockroom` and a fine-grained token with contents write on it only, stored in this repository as `HOMEBREW_TAP_TOKEN`. `release.yml` commits the cask there on each full release.
+- [x] **Create the tap and its key.** The cask goes to `Kathir-D/homebrew-tap`, shared with Sonar and headless-spotify. A deploy key with write access to it is stored here as `TAP_DEPLOY_KEY`. `release.yml` commits the cask there on each full release.
 - [ ] **Release a candidate.** Tag `v0.9.0-rc.1`. The release workflow marks it a prerelease, so it doesn't touch the tap and `releases/latest` skips it. Install it with `curl … get.sh | sudo STOCKROOM_VERSION=v0.9.0-rc.1 bash` on a machine that isn't the development Mac.
 
 **Done when:** a pushed tag produces a GitHub release with the archives, both `.deb` files, `checksums.txt`, and a cask commit in the tap.

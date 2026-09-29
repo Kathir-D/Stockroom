@@ -37,7 +37,10 @@ archives:
       - LICENSE*
       - docs/INSTALL.md
       # setup --with-camera on macOS runs the cask's copy (the .deb has its own).
-      - deploy/camera/**/*
+      # The glob has to be `**`, not `**/*`: the latter only matches paths at
+      # least one directory deep, so it ships deploy/camera/empty/.gitkeep and
+      # silently drops camera.sh -- the one file that matters.
+      - deploy/camera/**
 
 checksum:
   name_template: checksums.txt
@@ -112,7 +115,7 @@ homebrew_casks:
     description: Equipment checkout for a school media department
     repository:
       owner: Kathir-D
-      name: homebrew-stockroom
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     commit_author:
       name: github-actions[bot]

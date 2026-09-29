@@ -42,7 +42,7 @@ Development and production run different stacks on purpose.
 The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`). `setup --config` writes the config there instead and points the service at it, and a later `setup` or `service install` without the flag keeps that file. `serve` refuses a database that records a migration the binary doesn't carry.
 
 - Linux (Debian 12, Ubuntu 24.04 and newer) runs `curl … scripts/get.sh | sudo bash`, which installs the `.deb` from GitHub releases and runs `stockroom setup`. The package depends on the distribution's `postgresql (>= 14)` and `rclone (>= 1.60)` and ships a systemd unit. Setup runs the service as the account that ran `sudo`, creates the `stockroom` role and database, and writes `/etc/stockroom/stockroom.env`. Data lives in `/var/lib/stockroom`.
-- macOS runs `brew install kathir-d/stockroom/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
+- macOS runs `brew install --cask kathir-d/tap/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
 - Windows runs `scripts/get.ps1`, which installs Ubuntu under WSL 2, turns systemd on, runs `get.sh` inside it, and registers a `Stockroom WSL` boot task. There is no native Windows installer or service.
 
 `docs/INSTALL.md` is the guide. `.goreleaser.yaml` builds every release artefact and `packaging/linux/` holds the unit and maintainer scripts. The older installer, `scripts/install.sh` with a `postgres:17` container (`deploy/`), still works from a checkout. It gets deleted, with `deploy/docker-compose.yml`, `deploy/stockroom-run.sh` and the two service templates, once the packages pass on a real Linux machine and a real Mac. `deploy/camera/` stays.
@@ -216,7 +216,7 @@ Which endpoint a code goes to depends on the screen and a lookup, never a guess.
 Things that only a person, hardware or the school can settle. Each has a ROADMAP entry.
 
 - The live webcam has not run through go2rtc on macOS or Linux, the school has not approved recording students, and the QuickCam and closet PC tuning are unmeasured (ROADMAP A1).
-- No tag has been pushed, so no release exists and the Homebrew tap doesn't exist (ROADMAP §3, §6).
+- No tag has been pushed, so no release exists. The tap (`Kathir-D/homebrew-tap`, shared with Sonar and headless-spotify) exists, but has no stockroom cask until the first full release (ROADMAP §3, §6).
 - The packages are proven in containers only. No VM or real machine has been rebooted to prove the service comes back after a power cut with nobody logged in, and macOS setup has never run (ROADMAP §5, §6).
 - The barcode scanner isn't bought, so the scan threshold is untuned (ROADMAP §8).
 - The closet PC's backup folders, photo-mirror disk and target credentials wait on the PC (ROADMAP §9).

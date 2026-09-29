@@ -7,7 +7,7 @@ An install is the operating system's PostgreSQL, one `stockroom` binary and one 
 | Platform | Command |
 |---|---|
 | Debian 12 or Ubuntu 24.04, and newer | `curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh \| sudo bash` |
-| macOS | `brew install kathir-d/stockroom/stockroom && stockroom setup` |
+| macOS | `brew install --cask kathir-d/tap/stockroom && stockroom setup` |
 | Windows 10 or 11 | `get.ps1` in an administrator PowerShell, which runs the Linux package inside Ubuntu under WSL 2 |
 
 There is no native Windows version.
@@ -42,7 +42,7 @@ The service runs as the account that ran `sudo`, so the backup folder picker sta
 ## macOS
 
 ```bash
-brew install kathir-d/stockroom/stockroom
+brew install --cask kathir-d/tap/stockroom
 stockroom setup
 ```
 
@@ -169,7 +169,7 @@ Alt+F4 (Cmd+Q on a Mac) leaves kiosk mode.
 
 ## Upgrading
 
-Run the install command again: `get.sh` on Linux and WSL, `brew upgrade stockroom` on macOS. Installing the newer package restarts the service. Before the new binary applies a migration, it dumps the database with `pg_dump` into `backups/pre-migrate/` (mode 600, newest 10 kept). If the dump fails, the server refuses to migrate and says why, so an upgrade never changes the schema without a copy.
+Run the install command again: `get.sh` on Linux and WSL, `brew update && brew upgrade --cask kathir-d/tap/stockroom` on macOS. Installing the newer package restarts the service. Before the new binary applies a migration, it dumps the database with `pg_dump` into `backups/pre-migrate/` (mode 600, newest 10 kept). If the dump fails, the server refuses to migrate and says why, so an upgrade never changes the schema without a copy.
 
 A database migrated by a newer Stockroom, or by a different build, refuses to start one that lacks any of its migrations. Install the newer version again, or restore the pre-migrate dump into an empty database.
 
@@ -205,7 +205,7 @@ macOS:
 
 ```bash
 stockroom service uninstall       # removes the Stockroom LaunchDaemon
-brew uninstall stockroom
+brew uninstall --cask kathir-d/tap/stockroom
 ```
 
 The PostgreSQL LaunchDaemon, the database and `$(brew --prefix)/var/stockroom` stay. To delete them too: `sudo launchctl bootout system/com.stockroom.postgresql`, `sudo rm /Library/LaunchDaemons/com.stockroom.postgresql.plist`, `dropdb stockroom`, `dropuser stockroom`, then `rm -rf "$(brew --prefix)/var/stockroom"`.
