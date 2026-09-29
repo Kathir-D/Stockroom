@@ -62,6 +62,50 @@ jobs:
       - name: Check the binary runs
         run: dist/stockroom_linux_amd64_v1/stockroom version
 
+      # The tarballs are what the macOS cask unpacks, and `setup --with-camera`
+      # runs deploy/camera/camera.sh out of the one it lands in. (The .deb ships
+      # its own copy, at /usr/share/stockroom/camera.) A glob that quietly
+      # matches nothing ships a release whose camera is simply absent, with
+      # nothing in the build output to say so -- so assert the files are really
+      # in there rather than trusting the glob to mean what it looks like.
+      #
+      # All four archives, not just one. They are the same artifact built for
+      # four targets, so a per-target exception here would stay invisible until
+      # somebody ran `setup --with-camera` on the platform it applied to. macOS
+      # is the only platform that uses the archive copy, and a Linux-only
+      # assertion never proves the two macOS ones.
+      - name: Check every archive carries the camera
+        run: |
+          set -euo pipefail
+          camera_files=(
+            deploy/camera/camera.sh
+            deploy/camera/docker-compose.yml
+            deploy/camera/compose.linux-webcam.yml
+            deploy/camera/com.stockroom.go2rtc.plist.template
+          )
+          checked=0
+          for archive in dist/stockroom_*.tar.gz; do
+            # Listed once per archive rather than re-run per file. `tar tzf |
+            # grep -q` lets grep exit on the first match, tar takes SIGPIPE, and
+            # pipefail would then report a perfectly good listing as a failure.
+            # A here-string has no pipe, so there is nothing to break.
+            names=$(tar tzf "$archive")
+            modes=$(tar tvzf "$archive")
+            for f in "${camera_files[@]}"; do
+              grep -qxF "$f" <<<"$names" \
+                || { echo "::error::$f is missing from $archive"; exit 1; }
+            done
+            # setup runs camera.sh directly, so it has to arrive executable.
+            grep -qE '^-rwxr-xr-x .*deploy/camera/camera\.sh$' <<<"$modes" \
+              || { echo "::error::camera.sh is not executable in $archive"; exit 1; }
+            checked=$((checked + 1))
+          done
+          # A glob that matches nothing is the same failure as a glob matching
+          # the wrong files, and `for` over an unmatched glob is a silent
+          # no-op, so it has to be refused explicitly.
+          [ "$checked" -gt 0 ] || { echo "::error::no archives found in dist/"; exit 1; }
+          echo "camera.sh present and executable in $checked archives"
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
