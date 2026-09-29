@@ -7,7 +7,7 @@ An install is the operating system's PostgreSQL, one `stockroom` binary and one 
 | Platform | Command |
 |---|---|
 | Debian 12 or Ubuntu 24.04, and newer | `curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get.sh \| sudo bash` |
-| macOS | `brew install kathir-d/stockroom/stockroom && stockroom setup` |
+| macOS | `brew install kathir-d/tap/stockroom && stockroom setup` |
 | Windows 10 or 11 | `get.ps1` in an administrator PowerShell, which runs the Linux package inside Ubuntu under WSL 2 |
 
 There is no native Windows version.
@@ -42,7 +42,7 @@ The service runs as the account that ran `sudo`, so the backup folder picker sta
 ## macOS
 
 ```bash
-brew install kathir-d/stockroom/stockroom
+brew install kathir-d/tap/stockroom
 stockroom setup
 ```
 

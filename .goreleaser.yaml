@@ -112,7 +112,7 @@ homebrew_casks:
     description: Equipment checkout for a school media department
     repository:
       owner: Kathir-D
-      name: homebrew-stockroom
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     commit_author:
       name: github-actions[bot]

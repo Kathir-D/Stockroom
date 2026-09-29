@@ -107,20 +107,25 @@ jobs:
             --generate-notes "${flags[@]}" \
             dist/*.deb dist/*.tar.gz dist/checksums.txt
 
-      # The tap token is a fine-grained token with contents write on
-      # Kathir-D/homebrew-stockroom only. A prerelease doesn't touch the tap.
+      # The tap is Kathir-D/homebrew-tap, shared with Sonar and
+      # headless-spotify. TAP_DEPLOY_KEY is a deploy key on that repository
+      # with write access, so it can reach nothing else. A prerelease doesn't
+      # touch the tap.
       - name: Update the Homebrew tap
         if: ${{ !contains(github.ref_name, '-') }}
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
           TAG: ${{ github.ref_name }}
         run: |
-          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releases) and re-run this job."
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "::error::The TAP_DEPLOY_KEY secret is not set, so the cask was not published. The GitHub release is up. Add the secret (CI.md, Releases) and re-run this job."
             exit 1
           fi
-          git clone --depth 1 \
-            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Kathir-D/homebrew-stockroom.git" tap
+          KEY="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone --depth 1 git@github.com:Kathir-D/homebrew-tap.git tap
           mkdir -p tap/Casks
           cp dist/homebrew/Casks/stockroom.rb tap/Casks/stockroom.rb
           cd tap
@@ -132,7 +137,5 @@ jobs:
             echo "The tap already has stockroom ${TAG}."
             exit 0
           fi
-          git commit -m "stockroom ${TAG}"
-          # HEAD names the branch, so this works on a tap created empty (the
-          # first push makes the branch) as well as one with a README.
+          git commit -m "stockroom ${TAG#v}"
           git push origin HEAD

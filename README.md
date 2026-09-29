@@ -94,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/Kathir-D/Stockroom/main/scripts/get
 macOS:
 
 ```bash
-brew install kathir-d/stockroom/stockroom && stockroom setup
+brew install kathir-d/tap/stockroom && stockroom setup
 ```
 
 Windows 10 or 11, in an administrator PowerShell. This runs the Linux package inside Ubuntu under WSL 2:

@@ -32,20 +32,17 @@ To run it locally, build the packages the same way and use a throwaway container
 
 ## Releases
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a `v*` tag. Its `build` job has a read-only token and runs `goreleaser release --clean --skip=publish`, which builds the binaries, both `.deb` files, `checksums.txt` and the Homebrew cask into `dist/`. It checks the Linux binary runs `stockroom version`. The `publish` job has `contents: write` and runs no third-party code, so dependency scripts never see a token that can write. That split protects the tokens, not the files: the binaries, packages and cask are all built in the job that ran `npm ci`, and what guards their contents is the hashes `package-lock.json` pins. It creates the GitHub release with `gh`, marking a tag with a hyphen (`v0.9.0-rc.1`) as a prerelease so `releases/latest` skips it, and commits the cask to `Kathir-D/homebrew-stockroom` for a full release.
+[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a `v*` tag. Its `build` job has a read-only token and runs `goreleaser release --clean --skip=publish`, which builds the binaries, both `.deb` files, `checksums.txt` and the Homebrew cask into `dist/`. It checks the Linux binary runs `stockroom version`. The `publish` job has `contents: write` and runs no third-party code, so dependency scripts never see a token that can write. That split protects the tokens, not the files: the binaries, packages and cask are all built in the job that ran `npm ci`, and what guards their contents is the hashes `package-lock.json` pins. It creates the GitHub release with `gh`, marking a tag with a hyphen (`v0.9.0-rc.1`) as a prerelease so `releases/latest` skips it, and commits the cask to [`Kathir-D/homebrew-tap`](https://github.com/Kathir-D/homebrew-tap), the tap it shares with Sonar and headless-spotify, for a full release.
 
-The tap push needs `HOMEBREW_TAP_TOKEN`, a fine-grained token with contents write on `Kathir-D/homebrew-stockroom` only. Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
+The tap push needs `TAP_DEPLOY_KEY`, the private half of a deploy key on `Kathir-D/homebrew-tap` with write access. A deploy key reaches that one repository and nothing else. (`HOMEBREW_TAP_TOKEN` in the build job is a placeholder the GoReleaser cask template reads; it is never used to push.) Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
 
 ### Publishing a release, step by step
 
-These steps need the owner. An agent can't create repositories, secrets or tags on the owner's behalf.
+The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up. To replace the key: `ssh-keygen -t ed25519 -N "" -f key`, then `gh repo deploy-key add key.pub -R Kathir-D/homebrew-tap --allow-write --title "Stockroom release workflow"` and `gh secret set TAP_DEPLOY_KEY -R Kathir-D/Stockroom < key`, and delete both files. Remove the old key under the tap's Settings → Deploy keys.
 
-1. **Create the tap.** On GitHub, create the public repository `Kathir-D/homebrew-stockroom`. Tick "Add a README" so it has a `main` branch. Homebrew finds it from the name: `brew install kathir-d/stockroom/stockroom` looks in `Kathir-D/homebrew-stockroom`.
-2. **Create the token.** Settings → Developer settings → Fine-grained tokens → Generate new token. Repository access: only `Kathir-D/homebrew-stockroom`. Permissions: Contents, read and write. Nothing else.
-3. **Store it.** In this repository, Settings → Secrets and variables → Actions → New repository secret, named `HOMEBREW_TAP_TOKEN`.
-4. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
-5. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
-6. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install kathir-d/stockroom/stockroom && stockroom version` on a Mac.
+1. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
+2. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
+3. **Tag the full release** the same way, for example `v0.9.0`. The publish job then commits `Casks/stockroom.rb` to the tap. Check it with `brew install kathir-d/tap/stockroom && stockroom version` on a Mac.
 
 If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. The re-run finds the release, replaces its files, and goes on to the tap. A re-run with nothing new to commit succeeds without pushing.
 
