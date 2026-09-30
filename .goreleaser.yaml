@@ -48,8 +48,14 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
 
+# No changelog stanza. With `use: github-native` GoReleaser POSTs to
+# releases/generate-notes even under --skip=publish, and this build job's
+# read-only token gets a 401 that fails the whole release. The notes are
+# unused anyway: the publish job runs `gh release create --generate-notes`.
+# Add one back only alongside a token that can write, and only if something
+# reads its output.
 changelog:
-  use: github-native
+  disable: true
 
 # The .deb. Its name carries no version, so
 # releases/latest/download/stockroom_amd64.deb always resolves to the newest.
