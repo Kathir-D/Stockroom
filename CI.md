@@ -36,7 +36,7 @@ To run it locally, build the packages the same way and use a throwaway container
 
 The tap push needs `TAP_DEPLOY_KEY`, the private half of a deploy key on `Kathir-D/homebrew-tap` with write access. A deploy key reaches that one repository and nothing else. Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
 
-The cask is hand-written, in [`packaging/mac/stockroom.rb`](packaging/mac/stockroom.rb), the same shape the other two in the tap use. `build` fills it in with `scripts/make-cask.sh`, which substitutes the version and the four checksums from the release's own `checksums.txt`, and then runs `brew style` on the result. GoReleaser writes no cask, so there is no `homebrew_casks` stanza in `.goreleaser.yaml` and no `HOMEBREW_TAP_TOKEN` in the environment. `brew style` is run with `--except Cask/InstallSteps`, which the block on the cask's `postflight` cannot satisfy; the cask explains why in place.
+The cask is hand-written, in [`packaging/mac/stockroom.rb`](packaging/mac/stockroom.rb), the same shape the other two in the tap use. `build` fills it in with `scripts/make-cask.sh`, which substitutes the version and the four checksums from the release's own `checksums.txt`, and then runs `brew style` on the result. GoReleaser writes no cask, so there is no `homebrew_casks` stanza in `.goreleaser.yaml` and no `HOMEBREW_TAP_TOKEN` in the environment. `brew style` is run with `--except-cops Cask/InstallSteps`, which the block on the cask's `postflight` cannot satisfy; the cask explains why in place.
 
 ### Publishing a release, step by step
 
