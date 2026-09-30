@@ -32,13 +32,17 @@ To run it locally, build the packages the same way and use a throwaway container
 
 ## Releases
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a `v*` tag. Its `build` job has a read-only token and runs `goreleaser release --clean --skip=publish`, which builds the binaries, both `.deb` files, `checksums.txt` and the Homebrew cask into `dist/`. It checks the Linux binary runs `stockroom version`. The `publish` job has `contents: write` and runs no third-party code, so dependency scripts never see a token that can write. That split protects the tokens, not the files: the binaries, packages and cask are all built in the job that ran `npm ci`, and what guards their contents is the hashes `package-lock.json` pins. It creates the GitHub release with `gh`, marking a tag with a hyphen (`v0.9.0-rc.1`) as a prerelease so `releases/latest` skips it, and commits the cask to [`Kathir-D/homebrew-tap`](https://github.com/Kathir-D/homebrew-tap), the tap it shares with Sonar and headless-spotify, for a full release.
+[`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a `v*` tag. Its `build` job has a read-only token and runs `goreleaser release --clean --skip=publish`, which builds the binaries, both `.deb` files and `checksums.txt` into `dist/`. It checks the Linux binary runs `stockroom version`, checks every archive carries an executable `camera.sh`, and writes the Homebrew cask from the template. The `publish` job has `contents: write` and runs no third-party code, so dependency scripts never see a token that can write. That split protects the tokens, not the files: the binaries, packages and cask are all built in the job that ran `npm ci`, and what guards their contents is the hashes `package-lock.json` pins. It creates the GitHub release with `gh`, marking a tag with a hyphen (`v0.9.0-rc.1`) as a prerelease so `releases/latest` skips it, and commits the cask to [`Kathir-D/homebrew-tap`](https://github.com/Kathir-D/homebrew-tap), the tap it shares with Sonar and headless-spotify, for a full release.
 
-The tap push needs `TAP_DEPLOY_KEY`, the private half of a deploy key on `Kathir-D/homebrew-tap` with write access. A deploy key reaches that one repository and nothing else. (`HOMEBREW_TAP_TOKEN` in the build job is a placeholder the GoReleaser cask template reads; it is never used to push.) Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
+The tap push needs `TAP_DEPLOY_KEY`, the private half of a deploy key on `Kathir-D/homebrew-tap` with write access. A deploy key reaches that one repository and nothing else. Running the workflow by hand (`workflow_dispatch`) builds a snapshot and publishes nothing. Try the same locally with `goreleaser release --snapshot --clean`.
+
+The cask is hand-written, in [`packaging/mac/stockroom.rb`](packaging/mac/stockroom.rb), the same shape the other two in the tap use. `build` fills it in with `scripts/make-cask.sh`, which substitutes the version and the four checksums from the release's own `checksums.txt`, and then runs `brew style` on the result. GoReleaser writes no cask, so there is no `homebrew_casks` stanza in `.goreleaser.yaml` and no `HOMEBREW_TAP_TOKEN` in the environment. `brew style` is run with `--except Cask/InstallSteps`, which the block on the cask's `postflight` cannot satisfy; the cask explains why in place.
 
 ### Publishing a release, step by step
 
-The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up. To replace the key: `ssh-keygen -t ed25519 -N "" -f key`, then `gh repo deploy-key add key.pub -R Kathir-D/homebrew-tap --allow-write --title "Stockroom release workflow"` and `gh secret set TAP_DEPLOY_KEY -R Kathir-D/Stockroom < key`, and delete both files. Remove the old key under the tap's Settings → Deploy keys.
+The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up, and have been used:
+[v0.9.0](https://github.com/Kathir-D/Stockroom/releases/tag/v0.9.0) is published and
+`Casks/stockroom.rb` is in the tap. To replace the key: `ssh-keygen -t ed25519 -N "" -f key`, then `gh repo deploy-key add key.pub -R Kathir-D/homebrew-tap --allow-write --title "Stockroom release workflow"` and `gh secret set TAP_DEPLOY_KEY -R Kathir-D/Stockroom < key`, and delete both files. Remove the old key under the tap's Settings → Deploy keys.
 
 1. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
 2. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.
@@ -46,7 +50,7 @@ The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up. To r
 
 If the tap step fails, the GitHub release is already up. Fix the secret and re-run the failed job. The re-run finds the release, replaces its files, and goes on to the tap. A re-run with nothing new to commit succeeds without pushing.
 
-The cask is unsigned. Its post-install hook clears the quarantine flag so macOS runs it. `xattr -l $(brew --prefix)/bin/stockroom` should print nothing.
+The cask is unsigned. Its post-install hook clears the quarantine flag so macOS runs it. `xattr -l $(brew --prefix)/bin/stockroom` should print nothing. The tap file is generated from the template, so a change to the cask lands by shipping a release, not by editing the tap.
 
 ## Docs-only changes
 
