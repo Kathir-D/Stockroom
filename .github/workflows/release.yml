@@ -53,10 +53,6 @@ jobs:
           args: >-
             release --clean
             ${{ github.event_name == 'push' && '--skip=publish' || '--snapshot' }}
-        env:
-          # The cask template reads it. The build job never pushes, so it
-          # only needs a value.
-          HOMEBREW_TAP_TOKEN: unused
 
       # The cask can't carry a test block, so check the binary here.
       - name: Check the binary runs
@@ -105,6 +101,36 @@ jobs:
           # no-op, so it has to be refused explicitly.
           [ "$checked" -gt 0 ] || { echo "::error::no archives found in dist/"; exit 1; }
           echo "camera.sh present and executable in $checked archives"
+
+      # The tap's cask is hand-written (packaging/mac/stockroom.rb), not the
+      # one GoReleaser generates. GoReleaser's is a stub: no livecheck, no
+      # caveats worth reading, and a `postflight` block with no rescue, so a
+      # Homebrew that dropped the block would make the cask invalid and stop
+      # the whole tap from loading. Sonar and headless-spotify are hand-written
+      # for the same reason; this puts Stockroom in the same shape.
+      #
+      # Built here rather than in publish, because it needs the checksums and
+      # the build job is the only one that has them. The version and the sums
+      # come from the release's own checksums.txt, so the cask and the
+      # published file cannot disagree.
+      - name: Write the Homebrew cask
+        run: scripts/make-cask.sh "${{ github.ref_name }}" dist/checksums.txt dist/homebrew/Casks/stockroom.rb
+
+      # A cask that Homebrew will not load takes the whole tap with it, so
+      # sonar and headless-spotify stop installing too. `brew style` reports the
+      # postflight block as one unsatisfiable offense, so it is excluded: see
+      # the comment on the block in packaging/mac/stockroom.rb.
+      #
+      # The runner image ships Homebrew, but it is set up explicitly rather
+      # than assumed: a future image that dropped it would otherwise fail this
+      # step with "brew: command not found", which reads like a cask problem.
+      - name: Check the cask
+        run: |
+          if ! command -v brew >/dev/null; then
+            echo "::error::brew is not on this runner, so the cask was not checked"
+            exit 1
+          fi
+          brew style --except Cask/InstallSteps dist/homebrew/Casks/stockroom.rb
 
       - uses: actions/upload-artifact@v4
         with:

@@ -76,17 +76,18 @@ Everything runs on that one machine. There is no cloud account to create and no 
 
 ## Project status
 
-Stockroom runs end to end from a checkout, and the test suite covers Postgres 14 through 17. No
-release has been tagged yet, so the [install](#install) commands will not work until the first one
-ships — until then, run it from a checkout (see [From a checkout](#from-a-checkout)). The packages
-pass in containers but have not yet been proven on a real Linux machine or a real Mac.
+Stockroom runs end to end, and the test suite covers Postgres 14 through 17.
+[v0.9.0](https://github.com/Kathir-D/Stockroom/releases/tag/v0.9.0) is out, so the
+[install](#install) commands work: a `.deb` for Debian and Ubuntu, a cask for macOS, and a tarball
+for anything else. The `.deb` is proven on a real Debian 12 container and a real Ubuntu 24.04
+machine with systemd, by CI, on every merge. The macOS install has not yet been run on a real Mac.
 [ROADMAP.md](ROADMAP.md) tracks what's left.
 
 ## What you need
 
 | | |
 |---|---|
-| **Latest release** | [releases/latest](https://github.com/Kathir-D/Stockroom/releases/latest) — no tag yet |
+| **Latest release** | [releases/latest](https://github.com/Kathir-D/Stockroom/releases/latest) — v0.9.0 |
 | **Install** | `curl … get.sh \| sudo bash` on Debian or Ubuntu, `brew install --cask kathir-d/tap/stockroom` on macOS, `irm … get.ps1 \| iex` on Windows |
 | **Requires** | Debian 12, Ubuntu 24.04 or newer, macOS, or Windows 10 or 11 through WSL 2. PostgreSQL 14+. A HID barcode scanner |
 | **Cost** | Free and AGPL-3.0. No account to create, no subscription, and no internet for daily use |
@@ -107,8 +108,9 @@ and rclone installed, a database created, a config file written, and a service t
 at boot with nobody logged in. Then open http://127.0.0.1:8080 and the setup wizard takes it from
 there.
 
-> **No release has shipped yet.** Every command below works once a `v*` tag exists. Until then, run it
-> from a checkout: see [From a checkout](#from-a-checkout).
+> **Every command below needs one of the two releases, and no more than that.** `brew install
+> --cask kathir-d/tap/stockroom` installs the binary, PostgreSQL and rclone; the next command,
+> `stockroom setup`, finishes the job. The Linux script does both in one go.
 
 ### Linux — Debian or Ubuntu (recommended)
 

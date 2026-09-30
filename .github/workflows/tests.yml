@@ -309,8 +309,6 @@ jobs:
       # database before migrating.
       - name: Build two packages
         if: steps.changes.outputs.code == 'true'
-        env:
-          HOMEBREW_TAP_TOKEN: unused
         run: |
           goreleaser release --snapshot --clean --skip=archive,homebrew
           mkdir -p pkgs && cp dist/stockroom_amd64.deb pkgs/first.deb

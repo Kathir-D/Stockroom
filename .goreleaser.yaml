@@ -107,41 +107,24 @@ nfpms:
       preremove: packaging/linux/prerm
       postremove: packaging/linux/postrm
 
-# The macOS install. GoReleaser 2.10 deprecated formulas (`brews`) for casks.
-# A cask can't carry a `test do` block, so release.yml runs `stockroom version`
-# instead. Homebrew quarantines cask downloads and the binary isn't signed, so
-# the post-install hook clears the attribute. release.yml builds with
-# --skip=publish and commits the generated cask to the tap itself, so the
-# repository and token below are only read, never used to push.
-homebrew_casks:
-  - name: stockroom
-    ids: [stockroom]
-    binaries: [stockroom]
-    homepage: https://github.com/Kathir-D/Stockroom
-    description: Equipment checkout for a school media department
-    repository:
-      owner: Kathir-D
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    commit_author:
-      name: github-actions[bot]
-      email: 41898282+github-actions[bot]@users.noreply.github.com
-    dependencies:
-      - formula: postgresql@17
-      - formula: rclone
-    caveats: |
-      Finish the install with:
-
-        stockroom setup
-
-      It creates the database, writes the config and starts Stockroom at boot.
-      It asks for your password once, to install the LaunchDaemons.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/stockroom"]
-          end
+# No `homebrew_casks` stanza. The tap's cask is hand-written
+# (packaging/mac/stockroom.rb) and filled in by release.yml via
+# scripts/make-cask.sh, the same shape Sonar and headless-spotify use.
+#
+# GoReleaser could still generate one, and the generated file is a worse cask:
+# it carries no livecheck, a two-line caveat, and a `postflight` block with no
+# rescue. Without that rescue, a Homebrew that dropped the block would make the
+# cask invalid, and an invalid cask stops the whole tap from loading - so
+# `brew tap` would fail and Sonar and headless-spotify would stop installing
+# too. Both of those casks need the rescue for the same reason, and Stockroom
+# has it in the template.
+#
+# A `test do` block is the other thing GoReleaser emits that a hand-written
+# cask cannot: release.yml runs `stockroom version` on the built binary instead.
+#
+# To go back to generating it, delete packaging/mac/stockroom.rb, the two steps
+# in release.yml that run make-cask.sh and `brew style`, and restore the stanza
+# (v0.9.0 in git history has it).
 
 release:
   github:
