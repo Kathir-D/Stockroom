@@ -121,16 +121,20 @@ jobs:
       # postflight block as one unsatisfiable offense, so it is excluded: see
       # the comment on the block in packaging/mac/stockroom.rb.
       #
-      # The runner image ships Homebrew, but it is set up explicitly rather
-      # than assumed: a future image that dropped it would otherwise fail this
-      # step with "brew: command not found", which reads like a cask problem.
+      # The runner image ships Homebrew in /home/linuxbrew but leaves it off
+      # PATH, so it is put there here. A future image that dropped it fails
+      # with the message below rather than "brew: command not found", which
+      # reads like a cask problem.
       - name: Check the cask
         run: |
+          if ! command -v brew >/dev/null && [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
           if ! command -v brew >/dev/null; then
             echo "::error::brew is not on this runner, so the cask was not checked"
             exit 1
           fi
-          brew style --except Cask/InstallSteps dist/homebrew/Casks/stockroom.rb
+          brew style --except-cops Cask/InstallSteps dist/homebrew/Casks/stockroom.rb
 
       - uses: actions/upload-artifact@v4
         with:

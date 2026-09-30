@@ -91,7 +91,7 @@ cask "stockroom" do
   # only if_path_exists, on_macos, version and token and cannot run a command at
   # all; and Style/DisableCopsWithinSourceCodeDirective forbids suppressing the
   # cop. Check the cask with the cop excluded:
-  #   brew style --except Cask/InstallSteps kathir-d/tap/stockroom
+  #   brew style --except-cops Cask/InstallSteps kathir-d/tap/stockroom
   begin
     postflight do
       system_command(
