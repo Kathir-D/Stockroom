@@ -450,3 +450,10 @@ A standards and spec review of `feat/roadmap-production-path`.
 - [x] **`get.sh` judges a derivative by its base**: an Ubuntu codename before noble, or a numbered `/etc/debian_version` before 12, is too old. A testing or rolling base passes.
 - [x] **Two claims were narrowed to what is true.** The support bundle holds no records, but doctor's report does say what it read from the database. The release split keeps the tokens away from dependency scripts; it does not vouch for the files the build made.
 - [x] **Left as they are**: the label and ID card changes and pasting an asset photo, which the owner asked for, and `SIGNIN_PHOTOS_DIR` staying (2026-09-27, above).
+
+**Closed (2026-09-30, Postgres on macOS needs LC_ALL in its LaunchDaemon)**
+
+The first `stockroom setup` on a real Mac stopped at PostgreSQL after a minute: psql found no socket in `/tmp`. launchd starts a daemon with no locale in its environment, and Postgres on macOS then exits at once with `FATAL: postmaster became multithreaded during startup` and a hint to set `LC_ALL`. Reproduced on the development Mac with a throwaway cluster under a system LaunchDaemon, and `LC_ALL=C` in the plist fixed it. Homebrew's own `postgresql@17` service sets the same variable, which is why nobody sees this with `brew services`.
+
+- [x] **The Postgres LaunchDaemon sets `LC_ALL=C`.** `C` rather than the cluster's `en_US.UTF-8`, because it is what Homebrew ships and exists on every Mac; it only governs the server process's own messages, and the database's collation is fixed at initdb.
+- [x] **When Postgres doesn't answer, setup prints the last lines of its log**, so the next failure names its cause instead of only psql's "no such file".

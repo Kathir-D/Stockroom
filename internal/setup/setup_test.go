@@ -496,6 +496,37 @@ func TestSetupMacOS(t *testing.T) {
 	}
 }
 
+// TestBrewPostgresPlistSetsLocale guards the one-minute hang on a fresh Mac:
+// Postgres started by launchd with no locale exits with "postmaster became
+// multithreaded during startup".
+func TestBrewPostgresPlistSetsLocale(t *testing.T) {
+	env, _, _ := testEnv(t)
+	env.Paths.BrewPrefix = "/opt/homebrew"
+	env.SudoUser = "teacher"
+	plist := (&brewPostgres{env: env}).plist()
+	for _, want := range []string{
+		"<key>EnvironmentVariables</key>",
+		"<key>LC_ALL</key>\n    <string>C</string>",
+		"<string>/opt/homebrew/opt/" + brewFormula + "/bin/postgres</string>",
+		"<string>/opt/homebrew/var/log/" + brewFormula + ".log</string>",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Errorf("plist lacks %q:\n%s", want, plist)
+		}
+	}
+}
+
+func TestTailFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log")
+	os.WriteFile(path, []byte("a\nb\nc\nd\n"), 0o644)
+	if got := tailFile(path, 2); got != "  c\n  d" {
+		t.Errorf("tailFile = %q", got)
+	}
+	if got := tailFile(filepath.Join(t.TempDir(), "none"), 2); !strings.Contains(got, "no such file") {
+		t.Errorf("tailFile of a missing file = %q", got)
+	}
+}
+
 func runPlutil(path string) (string, error) {
 	out, err := exec.Command("/usr/bin/plutil", "-lint", path).CombinedOutput()
 	return string(out), err

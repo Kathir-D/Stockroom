@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -121,16 +122,43 @@ func (p *brewPostgres) start(ctx context.Context) error {
 		_, _ = e.Run.Run(ctx, Cmd{Name: brew, Args: []string{"services", "stop", brewFormula}, User: p.asUser()})
 	}
 
-	logFile := filepath.Join(e.Paths.BrewPrefix, "var", "log", brewFormula+".log")
-	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p.logFile()), 0o755); err != nil {
 		return err
 	}
-	plist := launchDaemon(postgresLabel, p.user(),
-		[]string{p.bin("postgres"), "-D", p.dataDir()}, logFile, nil)
-	if err := loadDaemon(ctx, e, postgresLabel, plist); err != nil {
+	if err := loadDaemon(ctx, e, postgresLabel, p.plist()); err != nil {
 		return err
 	}
-	return waitForSQL(ctx, p)
+	if err := waitForSQL(ctx, p); err != nil {
+		return fmt.Errorf("%w\n\nThe end of %s:\n%s", err, p.logFile(), tailFile(p.logFile(), 15))
+	}
+	return nil
+}
+
+func (p *brewPostgres) logFile() string {
+	return filepath.Join(p.env.Paths.BrewPrefix, "var", "log", brewFormula+".log")
+}
+
+// plist is the LaunchDaemon. launchd starts it with no locale in the
+// environment, and Postgres on macOS then dies at once with "postmaster became
+// multithreaded during startup". Homebrew's own service sets LC_ALL=C for the
+// same reason.
+func (p *brewPostgres) plist() string {
+	return launchDaemon(postgresLabel, p.user(),
+		[]string{p.bin("postgres"), "-D", p.dataDir()}, p.logFile(),
+		map[string]string{"LC_ALL": "C"})
+}
+
+// tailFile is the last n lines of a file, or why it couldn't be read.
+func tailFile(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "  (" + err.Error() + ")"
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return "  " + strings.Join(lines, "\n  ")
 }
 
 func (p *brewPostgres) sql(ctx context.Context, sql string) (string, error) {
