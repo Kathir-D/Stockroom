@@ -216,8 +216,8 @@ Which endpoint a code goes to depends on the screen and a lookup, never a guess.
 Things that only a person, hardware or the school can settle. Each has a ROADMAP entry.
 
 - The live webcam has not run through go2rtc on macOS or Linux, the school has not approved recording students, and the QuickCam and closet PC tuning are unmeasured (ROADMAP A1).
-- No tag has been pushed, so no release exists. The tap (`Kathir-D/homebrew-tap`, shared with Sonar and headless-spotify) exists, but has no stockroom cask until the first full release (ROADMAP §3, §6).
-- The packages are proven in containers only. No VM or real machine has been rebooted to prove the service comes back after a power cut with nobody logged in, and macOS setup has never run (ROADMAP §5, §6).
+- v0.9.2 is the latest release, and the tap (`Kathir-D/homebrew-tap`, shared with Sonar and headless-spotify) carries its cask. v0.9.0 is marked a superseded prerelease, and the v0.9.1 tag has no release, because its build failed before publishing (ROADMAP §5, §6).
+- The packages are proven in containers only. No VM or real machine has been rebooted to prove the service comes back after a power cut with nobody logged in, and macOS setup has run once on a real Mac, stalling at PostgreSQL before the `LC_ALL` fix in v0.9.2, and has not been re-run (ROADMAP §5, §6).
 - The barcode scanner isn't bought, so the scan threshold is untuned (ROADMAP §8).
 - The closet PC's backup folders, photo-mirror disk and target credentials wait on the PC (ROADMAP §9).
 - GitHub backup has never run against a real repository. Drive has.

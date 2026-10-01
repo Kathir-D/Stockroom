@@ -457,3 +457,10 @@ The first `stockroom setup` on a real Mac stopped at PostgreSQL after a minute: 
 
 - [x] **The Postgres LaunchDaemon sets `LC_ALL=C`.** `C` rather than the cluster's `en_US.UTF-8`, because it is what Homebrew ships and exists on every Mac; it only governs the server process's own messages, and the database's collation is fixed at initdb.
 - [x] **When Postgres doesn't answer, setup prints the last lines of its log**, so the next failure names its cause instead of only psql's "no such file".
+
+**Closed (2026-09-30, the first releases)**
+
+v0.9.0 published, then the macOS `LC_ALL` fix above went out as v0.9.1 and v0.9.2. The v0.9.1 build stopped at the cask check, because `brew` was not on the runner's `PATH`, so that tag has no GitHub release. v0.9.2 carries the same code plus the `PATH` fix (#62), and its publish job committed the 0.9.2 cask to the tap.
+
+- [x] **No release candidate.** ROADMAP §1 to 4 asked for `v0.9.0-rc.1` first. Full releases went out instead, and ROADMAP §5 and §6 now prove v0.9.2 rather than a candidate. The prerelease path in `release.yml` stays for later candidates.
+- [x] **v0.9.0 is marked a prerelease** whose notes point to v0.9.2, so `releases/latest` and the tap name v0.9.2. The v0.9.1 tag stays, without a release, rather than being deleted or rebuilt, since v0.9.2 supersedes it.

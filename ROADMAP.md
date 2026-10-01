@@ -109,13 +109,12 @@ Done on `feat/roadmap-production-path`, except what needs a tag or a real machin
 
 - [ ] **Test Google sign-in on rclone 1.60 against a real account.** Every rclone command Stockroom runs works on 1.60.1 offline. The browser flow through `rclone authorize` with the school's client id hasn't been tried. If it fails, the `.deb` moves rclone to `Recommends` and `get.sh` installs rclone.org's own `.deb`.
 - [x] **Create the tap and its key.** The cask goes to `Kathir-D/homebrew-tap`, shared with Sonar and headless-spotify. A deploy key with write access to it is stored here as `TAP_DEPLOY_KEY`. `release.yml` commits the cask there on each full release.
-- [ ] **Release a candidate.** Tag `v0.9.0-rc.1`. The release workflow marks it a prerelease, so it doesn't touch the tap and `releases/latest` skips it. Install it with `curl … get.sh | sudo STOCKROOM_VERSION=v0.9.0-rc.1 bash` on a machine that isn't the development Mac.
 
-**Done when:** a pushed tag produces a GitHub release with the archives, both `.deb` files, `checksums.txt`, and a cask commit in the tap.
+**Done when:** a pushed tag produces a GitHub release with the archives, both `.deb` files, `checksums.txt`, and a cask commit in the tap. Met by v0.9.2.
 
 ## 5. Prove it on Linux
 
-Depends on the candidate release. Linux is ready for the closet PC once this passes.
+Depends on a release (v0.9.2 is out). Linux is ready for the closet PC once this passes.
 
 The `package-linux` CI job (`CI.md`) installs the `.deb`, runs setup, restarts the service, upgrades to a package with one more migration, and runs `doctor`, on the ubuntu-24.04 runner with systemd and in a debian:12 container. The same steps passed locally in containers, the systemd one included.
 
