@@ -41,8 +41,8 @@ The cask is hand-written, in [`packaging/mac/stockroom.rb`](packaging/mac/stockr
 ### Publishing a release, step by step
 
 The tap, its deploy key and the `TAP_DEPLOY_KEY` secret are already set up, and have been used:
-[v0.9.0](https://github.com/Kathir-D/Stockroom/releases/tag/v0.9.0) is published and
-`Casks/stockroom.rb` is in the tap. To replace the key: `ssh-keygen -t ed25519 -N "" -f key`, then `gh repo deploy-key add key.pub -R Kathir-D/homebrew-tap --allow-write --title "Stockroom release workflow"` and `gh secret set TAP_DEPLOY_KEY -R Kathir-D/Stockroom < key`, and delete both files. Remove the old key under the tap's Settings → Deploy keys.
+[v0.9.2](https://github.com/Kathir-D/Stockroom/releases/tag/v0.9.2) is the latest release and
+`Casks/stockroom.rb` in the tap is at 0.9.2. To replace the key: `ssh-keygen -t ed25519 -N "" -f key`, then `gh repo deploy-key add key.pub -R Kathir-D/homebrew-tap --allow-write --title "Stockroom release workflow"` and `gh secret set TAP_DEPLOY_KEY -R Kathir-D/Stockroom < key`, and delete both files. Remove the old key under the tap's Settings → Deploy keys.
 
 1. **Try the workflow without publishing.** Actions → release → Run workflow on `main`. It builds a snapshot and publishes nothing. The `dist` artifact holds the cask it would commit.
 2. **Tag a release candidate** from `main`: `git tag v0.9.0-rc.1 && git push origin v0.9.0-rc.1`. The release gets the four archives, both `.deb` files and `checksums.txt`, marked as a prerelease. The tap is not touched.

@@ -16,7 +16,7 @@
 # NOTE: `version` and the `sha256` values are refreshed by CI
 # (.github/workflows/release.yml) on every `v*` tag, which also copies this file
 # into the Kathir-D/homebrew-tap tap. Do not hand-edit the version or the
-# checksums. `__VERSION__` and the `__SHA256_*__` placeholders are what CI
+# checksums. The version and `__SHA256_*__` placeholders are what CI
 # substitutes; the committed file in the tap has real values.
 cask "stockroom" do
   version "__VERSION__"
