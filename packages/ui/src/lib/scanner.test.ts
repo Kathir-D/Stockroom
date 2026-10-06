@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
 
-import {attachScanner, type ScanBurst} from './scanner'
+import {attachScanner, fillScanTarget, scanTargetField, type ScanBurst} from './scanner'
 
 /**
  * The scan-vs-typed split and, more importantly, what the buffer holds when a
@@ -171,5 +171,52 @@ describe('attachScanner', () => {
 
     expect(bursts[0].code).toBe('9')
     expect(bursts[0].fast).toBe(false)
+  })
+})
+
+describe('scanTargetField', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('finds nothing on a screen with no marked field', () => {
+    document.body.innerHTML = '<input id="search" />'
+    expect(scanTargetField()).toBeNull()
+  })
+
+  it('finds the marked field, skipping a disabled one', () => {
+    document.body.innerHTML = '<input id="off" data-scan-target disabled /><input id="number" data-scan-target />'
+    expect(scanTargetField()?.id).toBe('number')
+  })
+
+  it('looks only inside the topmost open dialog', () => {
+    document.body.innerHTML =
+      '<input id="page" data-scan-target />' +
+      '<div role="dialog" data-state="open"><input id="first" data-scan-target /></div>' +
+      '<div role="dialog" data-state="open"><button>Close</button></div>'
+    // The top dialog has no marked field, so the scan is not for a form.
+    expect(scanTargetField()).toBeNull()
+    document.body.lastElementChild!.remove()
+    expect(scanTargetField()?.id).toBe('first')
+  })
+
+  it('ignores a dialog that is closing', () => {
+    document.body.innerHTML =
+      '<input id="page" data-scan-target /><div role="dialog" data-state="closed"><input id="gone" data-scan-target /></div>'
+    expect(scanTargetField()?.id).toBe('page')
+  })
+})
+
+describe('fillScanTarget', () => {
+  it('sets the value, tells the binding, and focuses the field', () => {
+    document.body.innerHTML = '<input id="number" data-scan-target value="old" />'
+    const field = document.getElementById('number') as HTMLInputElement
+    const heard = vi.fn()
+    field.addEventListener('input', heard)
+    fillScanTarget(field, ' 123456 ')
+    expect(field.value).toBe('123456')
+    expect(heard).toHaveBeenCalledOnce()
+    expect(document.activeElement).toBe(field)
+    document.body.innerHTML = ''
   })
 })

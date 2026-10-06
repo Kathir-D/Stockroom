@@ -24,6 +24,7 @@
   import CopyPlusIcon from "@lucide/svelte/icons/copy-plus"
   import ArchiveIcon from "@lucide/svelte/icons/archive"
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore"
+  import SearchXIcon from "@lucide/svelte/icons/search-x"
   import { Checkbox } from "@stockroom/ui/components/ui/checkbox"
   import AssetPhotoDialog from "@stockroom/ui/components/app/asset-photo-dialog.svelte"
   import BarcodeDialog from "@stockroom/ui/components/app/barcode-dialog.svelte"
@@ -202,15 +203,87 @@
   /**
    * Retire is how an item leaves the catalogue once it has a history: delete
    * is refused then, because the custody trail is the point (CLAUDE.md §7).
+   *
+   * Retiring asks first whether the item is lost and takes a note; both are
+   * saved on the item and written to the log. An item that is out can only be
+   * retired as lost, which closes its checkout as lost. Bringing one back
+   * asks nothing.
    */
+  let retireTarget = $state<AssetListItem | null>(null)
+  let retireLost = $state(false)
+  let retireNote = $state("")
+  let retireError = $state<string | null>(null)
+  let retireBusy = $state(false)
+
   async function toggleRetired(unit: AssetListItem) {
+    if (!unit.retired_at) {
+      retireTarget = unit
+      // Out and being retired can only mean it is not coming back.
+      retireLost = unit.custody != null
+      retireNote = ""
+      retireError = null
+      return
+    }
     try {
-      await api.setAssetRetired(unit.id, !unit.retired_at)
-      toast.success(unit.retired_at ? `${unit.name} is back in the catalogue` : `${unit.name} retired`)
+      await api.setAssetRetired(unit.id, false)
+      toast.success(`${unit.name} is back in the catalogue`)
       await load()
       void catalog.reload()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function confirmRetire(event: SubmitEvent) {
+    event.preventDefault()
+    const unit = retireTarget
+    if (!unit) return
+    retireBusy = true
+    retireError = null
+    try {
+      await api.setAssetRetired(unit.id, true, { lost: retireLost, note: retireNote })
+      toast.success(retireLost ? `${unit.name} retired as lost` : `${unit.name} retired`)
+      retireTarget = null
+      await Promise.all([load(), session.refresh()])
+      void catalog.reload()
+    } catch (err) {
+      retireError = err instanceof Error ? err.message : String(err)
+    } finally {
+      retireBusy = false
+    }
+  }
+
+  /**
+   * Mark lost, for a row that is checked out: the same action as on the Out
+   * screen and in a holder's custody history (`MarkAssetLost`).
+   */
+  let lostTarget = $state<AssetListItem | null>(null)
+  let lostNote = $state("")
+  let lostError = $state<string | null>(null)
+  let lostBusy = $state(false)
+
+  function askLost(unit: AssetListItem) {
+    lostTarget = unit
+    lostNote = ""
+    lostError = null
+  }
+
+  async function confirmLost(event: SubmitEvent) {
+    event.preventDefault()
+    const unit = lostTarget
+    if (!unit) return
+    lostBusy = true
+    lostError = null
+    try {
+      const asset = await api.markLost(unit.id, lostNote)
+      toast.success(`${asset.name} marked lost`)
+      catalog.patchUnit(asset)
+      lostTarget = null
+      await Promise.all([load(), session.refresh()])
+    } catch (err) {
+      lostError = err instanceof Error ? err.message : String(err)
+    } finally {
+      lostBusy = false
     }
   }
 
@@ -441,6 +514,25 @@
                 </Tooltip.Content>
               </Tooltip.Root>
 
+              {#if row.custody}
+                <Tooltip.Root>
+                  <Tooltip.Trigger>
+                    {#snippet child({ props })}
+                      <Button
+                        {...props}
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Mark ${row.name} lost`}
+                        onclick={() => askLost(row)}
+                      >
+                        <SearchXIcon aria-hidden="true" />
+                      </Button>
+                    {/snippet}
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>Mark lost: closes the checkout, item unavailable</Tooltip.Content>
+                </Tooltip.Root>
+              {/if}
+
               <Tooltip.Root>
                 <Tooltip.Trigger>
                   {#snippet child({ props })}
@@ -486,6 +578,11 @@
             </Tooltip.Provider>
           {/snippet}
         </UnitRow>
+        {#if unit.retired_at && (unit.retired_lost || unit.retired_note)}
+          <p class="-mt-1 px-3 text-xs text-fg-muted">
+            Retired{unit.retired_lost ? " as lost" : ""}{unit.retired_note ? `: ${unit.retired_note}` : ""}
+          </p>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -516,7 +613,7 @@
            the serial is the one identifier anybody enters or reads. -->
       <div class="flex flex-col gap-1.5">
         <Label for="serial">Serial number</Label>
-        <Input id="serial" bind:value={form.serial_number} required placeholder="042021001234" />
+        <Input id="serial" bind:value={form.serial_number} required placeholder="042021001234" data-scan-target />
         <p class="text-xs text-fg-faint">
           What the barcode sticker encodes. Items with no manufacturer serial take a
           model-prefixed one, <code class="font-mono">T7IBAT-001</code>.
@@ -585,11 +682,77 @@
 
 <AssetPhotoDialog bind:asset={photoTarget} onSaved={load} />
 
+<Dialog.Root open={retireTarget !== null} onOpenChange={(open) => !open && (retireTarget = null)}>
+  <Dialog.Content>
+    <form onsubmit={confirmRetire} class="flex flex-col gap-3">
+      <Dialog.Header>
+        <Dialog.Title>Retire {retireTarget?.name ?? "this item"}?</Dialog.Title>
+        <Dialog.Description>
+          It leaves the catalogue and its kit, and keeps its history. You can bring it back later.
+          {#if retireTarget?.custody}
+            It is checked out to {retireTarget.custody.custodian_name}, so it can only be retired as
+            lost, which closes that checkout as lost.
+          {/if}
+        </Dialog.Description>
+      </Dialog.Header>
+      <label class="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={retireLost}
+          disabled={retireTarget?.custody != null}
+          onCheckedChange={(v) => (retireLost = v === true)}
+        />
+        This item is lost
+      </label>
+      <div class="flex flex-col gap-1.5">
+        <Label for="retire-note">Notes (optional)</Label>
+        <Input id="retire-note" bind:value={retireNote} maxlength={500} placeholder="What happened to it" />
+        <p class="text-xs text-fg-faint">Saved with the item and written to the activity log.</p>
+      </div>
+      {#if retireError}
+        <p class="text-status-overdue" role="alert">{retireError}</p>
+      {/if}
+      <Dialog.Footer>
+        <Button type="button" variant="ghost" onclick={() => (retireTarget = null)}>Cancel</Button>
+        <Button type="submit" variant="destructive" disabled={retireBusy}>
+          {retireBusy ? "Working…" : retireLost ? "Retire as lost" : "Retire"}
+        </Button>
+      </Dialog.Footer>
+    </form>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root open={lostTarget !== null} onOpenChange={(open) => !open && (lostTarget = null)}>
+  <Dialog.Content>
+    <form onsubmit={confirmLost} class="flex flex-col gap-3">
+      <Dialog.Header>
+        <Dialog.Title>Mark {lostTarget?.name ?? "this item"} lost?</Dialog.Title>
+        <Dialog.Description>
+          The checkout to {lostTarget?.custody?.custodian_name ?? "its borrower"} closes as lost, and the
+          item becomes unavailable. They will no longer be overdue on it. If it turns up, put it back
+          in service here.
+        </Dialog.Description>
+      </Dialog.Header>
+      <div class="flex flex-col gap-1.5">
+        <Label for="asset-lost-note">What happened (optional)</Label>
+        <Input id="asset-lost-note" bind:value={lostNote} maxlength={500} />
+      </div>
+      {#if lostError}
+        <p class="text-status-overdue" role="alert">{lostError}</p>
+      {/if}
+      <Dialog.Footer>
+        <Button type="button" variant="ghost" onclick={() => (lostTarget = null)}>Cancel</Button>
+        <Button type="submit" variant="destructive" disabled={lostBusy}>Mark lost</Button>
+      </Dialog.Footer>
+    </form>
+  </Dialog.Content>
+</Dialog.Root>
+
 
 <UserHistoryDialog
   bind:open={holderOpen}
   userId={holder?.custodian_id ?? null}
   userName={holder?.custodian_name ?? ""}
+  onChanged={() => load()}
 />
 
 <BarcodeDialog

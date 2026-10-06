@@ -137,6 +137,11 @@ type Asset struct {
 	// keeps its custody history, is unavailable, and is hidden from browse
 	// (CLAUDE.md §7).
 	RetiredAt *time.Time `json:"retired_at"`
+	// RetiredLost and RetiredNote are what the admin said when retiring it:
+	// whether the item is lost, and anything they typed. Cleared when the
+	// item is brought back.
+	RetiredLost bool    `json:"retired_lost"`
+	RetiredNote *string `json:"retired_note"`
 	// DamageReport is the damage note on the item's latest return that no
 	// admin has reviewed yet, and DamageReportedAt when it came back. The item
 	// stays available, but every screen shows the report (CLAUDE.md §7,

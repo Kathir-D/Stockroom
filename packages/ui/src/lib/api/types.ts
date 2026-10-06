@@ -98,6 +98,9 @@ export interface Asset {
   updated_at: string;
   /** Set on an item taken out of the catalogue for good; browse never lists it. */
   retired_at?: string | null;
+  /** What the admin said when retiring it: whether it is lost, and their note. */
+  retired_lost?: boolean;
+  retired_note?: string | null;
   /**
    * The damage note on the item's latest return that no admin has reviewed.
    * The item stays available; every screen shows the report.
@@ -267,6 +270,8 @@ export interface UserInput {
   last_name: string;
   email?: string | null;
   is_admin: boolean;
+  /** The first password. Required on create, ignored on update. */
+  password?: string;
 }
 
 /**

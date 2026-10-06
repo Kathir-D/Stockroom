@@ -37,10 +37,19 @@ func TestCreateGetListUser(t *testing.T) {
 	admin := actorFor(insertTestProfile(t, db, true, "admin-pw"))
 	sn := testStudentNumber(t, db)
 
-	p, err := db.CreateUser(ctx, admin, UserInput{
+	in := UserInput{
 		StudentNumber: " " + sn + " ", FirstName: " Ada ", LastName: "Lovelace",
 		Email: str("  "), IsAdmin: false,
-	})
+	}
+	if _, err := db.CreateUser(ctx, admin, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateUser with no password = %v, want ErrInvalid", err)
+	}
+	in.Password = "short"
+	if _, err := db.CreateUser(ctx, admin, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("CreateUser with a short password = %v, want ErrInvalid", err)
+	}
+	in.Password = "ada's password"
+	p, err := db.CreateUser(ctx, admin, in)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -50,8 +59,11 @@ func TestCreateGetListUser(t *testing.T) {
 	if p.Email != nil {
 		t.Errorf("email = %q, want null for a blank input", *p.Email)
 	}
-	if p.PasswordHash != nil {
-		t.Error("a user created without a password has a hash")
+	if err := CheckPassword(p.PasswordHash, "ada's password"); err != nil {
+		t.Errorf("the password given at create does not check: %v", err)
+	}
+	if deref(p.PasswordSetBy) != "admin" {
+		t.Errorf("password_set_by = %q, want admin", deref(p.PasswordSetBy))
 	}
 
 	got, err := db.GetUser(ctx, admin, p.ID)

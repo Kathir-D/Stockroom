@@ -52,7 +52,7 @@
   import * as api from "./api/index"
   import type { AssetDetail, AssetListItem, CheckoutResult, KitCheckInResult } from "./api/types"
   import { attachKeepAlive } from "./keep-alive"
-  import { normalizeSerial } from "./scanner"
+  import { fillScanTarget, normalizeSerial, scanTargetField } from "./scanner"
   import { attachSessionDeadline } from "./session-deadline"
   import { looksLikeStudentNumber } from "./student-number"
   import { rules } from "./stores/rules.svelte"
@@ -141,8 +141,35 @@
    * The scan listener is armed everywhere except the sign-in screen, which owns
    * its own. `captureInsideFields` stays false so typing a search query or a
    * damage note can't fire a phantom scan (§9.3).
+   *
+   * Item scanning is off in the setup guide: nobody is borrowing or returning
+   * there, and a card scanned to see what happens answered "Not a Stockroom
+   * item" or, worse, switched accounts mid-setup.
    */
-  const scannerArmed = $derived(signedIn)
+  const scannerArmed = $derived(signedIn && route.name !== "setup")
+
+  /**
+   * What a burst from the root listener is for (CLAUDE.md §10). The listener
+   * only reports while focus is outside every text field, so a scan into a
+   * focused field is already plain typing. Past that:
+   *
+   *  1. A form on screen that asked for scans (`data-scan-target`) gets the
+   *     code in its field.
+   *  2. The setup guide takes nothing else.
+   *  3. Everywhere else it is an item or a card, as before.
+   */
+  function onScannerBurst(burst: { code: string; fast?: boolean }) {
+    const field = scanTargetField()
+    if (field) {
+      fillScanTarget(field, burst.code)
+      return
+    }
+    if (!scannerArmed) {
+      if (burst.fast) toast.info("Scanning items is off during setup. Click a field first to scan into it.")
+      return
+    }
+    void onBurst(burst)
+  }
 
   // Every request says which screen sent it, so a scan's activity-log row can
   // say where it was scanned (ROADMAP §2.4).
@@ -400,7 +427,7 @@
     }}
   />
 {:else}
-  <ScanListener onBurst={(burst) => onBurst(burst)} />
+  <ScanListener onBurst={(burst) => onScannerBurst(burst)} />
 
   <!-- Cmd/Ctrl+K. Its own scoped scanner hands a real scan straight back to
        `onBurst`, so a barcode read while the palette is open still checks the

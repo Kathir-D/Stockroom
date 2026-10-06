@@ -97,6 +97,7 @@ func (db *DB) MarkAssetLost(ctx context.Context, actor Actor, assetID string, no
 		return AssetDetail{}, err
 	}
 	note = trimOptional(note)
+	admin := db.actorName(ctx, actor)
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return AssetDetail{}, fmt.Errorf("mark lost: %w", err)
@@ -119,31 +120,38 @@ func (db *DB) MarkAssetLost(ctx context.Context, actor Actor, assetID string, no
 	if held == nil {
 		return AssetDetail{}, fmt.Errorf("%w: item is not checked out; mark it unavailable instead", ErrConflict)
 	}
-	if _, err := tx.Exec(ctx, `
-		update custody_events
-		   set checked_in_at = now(), checked_in_by = $2, condition_in = $3,
-		       returned_via = 'lost', outcome = 'lost'
-		 where id = $1`, held.CustodyEventID, nullableID(actor), note); err != nil {
-		return AssetDetail{}, mapPgError("mark lost", err)
+	if err := closeAsLost(ctx, tx, actor, admin, assetID, held, note); err != nil {
+		return AssetDetail{}, err
 	}
 	if _, err := tx.Exec(ctx, `update assets set status = 'unavailable' where id = $1`, assetID); err != nil {
 		return AssetDetail{}, mapPgError("mark lost", err)
-	}
-	summary := fmt.Sprintf("Marked %s lost, last held by %s", assetLabel(ctx, tx, assetID), held.CustodianName)
-	if note != nil {
-		summary += ": " + *note
-	}
-	if err := writeLog(ctx, tx, LogEntry{
-		Category: LogEquipment, Action: "marked_lost", ActorID: actorLogID(actor), AssetID: assetID, Summary: summary,
-		Details: map[string]any{"custody_event_id": held.CustodyEventID, "custodian_id": held.CustodianID,
-			"custodian_name": held.CustodianName},
-	}); err != nil {
-		return AssetDetail{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AssetDetail{}, fmt.Errorf("mark lost: %w", err)
 	}
 	return db.GetAsset(ctx, actor, assetID)
+}
+
+// closeAsLost closes the open checkout held as lost and writes its log row.
+// The caller holds the asset's row lock and makes the item unavailable.
+// admin is the acting admin's name, for the summary.
+func closeAsLost(ctx context.Context, tx pgx.Tx, actor Actor, admin, assetID string, held *AssetCustody, note *string) error {
+	if _, err := tx.Exec(ctx, `
+		update custody_events
+		   set checked_in_at = now(), checked_in_by = $2, condition_in = $3,
+		       returned_via = 'lost', outcome = 'lost'
+		 where id = $1`, held.CustodyEventID, nullableID(actor), note); err != nil {
+		return mapPgError("mark lost", err)
+	}
+	summary := fmt.Sprintf("Lost by %s, marked by admin %s", held.CustodianName, admin)
+	if note != nil {
+		summary += ": " + *note
+	}
+	return writeLog(ctx, tx, LogEntry{
+		Category: LogEquipment, Action: "marked_lost", ActorID: actorLogID(actor), AssetID: assetID, Summary: summary,
+		Details: map[string]any{"custody_event_id": held.CustodyEventID, "custodian_id": held.CustodianID,
+			"custodian_name": held.CustodianName},
+	})
 }
 
 // adminNoticeFor is the sign-in line that tells an admin what is waiting:

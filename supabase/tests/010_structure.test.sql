@@ -49,7 +49,8 @@ select has_column('public', 'assets', c, format('assets.%I exists', c))
 from unnest(array[
   'id','asset_tag','name','description','category_id','location_id','status',
   'condition','serial_number','purchase_date','purchase_price',
-  'warranty_expiration','custom_fields','created_by','created_at','updated_at'
+  'warranty_expiration','custom_fields','created_by','created_at','updated_at',
+  'retired_at','retired_lost','retired_note'
 ]) as c;
 
 select has_column('public', 'custody_events', c, format('custody_events.%I exists', c))

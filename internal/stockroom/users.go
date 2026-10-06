@@ -20,6 +20,9 @@ type UserInput struct {
 	LastName      string  `json:"last_name"`
 	Email         *string `json:"email"`
 	IsAdmin       bool    `json:"is_admin"`
+	// Password is the account's first password. CreateUser requires it and
+	// UpdateUser ignores it (SetUserPassword changes one).
+	Password string `json:"password,omitempty"`
 }
 
 // normalize trims every field and validates the student number. Blank
@@ -100,8 +103,9 @@ func (db *DB) GetUser(ctx context.Context, actor Actor, id string) (Profile, err
 }
 
 // CreateUser adds an account. A duplicate student number or email is
-// ErrConflict. The account starts with no password and sets one at its
-// first scan login, the same as a roster import.
+// ErrConflict. The admin chooses its first password, so nobody who scans the
+// number first gets to pick it; only a roster or names import makes an
+// account without one.
 func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profile, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return Profile{}, err
@@ -109,15 +113,23 @@ func (db *DB) CreateUser(ctx context.Context, actor Actor, in UserInput) (Profil
 	if err := in.normalize(); err != nil {
 		return Profile{}, err
 	}
+	if in.Password == "" {
+		return Profile{}, fmt.Errorf("%w: a password is required", ErrInvalid)
+	}
+	hash, err := HashPassword(in.Password)
+	if err != nil {
+		return Profile{}, err
+	}
 	var p Profile
-	err := db.withLoggedTx(ctx, actorLogID(actor), "create user", func(tx pgx.Tx) error {
+	err = db.withLoggedTx(ctx, actorLogID(actor), "create user", func(tx pgx.Tx) error {
 		var err error
 		p, err = scanProfile(tx.QueryRow(ctx, `
-			insert into profiles (student_number, first_name, last_name, full_name, email, is_admin)
-			values ($1, $2, $3, $4, $5, $6)
+			insert into profiles (student_number, first_name, last_name, full_name, email, is_admin,
+			                      password_hash, password_set_at, password_set_by)
+			values ($1, $2, $3, $4, $5, $6, $7, now(), 'admin')
 			returning `+profileColumns,
 			in.StudentNumber, in.FirstName, in.LastName, fullName(in.FirstName, in.LastName),
-			in.Email, in.IsAdmin))
+			in.Email, in.IsAdmin, hash))
 		if err != nil {
 			return mapPgError("create user", err)
 		}

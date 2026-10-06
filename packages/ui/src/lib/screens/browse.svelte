@@ -203,4 +203,7 @@
   bind:open={holderOpen}
   userId={holder?.custodian_id ?? null}
   userName={holder?.custodian_name ?? ""}
+  onChanged={(asset) => {
+    if (detail?.id === asset.id) detail = asset
+  }}
 />

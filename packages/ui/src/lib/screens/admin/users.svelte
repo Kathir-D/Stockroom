@@ -12,9 +12,9 @@
    * is what the dialog shows afterwards. An import that silently half-applied is
    * the failure this screen exists to prevent.
    *
-   * No password field on create. A new account has `password_hash = null` and
-   * sets one at its first *scan* login; the admin can set one here afterwards
-   * (CLAUDE.md §7).
+   * **Create asks for a password** and the server requires it, so an account
+   * made here is never one that whoever scans the number first gets to claim.
+   * Only a roster or names import makes an account without one (CLAUDE.md §7).
    */
   import PlusIcon from "@lucide/svelte/icons/plus"
   import PencilIcon from "@lucide/svelte/icons/pencil"
@@ -39,6 +39,7 @@
   import Serial from "@stockroom/ui/components/app/serial.svelte"
   import * as api from "../../api/index"
   import type { Profile, RosterResult, UserInput } from "../../api/types"
+  import PasswordInput from "@stockroom/ui/components/app/password-input.svelte"
   import UserHistoryDialog from "@stockroom/ui/components/app/user-history-dialog.svelte"
   import AddNamesDialog from "@stockroom/ui/components/app/add-names-dialog.svelte"
   import ListIcon from "@lucide/svelte/icons/list-plus"
@@ -62,6 +63,8 @@
   let formOpen = $state(false)
   let editing = $state<Profile | null>(null)
   let form = $state<UserInput>(blankForm())
+  /** The new account's password. Create only; Set password changes one later. */
+  let createPassword = $state("")
   let formError = $state<string | null>(null)
   let saving = $state(false)
 
@@ -195,6 +198,7 @@
   function openCreate() {
     editing = null
     form = blankForm()
+    createPassword = ""
     formError = null
     formOpen = true
   }
@@ -219,11 +223,15 @@
     try {
       const payload: UserInput = { ...form, email: form.email || null }
       if (editing) await api.updateUser(editing.id, payload)
-      else await api.createUser(payload)
+      else {
+        if (createPassword.length < MIN_PASSWORD) {
+          formError = `The password needs at least ${MIN_PASSWORD} characters.`
+          return
+        }
+        await api.createUser({ ...payload, password: createPassword })
+      }
       formOpen = false
-      toast.success(
-        editing ? "User updated" : "User created — they set a password at their first scan login"
-      )
+      toast.success(editing ? "User updated" : "User created")
       await load()
       // An admin who just edited themselves needs the shell to notice.
       if (editing?.id === session.profile?.id) await session.refresh()
@@ -491,8 +499,8 @@
       <Dialog.Header>
         <Dialog.Title>{editing ? `Edit ${displayName(editing)}` : "New user"}</Dialog.Title>
         <Dialog.Description>
-          The student number is what the ID card barcode encodes. A new account has no password; it
-          sets one at its first scan login, or you can set one here afterwards.
+          The student number is what the ID card barcode encodes. Scan the card to fill it in. A new
+          account needs a password, which the person can be told and you can change later.
         </Dialog.Description>
       </Dialog.Header>
 
@@ -521,6 +529,7 @@
           autocomplete="off"
           spellcheck={false}
           required
+          data-scan-target
         />
         <p class="text-xs text-fg-faint">
           What the ID card barcode encodes, in the format set under Admin → Settings.
@@ -536,6 +545,24 @@
           oninput={(e) => (form.email = e.currentTarget.value)}
         />
       </div>
+
+      {#if !editing}
+        <div class="flex flex-col gap-1.5">
+          <Label for="user-password">Password</Label>
+          <PasswordInput
+            id="user-password"
+            bind:value={createPassword}
+            autocomplete="new-password"
+            minlength={MIN_PASSWORD}
+            maxlength={72}
+            required
+          />
+          <p class="text-xs text-fg-faint">
+            At least {MIN_PASSWORD} characters. They need it when they type their number instead of
+            scanning it.
+          </p>
+        </div>
+      {/if}
 
       <div class="flex items-center gap-2">
         <Checkbox
@@ -588,6 +615,7 @@
   bind:open={historyOpen}
   userId={historyTarget?.id ?? null}
   userName={historyTarget ? displayName(historyTarget) : ""}
+  onChanged={() => load()}
 />
 
 <AlertDialog.Root open={deleteTarget !== null} onOpenChange={(open) => !open && (deleteTarget = null)}>

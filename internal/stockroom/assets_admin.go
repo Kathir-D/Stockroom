@@ -374,15 +374,29 @@ func assetLabel(ctx context.Context, q querier, id string) string {
 	return label
 }
 
+// RetireInput is what an admin says when retiring an item.
+type RetireInput struct {
+	Lost bool    `json:"lost"`
+	Note *string `json:"note"`
+}
+
 // SetAssetRetired takes an item out of the catalogue for good, or brings it
 // back (CLAUDE.md §7). Retiring is what an admin does instead of deleting an
 // item with custody history: it becomes unavailable, disappears from browse
 // and from its kit, and keeps every custody row. Bringing it back makes it
-// available again. Refused while the item is out.
-func (db *DB) SetAssetRetired(ctx context.Context, actor Actor, id string, retired bool) (AssetDetail, error) {
+// available again.
+//
+// why is what the admin said when retiring: whether the item is lost, and a
+// note. Both are stored on the item and written to the log, and bringing the
+// item back clears them. An item that is out can be retired only as lost,
+// which closes its checkout as lost first (MarkAssetLost); otherwise that is
+// refused.
+func (db *DB) SetAssetRetired(ctx context.Context, actor Actor, id string, retired bool, why RetireInput) (AssetDetail, error) {
 	if err := RequireAdmin(actor); err != nil {
 		return AssetDetail{}, err
 	}
+	note := trimOptional(why.Note)
+	admin := db.actorName(ctx, actor)
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return AssetDetail{}, fmt.Errorf("retire asset: %w", err)
@@ -404,7 +418,7 @@ func (db *DB) SetAssetRetired(ctx context.Context, actor Actor, id string, retir
 	if err := tx.QueryRow(ctx, `select `+openCustodySQL("$1::uuid"), id).Scan(&open); err != nil {
 		return AssetDetail{}, mapPgError("retire asset", err)
 	}
-	if open {
+	if open && !(retired && why.Lost) {
 		return AssetDetail{}, fmt.Errorf("%w: item is checked out; check it in or mark it lost first", ErrConflict)
 	}
 	if was == retired {
@@ -421,17 +435,42 @@ func (db *DB) SetAssetRetired(ctx context.Context, actor Actor, id string, retir
 		if _, err := tx.Exec(ctx, `delete from kit_items where asset_id = $1`, id); err != nil {
 			return AssetDetail{}, mapPgError("retire asset", err)
 		}
-		if _, err := tx.Exec(ctx, `update assets set retired_at = now(), status = 'unavailable' where id = $1`, id); err != nil {
+		if open {
+			held, err := currentCustody(ctx, tx, id, actor)
+			if err != nil {
+				return AssetDetail{}, err
+			}
+			if held != nil {
+				if err := closeAsLost(ctx, tx, actor, admin, id, held, note); err != nil {
+					return AssetDetail{}, err
+				}
+			}
+		}
+		if _, err := tx.Exec(ctx, `
+			update assets set retired_at = now(), status = 'unavailable', retired_lost = $2, retired_note = $3
+			 where id = $1`, id, why.Lost, note); err != nil {
 			return AssetDetail{}, mapPgError("retire asset", err)
 		}
-	} else if _, err := tx.Exec(ctx, `update assets set retired_at = null, status = 'available' where id = $1`, id); err != nil {
+	} else if _, err := tx.Exec(ctx, `
+		update assets set retired_at = null, status = 'available', retired_lost = false, retired_note = null
+		 where id = $1`, id); err != nil {
 		return AssetDetail{}, mapPgError("retire asset", err)
 	}
 	action, summary := "asset_retired", "Retired "+label
-	if !retired {
+	var details map[string]any
+	if retired {
+		if why.Lost {
+			summary += " as lost"
+		}
+		details = map[string]any{"lost": why.Lost}
+		if note != nil {
+			summary += ": " + *note
+			details["note"] = *note
+		}
+	} else {
 		action, summary = "asset_unretired", "Brought back retired item "+label
 	}
-	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: action, ActorID: actorLogID(actor), AssetID: id, Summary: summary}); err != nil {
+	if err := writeLog(ctx, tx, LogEntry{Category: LogAdmin, Action: action, ActorID: actorLogID(actor), AssetID: id, Summary: summary, Details: details}); err != nil {
 		return AssetDetail{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

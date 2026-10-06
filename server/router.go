@@ -109,6 +109,7 @@ func newRouter(d deps) http.Handler {
 	mux.Handle("GET /custody/review", d.withSession(d.handleNeedsReview, fullOnly))
 	mux.Handle("POST /custody/{id}/reviewed", d.withSession(d.handleResolveReview, fullOnly))
 	mux.Handle("POST /assets/{id}/lost", d.withSession(d.handleMarkLost, fullOnly))
+	mux.Handle("POST /assets/{id}/readd", d.withSession(d.handleReaddAsset, fullOnly))
 	mux.Handle("GET /assets/{id}/history", d.withSession(d.handleAssetHistory, fullOnly))
 	mux.Handle("GET /users/{id}/history", d.withSession(d.handleUserHistory, fullOnly))
 
