@@ -39,6 +39,28 @@ step "install $first"
 apt-get update -q
 apt-get install -y -q "$first"
 
+# The graphical installer's launcher is in the package, and the page it opens
+# answers. Nothing is installed here: the page is asked for its state and told
+# to close, and the terminal setup below does the install.
+step "the graphical installer serves its page"
+[ -x /usr/lib/stockroom/setup-gui ] || fail "the Stockroom Setup launcher is missing or not executable"
+grep -q '^Exec=/usr/lib/stockroom/setup-gui$' /usr/share/applications/stockroom-setup.desktop \
+  || fail "the Stockroom Setup menu entry doesn't run the launcher"
+guilog=$(mktemp)
+stockroom setup --gui --no-open > "$guilog" 2>&1 &
+guipid=$!
+page=""
+for _ in $(seq 30); do
+  page=$(grep -m1 '^http://127\.0\.0\.1:' "$guilog" || true)
+  [ -n "$page" ] && break
+  sleep 1
+done
+[ -n "$page" ] || { cat "$guilog"; fail "setup --gui never printed its address"; }
+curl -fs "${page%%/\?*}/api/state?${page##*\?}" | grep -q '"phase":"ask"' || fail "the installer's page gave no state"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "${page%%/\?*}/api/state")" = 403 ] || fail "the installer answered without its token"
+curl -fs -X POST "${page%%/\?*}/api/quit?${page##*\?}" || fail "the installer refused to close"
+wait "$guipid" || fail "setup --gui exited with an error"
+
 step "setup"
 if [ "$mode" = --no-service ]; then
   stockroom setup --non-interactive --no-open --no-service --service-user stockroom \

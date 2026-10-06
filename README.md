@@ -117,6 +117,11 @@ there.
 > --cask kathir-d/tap/stockroom` installs the binary, PostgreSQL and rclone; the next command,
 > `stockroom setup`, finishes the job. The Linux script does both in one go.
 
+Prefer not to use a terminal? Each platform also has a graphical installer that does the same
+install from a page in your browser: the `.deb` plus **Stockroom Setup** in the applications menu,
+`Stockroom-Installer-macOS.zip`, and `Stockroom-Setup.exe`. They ship with the next release, and
+[`docs/INSTALL.md`](docs/INSTALL.md#graphical-installers) walks through each.
+
 ### Linux — Debian or Ubuntu (recommended)
 
 Debian 12, Ubuntu 24.04 or newer, on amd64 or arm64.

@@ -68,14 +68,7 @@ func DefaultPaths(goos string) Paths {
 	switch goos {
 	case "darwin":
 		prefix := stockroom.BrewPrefix()
-		// The cask unpacks the release archive, deploy/camera included, next
-		// to the real binary.
-		camera := filepath.Join(prefix, "share", "stockroom", "camera")
-		if real, err := filepath.EvalSymlinks(bin); err == nil {
-			if dir := filepath.Join(filepath.Dir(real), "deploy", "camera"); isDir(dir) {
-				camera = dir
-			}
-		}
+		camera := brewCameraDir(prefix, bin)
 		// A Homebrew binary runs from its Caskroom (or Cellar), whose path
 		// changes with every upgrade. The daemon points at the stable link.
 		for _, dir := range []string{"Caskroom", "Cellar"} {
@@ -103,6 +96,17 @@ func DefaultPaths(goos string) Paths {
 			CameraDir:    "/usr/share/stockroom/camera",
 		}
 	}
+}
+
+// brewCameraDir is where macOS setup finds deploy/camera. The cask unpacks
+// the release archive, deploy/camera included, next to the real binary.
+func brewCameraDir(prefix, bin string) string {
+	if real, err := filepath.EvalSymlinks(bin); err == nil {
+		if dir := filepath.Join(filepath.Dir(real), "deploy", "camera"); isDir(dir) {
+			return dir
+		}
+	}
+	return filepath.Join(prefix, "share", "stockroom", "camera")
 }
 
 func isDir(path string) bool {
@@ -149,7 +153,7 @@ func NewEnv() *Env {
 	root := os.Geteuid() == 0
 	sudoUser := ""
 	if root {
-		sudoUser = os.Getenv("SUDO_USER")
+		sudoUser = platform.SudoUser()
 	}
 	return &Env{
 		GOOS:     runtime.GOOS,

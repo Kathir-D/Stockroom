@@ -1,0 +1,32 @@
+#!/bin/sh
+# The executable of "Install Stockroom.app" (scripts/make-mac-installer.sh
+# builds the bundle). It runs the copy of stockroom inside the app as
+# `setup --gui --install-packages`, which opens the installer's page in the
+# browser, installs the Homebrew cask and its PostgreSQL, and then runs the
+# same setup `stockroom setup` does.
+#
+# Both architectures ship in the one app, because nobody downloading an
+# installer should have to know which Mac they have.
+resources="$(cd "$(dirname "$0")/../Resources" && pwd)"
+# Asked of the hardware, not of uname: Finder may start a script under
+# Rosetta, where uname says x86_64 on an Apple Silicon Mac, and the Intel
+# build would then look for Homebrew in /usr/local.
+if [ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  bin="$resources/stockroom-arm64"
+else
+  bin="$resources/stockroom-amd64"
+fi
+log="${TMPDIR:-/tmp}/stockroom-installer.log"
+
+# Finder starts an app with launchd's PATH, which has no Homebrew in it.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
+if ! "$bin" setup --gui --install-packages >"$log" 2>&1; then
+  /usr/bin/osascript - "$log" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+	display alert "Stockroom Setup could not start" message "What it said is in " & (item 1 of argv) & "." as critical
+end run
+APPLESCRIPT
+  exit 1
+fi

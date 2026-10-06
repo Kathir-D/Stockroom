@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stockroom Setup</title>
+<style>
+  /* The same palette as the app. packages/ui/src/lib/styles/tokens.css is
+     where a colour is defined; these are copies, because this page is served
+     by the installer before any of the app exists on the machine.
+     TestPageColoursComeFromTheTokens fails on one that isn't in that file. */
+  :root {
+    --ground: #2e3033;
+    --surface: #35383b;
+    --raised: #3d4144;
+    --fg: #e9e9e7;
+    --fg-muted: #a8adac;
+    --fg-faint: #949998;
+    --line: #464b4e;
+    --line-control: #7b8283;
+    --line-strong: #585e61;
+    --primary: #e9e9e7;
+    --primary-fg: #17191a;
+    --primary-hover: #ffffff;
+    --destructive: #ff7a70;
+    --status-available: #4ade80;
+    --status-due-soon: #fbbf24;
+    --radius: 6px;
+    --radius-xl: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 20px 64px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--fg-muted); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xl);
+    padding: 20px;
+    margin-top: 20px;
+  }
+  ul.notes { margin: 0; padding-left: 20px; color: var(--fg-muted); }
+  ul.notes li { margin-bottom: 4px; }
+  label { display: block; font-weight: 500; margin: 14px 0 4px; }
+  input[type=text], input[type=password] {
+    width: 100%;
+    padding: 9px 11px;
+    background: var(--raised);
+    color: var(--fg);
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius);
+    font: inherit;
+  }
+  input::placeholder { color: var(--fg-faint); }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 4px; font-weight: 400; }
+  .check input { margin-top: 5px; }
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  button, a.button {
+    display: inline-block;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line-control);
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  button.primary, a.button.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-fg);
+  }
+  button.primary:hover, a.button.primary:hover { background: var(--primary-hover); }
+  button:disabled { opacity: .5; cursor: default; }
+  .error { color: var(--destructive); margin: 14px 0 0; white-space: pre-wrap; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li { display: flex; gap: 10px; align-items: center; padding: 5px 0; color: var(--fg-faint); }
+  ol.steps li .mark { width: 18px; text-align: center; flex: none; }
+  ol.steps li.done { color: var(--fg); }
+  ol.steps li.done .mark { color: var(--status-available); }
+  ol.steps li.now { color: var(--fg); font-weight: 600; }
+  ol.steps li.now .mark { color: var(--status-due-soon); }
+  ol.steps li.failed { color: var(--destructive); }
+  @keyframes pulse { 50% { opacity: .25; } }
+  ol.steps li.now .mark { animation: pulse 1.2s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { ol.steps li.now .mark { animation: none; } }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; color: var(--fg-muted); }
+  pre {
+    margin: 10px 0 0;
+    padding: 12px;
+    max-height: 320px;
+    overflow: auto;
+    background: var(--ground);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Stockroom Setup</h1>
+  <p class="muted" id="subtitle">Equipment checkout for a school media department.</p>
+
+  <section class="card" id="need" hidden>
+    <h2>One thing first</h2>
+    <p id="need-message"></p>
+    <div class="actions">
+      <a class="button primary" id="need-link" target="_blank" rel="noreferrer" hidden></a>
+      <button type="button" id="need-again">Check again</button>
+    </div>
+  </section>
+
+  <form id="form" hidden novalidate>
+    <section class="card">
+      <h2>What this does</h2>
+      <ul class="notes" id="notes"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Failsafe admin</h2>
+      <p class="muted" id="admin-note" hidden></p>
+      <div id="admin-fields" hidden>
+        <p class="muted">An admin account that always works, even after a forgotten password or a lost database. Leave all three blank to skip it; the setup guide in Stockroom can add one later.</p>
+        <label for="number">Student number (digits)</label>
+        <input type="text" id="number" inputmode="numeric" autocomplete="off" placeholder="900100">
+        <label for="password">Password (8 to 72 characters)</label>
+        <input type="password" id="password" autocomplete="new-password">
+        <label for="again">Password again</label>
+        <input type="password" id="again" autocomplete="new-password">
+      </div>
+    </section>
+
+    <section class="card" id="camera-card" hidden>
+      <h2>Closet camera</h2>
+      <label class="check"><input type="checkbox" id="camera"><span>Also start the closet camera's detector. It needs Docker, and stays off in Stockroom until an admin turns it on.</span></label>
+    </section>
+
+    <p class="error" id="form-error" role="alert" hidden></p>
+    <div class="actions">
+      <button type="submit" class="primary" id="install">Install</button>
+    </div>
+  </form>
+
+  <section class="card" id="progress" hidden>
+    <h2 id="progress-title">Installing</h2>
+    <ol class="steps" id="steps"></ol>
+    <p id="result-message" hidden></p>
+    <p class="error" id="run-error" role="alert" hidden></p>
+    <div class="actions" id="result-actions" hidden>
+      <a class="button primary" id="open-app" hidden>Open Stockroom</a>
+      <button type="button" id="retry" hidden>Try again</button>
+      <button type="button" id="close" hidden>Close</button>
+    </div>
+    <details id="log-box">
+      <summary>Details</summary>
+      <pre id="log" aria-live="off"></pre>
+    </details>
+  </section>
+
+  <p class="muted" id="closed" hidden>Setup has closed. You can close this tab.</p>
+</main>
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get("t") || "";
+  const $ = (id) => document.getElementById(id);
+  const api = (path, extra = "") => `/api/${path}?t=${encodeURIComponent(token)}${extra}`;
+  let logLines = 0, timer = null, over = false, state = null, editing = false;
+
+  function show(id, on) { $(id).hidden = !on; }
+
+  function renderSteps(st) {
+    const ol = $("steps");
+    ol.replaceChildren();
+    st.steps.forEach((name, i) => {
+      const li = document.createElement("li");
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      let cls = "", sign = "•";
+      if (st.phase === "done" || i < st.step) { cls = "done"; sign = "✓"; }
+      else if (i === st.step) {
+        if (st.phase === "failed") { cls = "failed"; sign = "✕"; }
+        else { cls = "now"; sign = "●"; }
+      }
+      li.className = cls;
+      mark.textContent = sign;
+      li.append(mark, document.createTextNode(name));
+      ol.append(li);
+    });
+  }
+
+  function render(st) {
+    state = st;
+    $("title").textContent = `Install Stockroom on ${st.platform}`;
+    const asking = st.phase === "ask" || (st.phase === "failed" && editing);
+    show("need", st.phase === "ask" && !!st.need);
+    show("form", asking && !st.need);
+    show("progress", !asking);
+
+    if (st.need) {
+      $("need-message").textContent = st.need.message;
+      const link = $("need-link");
+      link.hidden = !st.need.linkUrl;
+      if (st.need.linkUrl) { link.href = st.need.linkUrl; link.textContent = st.need.linkText || "Open"; }
+    }
+
+    if (asking && !$("notes").childElementCount) {
+      for (const note of st.notes || []) {
+        const li = document.createElement("li");
+        li.textContent = note;
+        $("notes").append(li);
+      }
+      show("admin-fields", st.askAdmin);
+      show("admin-note", !st.askAdmin && !!st.adminNote);
+      $("admin-note").textContent = st.adminNote || "";
+      show("camera-card", st.camera);
+    }
+
+    if (!asking) {
+      if (st.from < logLines) { $("log").textContent = ""; logLines = st.from; }
+      if (st.lines.length) {
+        const log = $("log");
+        const pinned = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+        log.append(document.createTextNode(st.lines.join("\n") + "\n"));
+        logLines += st.lines.length;
+        if (pinned) log.scrollTop = log.scrollHeight;
+      }
+      renderSteps(st);
+      const titles = { running: "Installing", done: st.url ? "Stockroom is installed" : "Almost there", failed: "Setup stopped" };
+      $("progress-title").textContent = titles[st.phase] || "Installing";
+      show("result-message", st.phase === "done" && !!st.message);
+      $("result-message").textContent = st.message || "";
+      show("run-error", st.phase === "failed");
+      $("run-error").textContent = st.error || "";
+      show("result-actions", st.phase !== "running");
+      show("open-app", st.phase === "done" && !!st.url);
+      if (st.url) $("open-app").href = st.url;
+      show("retry", st.phase === "failed");
+      show("close", st.phase === "done" && !st.url);
+      if (st.phase === "failed") $("log-box").open = true;
+    }
+  }
+
+  async function poll() {
+    if (over) return;
+    let delay = 4000;
+    try {
+      const res = await fetch(api("state", `&from=${logLines}`), { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const st = await res.json();
+      render(st);
+      if (st.phase === "running") delay = 700;
+    } catch {
+      // The wizard exits once it is done with. A page still open says so.
+      if (state && state.phase !== "running") { finished(); return; }
+    }
+    timer = setTimeout(poll, delay);
+  }
+
+  function finished() {
+    over = true;
+    clearTimeout(timer);
+    for (const id of ["need", "form", "result-actions"]) show(id, false);
+    show("closed", true);
+  }
+
+  function formError(text) {
+    $("form-error").textContent = text;
+    show("form-error", !!text);
+  }
+
+  $("form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    formError("");
+    const answers = { adminNumber: "", adminPassword: "", withCamera: $("camera").checked };
+    if (state.askAdmin) {
+      answers.adminNumber = $("number").value.trim();
+      answers.adminPassword = $("password").value;
+      if (answers.adminPassword !== $("again").value) { formError("The two passwords differ."); return; }
+    }
+    $("install").disabled = true;
+    try {
+      const res = await fetch(api("run"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(answers),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        formError(body.error || "Setup could not start.");
+        return;
+      }
+      $("password").value = $("again").value = "";
+      editing = false;
+      logLines = 0;
+      $("log").textContent = "";
+      clearTimeout(timer);
+      poll();
+    } catch {
+      formError("Setup is no longer running. Open Stockroom Setup again.");
+    } finally {
+      $("install").disabled = false;
+    }
+  });
+
+  $("need-again").addEventListener("click", () => { clearTimeout(timer); poll(); });
+  $("retry").addEventListener("click", () => { editing = true; render(state); });
+
+  async function quit() {
+    try { await fetch(api("quit"), { method: "POST", keepalive: true }); } catch {}
+    finished();
+  }
+  $("close").addEventListener("click", quit);
+  // Opening Stockroom ends the install. The link still navigates.
+  $("open-app").addEventListener("click", () => {
+    over = true;
+    navigator.sendBeacon(api("quit"));
+  });
+  // A closed tab lets the wizard exit in seconds rather than minutes. A
+  // reload asks for the state again and keeps it alive.
+  addEventListener("pagehide", () => { if (!over) navigator.sendBeacon(api("bye")); });
+
+  poll();
+})();
+</script>
+</body>
+</html>

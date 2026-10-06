@@ -1,0 +1,31 @@
+#!/bin/sh
+# The Stockroom Setup entry in the applications menu runs this
+# (stockroom-setup.desktop). It asks for the administrator password in the
+# desktop's own dialog, starts `stockroom setup --gui` as root, and opens the
+# page that prints in this session's browser.
+#
+# The browser is opened here and not by setup, because pkexec gives root a
+# clean environment with no display in it.
+set -u
+
+setup() { "$@" /usr/bin/stockroom setup --gui --no-open 2>&1; }
+
+if [ "$(id -u)" -eq 0 ]; then
+  as_root=""
+elif command -v pkexec >/dev/null 2>&1; then
+  as_root="pkexec"
+elif command -v x-terminal-emulator >/dev/null 2>&1; then
+  # No polkit on this desktop. A terminal can still ask for the password.
+  exec x-terminal-emulator -e sudo /usr/bin/stockroom setup --gui
+else
+  echo "Stockroom Setup needs pkexec to ask for the administrator password. Run: sudo stockroom setup --gui" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+setup $as_root | while IFS= read -r line; do
+  printf '%s\n' "$line"
+  case "$line" in
+    http://127.0.0.1:*) xdg-open "$line" >/dev/null 2>&1 & ;;
+  esac
+done

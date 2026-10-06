@@ -25,6 +25,8 @@ func cmdSetup(args []string) int {
 	fs.StringVar(&o.AdminPasswordFile, "admin-password-file", "", "file holding the failsafe admin password, or - for stdin")
 	fs.StringVar(&o.Addr, "addr", "", "address the server listens on (default 127.0.0.1:8080)")
 	fs.StringVar(&o.ConfigFile, "config", "", "config file to write and point the service at (default: the service's current one, else the system path)")
+	gui := fs.Bool("gui", false, "ask and show progress in a browser page instead of this terminal")
+	fs.BoolVar(&o.InstallPackages, "install-packages", false, "macOS, with --gui: install the Homebrew cask, PostgreSQL and rclone first (what the installer app does)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -36,6 +38,21 @@ func cmdSetup(args []string) int {
 	defer stop()
 
 	env := setup.NewEnv()
+	if *gui {
+		if o.NonInteractive {
+			fmt.Fprintln(os.Stderr, "stockroom setup: --gui asks its questions in a browser, so it can't be --non-interactive")
+			return 2
+		}
+		if err := setup.GUI(ctx, env, o); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "stockroom setup --gui: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if o.InstallPackages {
+		fmt.Fprintln(os.Stderr, "stockroom setup: --install-packages goes with --gui. In a terminal, run: brew install --cask kathir-d/tap/stockroom")
+		return 2
+	}
 	if err := setup.Setup(ctx, env, o); err != nil {
 		fmt.Fprintf(os.Stderr, "\nsetup stopped at %v\n", err)
 		return 1

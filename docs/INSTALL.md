@@ -12,6 +12,26 @@ An install is the operating system's PostgreSQL, one `stockroom` binary and one 
 
 There is no native Windows version.
 
+## Graphical installers
+
+Each platform also has an installer that needs no terminal. All three show the same page in your browser: it says what will be installed, asks for the failsafe admin, and follows the install step by step. They run the same setup as the commands above, so everything else in this guide applies to both.
+
+| Platform | Download | Then |
+|---|---|---|
+| Debian 12 or Ubuntu 24.04, and newer | [`stockroom_amd64.deb`](https://github.com/Kathir-D/Stockroom/releases/latest/download/stockroom_amd64.deb) (or [`stockroom_arm64.deb`](https://github.com/Kathir-D/Stockroom/releases/latest/download/stockroom_arm64.deb)) | Open it to install, then open **Stockroom Setup** from the applications menu |
+| macOS | [`Stockroom-Installer-macOS.zip`](https://github.com/Kathir-D/Stockroom/releases/latest/download/Stockroom-Installer-macOS.zip) | Open **Install Stockroom** |
+| Windows 10 or 11 | [`Stockroom-Setup.exe`](https://github.com/Kathir-D/Stockroom/releases/latest/download/Stockroom-Setup.exe) | Open it |
+
+None of the three is signed, so macOS and Windows each warn once before the first open. The steps for getting past that are below.
+
+**Linux.** Double-click the `.deb` and install it with the Software app. If the Software app doesn't offer to, right-click the file and choose Open With, Software Install, or run `sudo apt install ./stockroom_amd64.deb`. Then open **Stockroom Setup** from the applications menu. It asks for your password in the desktop's own dialog and opens the page. From a terminal the same thing is `sudo stockroom setup --gui`.
+
+**macOS.** Unzip the download and open **Install Stockroom**. macOS refuses an unsigned app the first time: Control-click it and choose Open, or on macOS 15 and newer open System Settings, Privacy & Security, and press Open Anyway. The installer needs [Homebrew](https://brew.sh), which supplies PostgreSQL. If this Mac doesn't have it, the page says so and links to Homebrew's own installer; run that, come back and press Check again. The installer then installs the cask, PostgreSQL 17 and rclone, and asks for your Mac password once, in a dialog, to install the two LaunchDaemons. The app only installs. Afterwards you can delete it: Stockroom itself lives in Homebrew.
+
+**Windows.** Open `Stockroom-Setup.exe`. If SmartScreen says "Windows protected your PC", press More info, then Run anyway. Press Install on the page and answer Yes when Windows asks for permission. It then does what `get.ps1` does, below, with two differences: Ubuntu gets no user account of your own (Stockroom runs as a system account inside it), and a PC that needs a restart to finish installing WSL is told so on the page. Restart, open `Stockroom-Setup.exe` again, and it carries on. Near the end Windows asks for your Windows password, so the startup task can run with nobody logged in. That dialog can open behind the browser.
+
+The page closes itself: the installer exits when the install is done, or a few minutes after the tab is closed. If setup stops, the page shows where, and Try again runs it again.
+
 ## Linux
 
 ```bash
@@ -93,6 +113,8 @@ The closet camera doesn't run under WSL.
 | `--no-service` | don't install or start the service, for a machine without systemd |
 | `--no-open` | don't open a browser at the end |
 | `--with-camera` | also start the closet camera's detector, which needs Docker |
+| `--gui` | ask and show progress in a browser page instead of the terminal. On Linux it still needs `sudo` |
+| `--install-packages` | macOS, with `--gui`: install the Homebrew cask, PostgreSQL and rclone first. The installer app passes it |
 
 There is no flag for the password itself, because other users can read command-line arguments and shells save them in history.
 

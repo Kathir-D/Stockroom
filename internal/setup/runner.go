@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -27,6 +28,9 @@ type Cmd struct {
 	Root bool
 	// Env is added to the inherited environment.
 	Env []string
+	// Stream also receives the command's output as it arrives, for a
+	// command slow enough that someone is watching (brew install).
+	Stream io.Writer
 }
 
 func (c Cmd) String() string {
@@ -50,9 +54,13 @@ type Runner interface {
 }
 
 // ExecRunner runs commands for real.
-type ExecRunner struct{}
+type ExecRunner struct {
+	// Askpass is a program sudo runs to ask for the password, for a setup
+	// with no terminal to ask on. Empty lets sudo ask on the terminal.
+	Askpass string
+}
 
-func (ExecRunner) Run(ctx context.Context, c Cmd) (string, error) {
+func (r ExecRunner) Run(ctx context.Context, c Cmd) (string, error) {
 	argv := append([]string{c.Name}, c.Args...)
 	euid := os.Geteuid()
 	switch {
@@ -62,6 +70,8 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) (string, error) {
 		argv = append([]string{"sudo", "-u", c.User, "--"}, argv...)
 	case c.User != "" && c.User != currentUserName():
 		argv = append([]string{"sudo", "-u", c.User, "--"}, argv...)
+	case c.Root && euid != 0 && r.Askpass != "":
+		argv = append([]string{"sudo", "-A", "--"}, argv...)
 	case c.Root && euid != 0:
 		argv = append([]string{"sudo", "--"}, argv...)
 	}
@@ -72,12 +82,19 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) (string, error) {
 		cmd.Dir = "/"
 	}
 	cmd.Env = append(os.Environ(), c.Env...)
+	if r.Askpass != "" {
+		cmd.Env = append(cmd.Env, "SUDO_ASKPASS="+r.Askpass)
+	}
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if c.Stream != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, c.Stream)
+		cmd.Stderr = io.MultiWriter(&stderr, c.Stream)
+	}
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {

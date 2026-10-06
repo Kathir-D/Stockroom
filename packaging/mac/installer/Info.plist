@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Install Stockroom</string>
+	<key>CFBundleDisplayName</key>
+	<string>Install Stockroom</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.stockroom.installer</string>
+	<key>CFBundleExecutable</key>
+	<string>install-stockroom</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<!-- The executable is a shell script, which tells macOS nothing about
+	     architecture. Without this an Apple Silicon Mac starts it under
+	     Rosetta, and offers to install Rosetta when it is missing. -->
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+		<string>x86_64</string>
+	</array>
+	<!-- The window is a browser tab, so the app itself shows nothing: no Dock
+	     icon to bounce while setup runs behind it. -->
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>

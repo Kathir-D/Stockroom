@@ -1,8 +1,9 @@
 name: release
 
 # Builds a release with GoReleaser on a version tag: the binaries for Linux and
-# macOS, stockroom_amd64.deb and stockroom_arm64.deb, checksums.txt, and the
-# Homebrew cask. .goreleaser.yaml says what goes in each.
+# macOS, stockroom_amd64.deb and stockroom_arm64.deb, the two graphical
+# installers (Stockroom-Setup.exe and Stockroom-Installer-macOS.zip),
+# checksums.txt, and the Homebrew cask. .goreleaser.yaml says what goes in each.
 #
 # The build and the publish are separate jobs. The build runs `npm ci`, which
 # runs every dependency's lifecycle scripts, so it gets a read-only token. The
@@ -57,6 +58,23 @@ jobs:
       # The cask can't carry a test block, so check the binary here.
       - name: Check the binary runs
         run: dist/stockroom_linux_amd64_v1/stockroom version
+
+      # The graphical installers. GoReleaser built the .exe and left it in
+      # its build folder, so copy it beside the other release files and hold
+      # it to the checksum GoReleaser recorded under that name. The macOS app
+      # is a folder around the two darwin binaries, which is why it can be
+      # built here on Linux; its checksum joins the others.
+      - name: Build the graphical installers
+        run: |
+          set -euo pipefail
+          cp dist/winsetup_windows_amd64*/winsetup.exe dist/Stockroom-Setup.exe
+          (cd dist && grep ' Stockroom-Setup\.exe$' checksums.txt | sha256sum -c -)
+          version=$(dist/stockroom_linux_amd64_v1/stockroom version | awk 'NR==1 {print $2}')
+          scripts/make-mac-installer.sh \
+            dist/stockroom_darwin_arm64*/stockroom dist/stockroom_darwin_amd64*/stockroom \
+            "$version" dist/Stockroom-Installer-macOS.zip
+          unzip -Z1 dist/Stockroom-Installer-macOS.zip | grep -qxF 'Install Stockroom.app/Contents/MacOS/install-stockroom'
+          (cd dist && sha256sum Stockroom-Installer-macOS.zip >> checksums.txt)
 
       # The tarballs are what the macOS cask unpacks, and `setup --with-camera`
       # runs deploy/camera/camera.sh out of the one it lands in. (The .deb ships
@@ -142,6 +160,8 @@ jobs:
           path: |
             dist/*.deb
             dist/*.tar.gz
+            dist/Stockroom-Setup.exe
+            dist/Stockroom-Installer-macOS.zip
             dist/checksums.txt
             dist/homebrew/Casks/stockroom.rb
           if-no-files-found: error
@@ -172,14 +192,14 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "The release for ${TAG} exists. Replacing its files."
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-              dist/*.deb dist/*.tar.gz dist/checksums.txt
+              dist/*.deb dist/*.tar.gz dist/*.exe dist/*.zip dist/checksums.txt
             exit 0
           fi
           flags=()
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --generate-notes "${flags[@]}" \
-            dist/*.deb dist/*.tar.gz dist/checksums.txt
+            dist/*.deb dist/*.tar.gz dist/*.exe dist/*.zip dist/checksums.txt
 
       # The tap is Kathir-D/homebrew-tap, shared with Sonar and
       # headless-spotify. TAP_DEPLOY_KEY is a deploy key on that repository
