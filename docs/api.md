@@ -15,6 +15,7 @@ Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` a
 | `POST /checkout` | any full | `{asset_ids, due_at, custodian_id?, override_overdue?}`; the last two are admin-only |
 | `POST /assets/{id}/checkin` | any full | optional `{note, scanned}` (the damage note; `scanned` confirms a `confirm_return`; an empty body is fine). A student's unscanned return, or any note, goes to Needs attention |
 | `POST /assets/{id}/lost` | admin | optional `{note}`; closes the open checkout as lost and makes the item unavailable |
+| `POST /assets/{id}/readd` | admin | closes the open checkout as returned and makes the item available; the log row says an admin re-added it. Not checked out is 409 |
 | `GET /custody/review`, `POST /custody/{id}/reviewed` | admin | returns with a damage note or no scan behind them, and clearing one |
 | `POST /custody/{id}/note` | any full | `{note}` onto a **closed** event's `condition_in`. A scan checks an item in before the "Add a note" surface renders, so the note has no check-in call left to ride; an open event or a lost loan is 409. A student gets 403 past 30 minutes or once an admin has reviewed the return |
 | `GET /kits`, `GET /kits/{id}` | any full | the kit with its units as browse rows, plus `available`/`checked_out`/`unavailable` and `checkable` |
@@ -23,12 +24,12 @@ Every route except `/health`, the two logins, `/signin/*`, `POST /setup/admin` a
 | `POST /kits/{id}/checkin` | any full | returns every unit of the kit that is out. Per unit, never all-or-nothing: `returned`, `already_in`, `failed` |
 | `GET /users/{id}/history` | own, or admin | |
 | `GET /custody/active`, `GET /custody/overdue`, `GET /assets/{id}/history` | admin | |
-| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo. The list includes archived accounts, flagged, last |
+| `GET/POST /users`, `GET/PUT/DELETE /users/{id}`, `POST /users/{id}/password` | admin | `POST /users` requires `password` (8 to 72 characters), and `PUT` ignores it. `UserInput` has no `photo_path`; the roster import is the only way a profile gets a photo. The list includes archived accounts, flagged, last |
 | `POST /users/add-names/preview`, `POST /users/add-names` | admin | `{names, first_number}`: one person per line, with or without a number. Lines without one count up from `first_number`, skipping numbers in use. Preview writes nothing; add creates every line or none, and returns each row's `id` |
 | `POST /users/{id}/archive` | admin | `{archived}`; refused for yourself and while the account holds anything |
 | `POST /users/import` | admin | multipart `file` (+ optional `photo_dir`, `archive_missing=1`) or a `text/csv` body (`?archive_missing=1`). Archiving is refused if any row failed |
 | `POST /assets`, `PUT/DELETE /assets/{id}`, `POST /assets/{id}/status` | admin | `AssetInput` has no `photo_path`, no status and no `asset_tag` (generated); `serial_number` is required. Status takes `{status: available\|unavailable}`. Delete is refused for anything ever checked out |
-| `POST /assets/{id}/retire` | admin | `{retired}`; retired items are unavailable, out of browse and out of their kit, history kept. `GET /assets?retired=1` lists them, for an admin |
+| `POST /assets/{id}/retire` | admin | `{retired, lost?, note?}`; `lost` and `note` say why and are stored on the item and logged. An item that is out is 409 unless `lost`, which closes its checkout as lost. Retired items are unavailable, out of browse and out of their kit, history kept. `GET /assets?retired=1` lists them, for an admin |
 | `POST /assets/{id}/photo` | admin | multipart `photo` part, 10 MB cap, `.jpg .jpeg .png .gif .webp` only; the file lands at `uploads/assets/<id>.<ext>` and the response is the asset with its new `photo_url` |
 | `POST /users/cards.pdf` | admin | `{user_ids}`; a sheet of ID cards with a scannable barcode, for schools whose own cards carry none |
 | `POST /categories/import` | admin | multipart `file` or a raw `text/plain`/`text/csv` body. Indented text, Markdown (headings and list items only) or `type,category,model` CSV, sniffed. One transaction with a savepoint per row, idempotent, so re-running a corrected file only adds what is new |

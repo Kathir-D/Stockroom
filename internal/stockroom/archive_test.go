@@ -159,7 +159,7 @@ func TestRetiredAsset(t *testing.T) {
 	}
 
 	openCustody(t, db, id, student, admin, time.Now().Add(time.Hour))
-	if _, err := db.SetAssetRetired(ctx, actorFor(admin), id, true); !errors.Is(err, ErrConflict) {
+	if _, err := db.SetAssetRetired(ctx, actorFor(admin), id, true, RetireInput{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("retire while out = %v, want ErrConflict", err)
 	}
 	if _, err := db.CheckInAsset(ctx, actorFor(admin), id, nil); err != nil {
@@ -169,7 +169,7 @@ func TestRetiredAsset(t *testing.T) {
 		t.Errorf("delete with history = %v, want a conflict that suggests retiring", err)
 	}
 
-	a, err := db.SetAssetRetired(ctx, actorFor(admin), id, true)
+	a, err := db.SetAssetRetired(ctx, actorFor(admin), id, true, RetireInput{})
 	if err != nil || a.RetiredAt == nil || a.Status != StatusUnavailable {
 		t.Fatalf("retire = %+v, %v", a, err)
 	}
@@ -193,8 +193,54 @@ func TestRetiredAsset(t *testing.T) {
 		t.Errorf("make a retired item available = %v, want ErrConflict", err)
 	}
 
-	a, err = db.SetAssetRetired(ctx, actorFor(admin), id, false)
+	a, err = db.SetAssetRetired(ctx, actorFor(admin), id, false, RetireInput{})
 	if err != nil || a.RetiredAt != nil || a.Status != StatusAvailable {
 		t.Errorf("bring back = %+v, %v", a, err)
+	}
+}
+
+// Retiring records whether the item is lost and the admin's note, on the item
+// and in the log. An item that is out can be retired as lost, which closes
+// its checkout as lost; bringing it back clears both.
+func TestRetireAssetAsLost(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := insertTestProfile(t, db, true, "admin-password")
+	student := insertTestProfile(t, db, false, "student-password")
+
+	shelf := insertTestAsset(t, db, admin)
+	note := "  water damage, binned  "
+	a, err := db.SetAssetRetired(ctx, actorFor(admin), shelf, true, RetireInput{Note: &note})
+	if err != nil || a.RetiredAt == nil || a.RetiredLost || deref(a.RetiredNote) != "water damage, binned" {
+		t.Fatalf("retire with a note = %+v, %v", a, err)
+	}
+	if got := logSummary(t, db, shelf, "asset_retired"); !strings.HasSuffix(got, ": water damage, binned") || strings.Contains(got, "as lost") {
+		t.Errorf("log summary = %q, want the note and no lost", got)
+	}
+
+	out := insertTestAsset(t, db, admin)
+	openCustody(t, db, out, student, admin, time.Now().Add(-time.Hour))
+	gone := "never came back from the trip"
+	a, err = db.SetAssetRetired(ctx, actorFor(admin), out, true, RetireInput{Lost: true, Note: &gone})
+	if err != nil || a.RetiredAt == nil || !a.RetiredLost || deref(a.RetiredNote) != gone || a.Custody != nil || a.Status != StatusUnavailable {
+		t.Fatalf("retire a checked-out item as lost = %+v, %v", a, err)
+	}
+	hist, err := db.GetAssetHistory(ctx, actorFor(admin), out)
+	if err != nil || len(hist) != 1 || hist[0].Outcome != "lost" || deref(hist[0].ConditionIn) != gone {
+		t.Errorf("history after retiring as lost = %+v, %v", hist, err)
+	}
+	if overdue, _ := db.hasOverdue(ctx, student.ID); overdue {
+		t.Error("the borrower is still overdue on an item retired as lost")
+	}
+	if got := logSummary(t, db, out, "asset_retired"); !strings.HasSuffix(got, " as lost: "+gone) {
+		t.Errorf("log summary = %q, want lost and the note", got)
+	}
+	if got := logSummary(t, db, out, "marked_lost"); !strings.HasPrefix(got, "Lost by ") {
+		t.Errorf("lost log summary = %q", got)
+	}
+
+	a, err = db.SetAssetRetired(ctx, actorFor(admin), out, false, RetireInput{})
+	if err != nil || a.RetiredLost || a.RetiredNote != nil {
+		t.Errorf("bring back = lost %v note %v, %v; want both cleared", a.RetiredLost, a.RetiredNote, err)
 	}
 }

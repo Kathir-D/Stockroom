@@ -173,6 +173,63 @@ func TestMarkAssetLost(t *testing.T) {
 	if overdue, _ := db.hasOverdue(ctx, student.ID); overdue {
 		t.Error("the borrower is still overdue on a lost item")
 	}
+	want := "Lost by " + displayNameOf(t, db, student) + ", marked by admin " + displayNameOf(t, db, admin) + ": " + note
+	if got := logSummary(t, db, id, "marked_lost"); got != want {
+		t.Errorf("log summary = %q, want %q", got, want)
+	}
+}
+
+// displayNameOf is a profile's name as the activity log writes it.
+func displayNameOf(t *testing.T, db *DB, p Profile) string {
+	t.Helper()
+	return db.actorName(context.Background(), actorFor(p))
+}
+
+// logSummary is the summary of an asset's newest log row for action.
+func logSummary(t *testing.T, db *DB, assetID, action string) string {
+	t.Helper()
+	var summary string
+	if err := db.Pool.QueryRow(context.Background(), `
+		select summary from activity_log where asset_id = $1 and action = $2
+		 order by created_at desc limit 1`, assetID, action).Scan(&summary); err != nil {
+		t.Fatalf("no %s log row: %v", action, err)
+	}
+	return summary
+}
+
+// Re-adding an item closes the checkout as returned, puts the item back on
+// the shelf with nothing to review, and logs it as the admin's doing.
+func TestReaddAsset(t *testing.T) {
+	db := requireTestDB(t)
+	ctx := context.Background()
+	admin := insertTestProfile(t, db, true, "admin-password")
+	student := insertTestProfile(t, db, false, "student-password")
+	id := insertTestAsset(t, db, admin)
+	if _, err := db.ReaddAsset(ctx, actorFor(admin), id); !errors.Is(err, ErrConflict) {
+		t.Errorf("re-add while on the shelf = %v, want ErrConflict", err)
+	}
+	openCustody(t, db, id, student, admin, time.Now().Add(-time.Hour))
+	if _, err := db.ReaddAsset(ctx, actorFor(student), id); !errors.Is(err, ErrForbidden) {
+		t.Errorf("student re-adds = %v, want ErrForbidden", err)
+	}
+	res, err := db.ReaddAsset(ctx, actorFor(admin), id)
+	if err != nil || res.Asset.Status != StatusAvailable || res.Asset.Custody != nil {
+		t.Fatalf("re-add = %+v, %v", res, err)
+	}
+	hist, err := db.GetAssetHistory(ctx, actorFor(admin), id)
+	if err != nil || len(hist) != 1 || hist[0].Outcome != "returned" || hist[0].CheckedInAt == nil {
+		t.Errorf("history after re-add = %+v, %v", hist, err)
+	}
+	if r, _ := reasonsOf(t, db, id); len(r) != 0 {
+		t.Errorf("re-add: reasons %v, want none", r)
+	}
+	if overdue, _ := db.hasOverdue(ctx, student.ID); overdue {
+		t.Error("the borrower is still overdue on a re-added item")
+	}
+	want := "Re-added to inventory by admin " + displayNameOf(t, db, admin) + ", was checked out to " + displayNameOf(t, db, student)
+	if got := logSummary(t, db, id, "readded"); got != want {
+		t.Errorf("log summary = %q, want %q", got, want)
+	}
 }
 
 // A typed serial of your own fresh checkout is a deliberate return, not a

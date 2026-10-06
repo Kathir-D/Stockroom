@@ -375,6 +375,14 @@ export function markLost(assetId: string, note?: string) {
   });
 }
 
+/** Admin. Closes an item's checkout and puts it back in the inventory. */
+export function readdAsset(assetId: string) {
+  return request<CheckInResult>(
+    `/assets/${encodeURIComponent(assetId)}/readd`,
+    { method: "POST" },
+  );
+}
+
 /** Admin. The full past-custodian trail for one asset. */
 export function assetHistory(assetId: string) {
   return request<CustodyRecord[]>(
@@ -526,10 +534,15 @@ export function deleteAsset(id: string) {
 
 /** The available/unavailable toggle. `checked_out` is not an accepted value. */
 /** Admin. Retire (unavailable, hidden from browse, history kept) or bring back. */
-export function setAssetRetired(id: string, retired: boolean) {
+export function setAssetRetired(
+  id: string,
+  retired: boolean,
+  why: { lost?: boolean; note?: string } = {},
+) {
+  const note = why.note?.trim();
   return request<AssetDetail>(`/assets/${encodeURIComponent(id)}/retire`, {
     method: "POST",
-    body: { retired },
+    body: { retired, lost: why.lost === true, ...(note ? { note } : {}) },
   });
 }
 

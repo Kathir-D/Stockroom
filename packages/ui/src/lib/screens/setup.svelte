@@ -317,7 +317,7 @@
         <div class="grid grid-cols-2 gap-3">
           <div class="flex flex-col gap-1.5">
             <Label for="spare-number">Spare ID number</Label>
-            <Input id="spare-number" bind:value={spareNumber} class="font-mono" spellcheck={false} />
+            <Input id="spare-number" bind:value={spareNumber} class="font-mono" spellcheck={false} data-scan-target />
             <p class="text-xs text-fg-faint">Any number nobody at school uses.</p>
           </div>
           <div class="flex flex-col gap-1.5">

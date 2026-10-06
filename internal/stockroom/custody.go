@@ -457,6 +457,33 @@ func (db *DB) CheckInAsset(ctx context.Context, actor Actor, assetID string, dam
 // Returned* constants). A damage note, or a student's return that no scan
 // backs up, marks the return for an admin's review (CLAUDE.md §7).
 func (db *DB) CheckInAssetVia(ctx context.Context, actor Actor, assetID string, damageNote *string, via string) (CheckInResult, error) {
+	return db.checkIn(ctx, actor, assetID, damageNote, via, checkInEntry)
+}
+
+// ReaddAsset is an admin taking an item off somebody's hands from their
+// custody history: the checkout closes as returned, the item is available
+// again, and the log says an admin re-added it rather than that it was
+// checked in. Admin only.
+func (db *DB) ReaddAsset(ctx context.Context, actor Actor, assetID string) (CheckInResult, error) {
+	if err := RequireAdmin(actor); err != nil {
+		return CheckInResult{}, err
+	}
+	admin := db.actorName(ctx, actor)
+	return db.checkIn(ctx, actor, assetID, nil, ReturnedByButton,
+		func(ctx context.Context, actor Actor, assetID string, held *AssetCustody, _ *string, via string, _ []string) LogEntry {
+			return LogEntry{
+				Category: LogEquipment, Action: "readded", ActorID: actorLogID(actor), AssetID: assetID,
+				Summary: fmt.Sprintf("Re-added to inventory by admin %s, was checked out to %s", admin, held.CustodianName),
+				Details: map[string]any{"custody_event_id": held.CustodyEventID, "custodian_id": held.CustodianID,
+					"custodian_name": held.CustodianName, "checked_out_at": held.CheckedOutAt, "returned_via": via},
+			}
+		})
+}
+
+// checkIn closes an item's open checkout and writes the log row entry builds
+// for it, in one transaction.
+func (db *DB) checkIn(ctx context.Context, actor Actor, assetID string, damageNote *string, via string,
+	entry func(context.Context, Actor, string, *AssetCustody, *string, string, []string) LogEntry) (CheckInResult, error) {
 	if err := RequireFullSession(actor); err != nil {
 		return CheckInResult{}, err
 	}
@@ -504,7 +531,7 @@ func (db *DB) CheckInAssetVia(ctx context.Context, actor Actor, assetID string, 
 		`update assets set status = 'available' where id = $1`, assetID); err != nil {
 		return CheckInResult{}, mapPgError("check in", err)
 	}
-	if err := writeLog(ctx, tx, checkInEntry(ctx, actor, assetID, held, note, via, reasons)); err != nil {
+	if err := writeLog(ctx, tx, entry(ctx, actor, assetID, held, note, via, reasons)); err != nil {
 		return CheckInResult{}, err
 	}
 

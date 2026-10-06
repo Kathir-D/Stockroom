@@ -78,16 +78,18 @@ func (d deps) handleSetAssetStatus(w http.ResponseWriter, r *http.Request, actor
 	writeJSON(w, http.StatusOK, asset)
 }
 
-// POST /assets/{id}/retire {"retired": true|false}
+// POST /assets/{id}/retire {"retired": true|false, "lost": false, "note": "..."}
+// lost and note say why, and only matter when retiring.
 func (d deps) handleRetireAsset(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
 	var in struct {
 		Retired bool `json:"retired"`
+		stockroom.RetireInput
 	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeError(w, err)
 		return
 	}
-	asset, err := d.db.SetAssetRetired(r.Context(), actor, r.PathValue("id"), in.Retired)
+	asset, err := d.db.SetAssetRetired(r.Context(), actor, r.PathValue("id"), in.Retired, in.RetireInput)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -391,7 +391,7 @@ func deref(s *string) string {
 const assetColumns = `a.id, a.asset_tag, a.name, a.description, a.category_id, a.location_id,
 	a.status, a.condition, a.serial_number, a.purchase_date, a.purchase_price,
 	a.warranty_expiration, a.custom_fields, a.photo_path, a.created_by, a.created_at, a.updated_at,
-	a.retired_at,
+	a.retired_at, a.retired_lost, a.retired_note,
 	(select coalesce(nullif(dr.condition_in, ''), 'Reported damaged') ` + unreviewedDamageSQL + `),
 	(select dr.checked_in_at ` + unreviewedDamageSQL + `)`
 
@@ -407,7 +407,7 @@ func scanAsset(row pgx.Row) (Asset, error) {
 	err := row.Scan(&a.ID, &a.AssetTag, &a.Name, &a.Description, &a.CategoryID, &a.LocationID,
 		&a.Status, &a.Condition, &a.SerialNumber, &a.PurchaseDate, &a.PurchasePrice,
 		&a.WarrantyExpiration, &a.CustomFields, &a.PhotoPath, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt,
-		&a.RetiredAt, &a.DamageReport, &a.DamageReportedAt)
+		&a.RetiredAt, &a.RetiredLost, &a.RetiredNote, &a.DamageReport, &a.DamageReportedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Asset{}, ErrNotFound
 	}

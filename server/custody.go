@@ -170,6 +170,18 @@ func (d deps) handleMarkLost(w http.ResponseWriter, r *http.Request, actor stock
 	writeJSON(w, http.StatusOK, result)
 }
 
+// POST /assets/{id}/readd
+// An admin closes a checkout from the borrower's custody history and puts
+// the item back in the inventory.
+func (d deps) handleReaddAsset(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {
+	result, err := d.db.ReaddAsset(r.Context(), actor, r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // GET /custody/review
 // Returns an admin has not looked at yet (CLAUDE.md §7).
 func (d deps) handleNeedsReview(w http.ResponseWriter, r *http.Request, actor stockroom.Actor) {

@@ -252,6 +252,36 @@ function reportTimings(burst: ScanBurst | null, thresholdMs: number) {
  */
 export { looksLikeStudentNumber } from "./student-number"
 
+/**
+ * The field a scan belongs in right now, if the screen has one.
+ *
+ * A form that wants a scanned code (a new account's student number, a new
+ * item's serial, the setup guide's spare ID) marks its input with
+ * `data-scan-target`. While one is on screen, a scan that arrives with focus
+ * outside any text field is that form's input, not an item to look up or a
+ * card to switch accounts with. The topmost open dialog decides: a marked
+ * field behind a dialog is not what the person is looking at.
+ */
+export function scanTargetField(root: ParentNode = document): HTMLInputElement | null {
+  const dialogs = root.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')
+  const scope: ParentNode = dialogs.length > 0 ? dialogs[dialogs.length - 1] : root
+  for (const field of scope.querySelectorAll<HTMLInputElement>("input[data-scan-target]")) {
+    if (!field.disabled && !field.readOnly) return field
+  }
+  return null
+}
+
+/**
+ * Put a scanned code into `field` the way typing it would: the value, then the
+ * `input` event the framework's binding listens for, then focus so the person
+ * can carry on with the form.
+ */
+export function fillScanTarget(field: HTMLInputElement, code: string) {
+  field.value = code.trim()
+  field.dispatchEvent(new Event("input", { bubbles: true }))
+  field.focus()
+}
+
 /** Trim a scanned serial the way the server does before looking it up. */
 export function normalizeSerial(code: string): string {
   return code.trim()

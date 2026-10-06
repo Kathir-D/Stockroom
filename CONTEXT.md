@@ -60,7 +60,7 @@ The words the code, the docs and the issues use, with the meaning fixed. When tw
 
 **Archived account.** An account that can no longer sign in, kept for its custody history. How a graduate leaves, since an account with history cannot be deleted.
 
-**Retired item.** An item out of the catalogue for good: unavailable, hidden from browse, out of its kit, history kept.
+**Retired item.** An item out of the catalogue for good: unavailable, hidden from browse, out of its kit, history kept. It carries what the admin said when retiring it: whether it is lost, and a note.
 
 ## Operations
 
