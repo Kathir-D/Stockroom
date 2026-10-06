@@ -180,11 +180,11 @@ release you did not come to Homebrew for will not announce itself.
 
 > **The binary is ad-hoc signed and not notarized, so the cask clears the quarantine attribute.**
 > Homebrew deliberately quarantines cask downloads, which would otherwise make every user approve the
-> binary by hand in System Settings. The cask removes the attribute in a `postflight` block that runs
-> *after* Homebrew has verified the SHA-256 — so the checksum is the integrity gate, and the quarantine
-> flag never was one. Homebrew's own `--no-quarantine` flag, which used to do this, was removed in 7.x
-> and has no cask DSL replacement. If a future Homebrew drops the block, installs still succeed and you
-> would get the ordinary one-time approval back.
+> binary by hand in System Settings. The cask removes the attribute in a `postflight_steps` block that
+> runs *after* Homebrew has verified the SHA-256 — so the checksum is the integrity gate, and the
+> quarantine flag never was one. Homebrew's own `--no-quarantine` flag, which used to do this, was
+> removed in 7.x. If the `xattr` step fails, installs still succeed and you get the ordinary one-time
+> approval back.
 
 > **Why a personal tap rather than `homebrew/cask`?** Homebrew's policy for its official cask repo
 > requires that apps which Gatekeeper can assess pass its Gatekeeper checks. Stockroom's binary is

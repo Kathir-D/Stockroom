@@ -122,9 +122,9 @@ jobs:
 
       # The tap's cask is hand-written (packaging/mac/stockroom.rb), not the
       # one GoReleaser generates. GoReleaser's is a stub: no livecheck, no
-      # caveats worth reading, and a `postflight` block with no rescue, so a
-      # Homebrew that dropped the block would make the cask invalid and stop
-      # the whole tap from loading. Sonar and headless-spotify are hand-written
+      # caveats worth reading, and a deprecated `postflight` block, which makes
+      # the cask invalid once Homebrew disables it and stops the whole tap
+      # from loading. Sonar and headless-spotify are hand-written
       # for the same reason; this puts Stockroom in the same shape.
       #
       # Built here rather than in publish, because it needs the checksums and
@@ -135,9 +135,9 @@ jobs:
         run: scripts/make-cask.sh "${{ github.ref_name }}" dist/checksums.txt dist/homebrew/Casks/stockroom.rb
 
       # A cask that Homebrew will not load takes the whole tap with it, so
-      # sonar and headless-spotify stop installing too. `brew style` reports the
-      # postflight block as one unsatisfiable offense, so it is excluded: see
-      # the comment on the block in packaging/mac/stockroom.rb.
+      # sonar and headless-spotify stop installing too. No cop is excluded:
+      # Cask/InstallSteps is what catches a return of the deprecated
+      # `postflight` block.
       #
       # The runner image ships Homebrew in /home/linuxbrew but leaves it off
       # PATH, so it is put there here. A future image that dropped it fails
@@ -152,7 +152,7 @@ jobs:
             echo "::error::brew is not on this runner, so the cask was not checked"
             exit 1
           fi
-          brew style --except-cops Cask/InstallSteps dist/homebrew/Casks/stockroom.rb
+          brew style dist/homebrew/Casks/stockroom.rb
 
       - uses: actions/upload-artifact@v4
         with:
