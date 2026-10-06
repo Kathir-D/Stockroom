@@ -31,6 +31,14 @@ type Options struct {
 	// ConfigFile is --config: where the config is written and read. Empty
 	// means the one the service already uses, else the platform's default.
 	ConfigFile string
+	// InstallPackages is --install-packages: on macOS, install the Homebrew
+	// cask and what it depends on before anything else. The installer app
+	// passes it, because it runs on a Mac that has none of them yet.
+	InstallPackages bool
+
+	// adminPassword is the failsafe admin's password as the graphical
+	// installer collected it. There is no flag for it (see cmdSetup).
+	adminPassword string
 }
 
 const defaultAddr = "127.0.0.1:8080"
@@ -48,39 +56,45 @@ type installer struct {
 	dbPassword string
 }
 
+// stepNames are setup's steps in order. Setup prints each as "== Name ==",
+// which is also how the graphical installer follows along.
+var stepNames = []string{"Platform", "PostgreSQL", "Database", "Service user", "Config", "Service", "Camera"}
+
 // Setup installs or repairs Stockroom on this machine. Running it again
 // repairs rather than reinstalls: it never overwrites a config, never drops
 // the database, and resets the database password only when the config that
 // held it is gone.
 func Setup(ctx context.Context, env *Env, opts Options) error {
-	if err := useConfig(env, opts.ConfigFile); err != nil {
+	addr, err := install(ctx, env, opts)
+	if err != nil {
 		return err
 	}
-	in := &installer{env: env, opts: opts}
-	for _, step := range []struct {
-		name string
-		run  func(context.Context) error
-	}{
-		{"Platform", in.checkPlatform},
-		{"PostgreSQL", in.startPostgres},
-		{"Database", in.ensureDatabase},
-		{"Service user", in.ensureServiceUser},
-		{"Config", in.writeConfig},
-		{"Service", in.startService},
-		{"Camera", in.startCamera},
-	} {
-		env.say("== %s ==", step.name)
-		if err := step.run(ctx); err != nil {
-			return fmt.Errorf("%s: %w", strings.ToLower(step.name), err)
-		}
-	}
-	in.finish()
 	if !opts.NoOpen && env.Open != nil {
-		if err := env.Open("http://" + in.addr); err != nil {
+		if err := env.Open("http://" + addr); err != nil {
 			env.warn("could not open a browser: %v", err)
 		}
 	}
 	return nil
+}
+
+// install runs setup's steps and returns the address Stockroom answers at.
+func install(ctx context.Context, env *Env, opts Options) (string, error) {
+	if err := useConfig(env, opts.ConfigFile); err != nil {
+		return "", err
+	}
+	in := &installer{env: env, opts: opts}
+	run := []func(context.Context) error{
+		in.checkPlatform, in.startPostgres, in.ensureDatabase, in.ensureServiceUser,
+		in.writeConfig, in.startService, in.startCamera,
+	}
+	for i, name := range stepNames {
+		env.say("== %s ==", name)
+		if err := run[i](ctx); err != nil {
+			return "", fmt.Errorf("%s: %w", strings.ToLower(name), err)
+		}
+	}
+	in.finish()
+	return in.addr, nil
 }
 
 /* ------------------------------------------------------------ platform ---- */
@@ -454,7 +468,7 @@ func (in *installer) writeConfig(ctx context.Context) error {
 
 // askFailsafe gets the failsafe admin from the flags, or asks.
 func (in *installer) askFailsafe() (failsafe, error) {
-	f := failsafe{number: in.opts.AdminNumber}
+	f := failsafe{number: in.opts.AdminNumber, password: in.opts.adminPassword}
 	switch in.opts.AdminPasswordFile {
 	case "":
 	case "-":

@@ -39,13 +39,15 @@ Development and production run different stacks on purpose.
 
 **An install** is the operating system's PostgreSQL, one binary and one OS service. The binary holds the API, the web UI and every migration. It dumps the database and applies pending migrations at boot, and serves the UI at `/` on the same origin as the API. The service restarts it if it dies, and it is required, because the nightly backup is a goroutine inside the server. Supabase never ships to a school, because it would put Studio on the closet PC with no authentication and full access to the roster.
 
-The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`). `setup --config` writes the config there instead and points the service at it, and a later `setup` or `service install` without the flag keeps that file. `serve` refuses a database that records a migration the binary doesn't carry.
+The binary's subcommands are `serve` (the default), `setup`, `service`, `doctor`, `support-bundle`, `restore`, `version` and `open`. `setup --gui` asks and shows progress in a browser page instead of the terminal. Each reads the config from `--config`, `STOCKROOM_CONFIG`, a `.env` above the working directory, then the system path, in that order (`LoadConfigFrom`). `setup --config` writes the config there instead and points the service at it, and a later `setup` or `service install` without the flag keeps that file. `serve` refuses a database that records a migration the binary doesn't carry.
 
 - Linux (Debian 12, Ubuntu 24.04 and newer) runs `curl … scripts/get.sh | sudo bash`, which installs the `.deb` from GitHub releases and runs `stockroom setup`. The package depends on the distribution's `postgresql (>= 14)` and `rclone (>= 1.60)` and ships a systemd unit. Setup runs the service as the account that ran `sudo`, creates the `stockroom` role and database, and writes `/etc/stockroom/stockroom.env`. Data lives in `/var/lib/stockroom`.
 - macOS runs `brew install --cask kathir-d/tap/stockroom && stockroom setup`. The cask depends on Homebrew's `postgresql@17` and `rclone`, and setup installs two LaunchDaemons so both start at boot with nobody logged in. Config and data live in `$(brew --prefix)/var/stockroom`.
-- Windows runs `scripts/get.ps1`, which installs Ubuntu under WSL 2, turns systemd on, runs `get.sh` inside it, and registers a `Stockroom WSL` boot task. There is no native Windows installer or service.
+- Windows runs `scripts/get.ps1`, which installs Ubuntu under WSL 2, turns systemd on, runs `get.sh` inside it, and registers a `Stockroom WSL` boot task. There is no native Windows build of Stockroom and no Windows service.
 
-`docs/INSTALL.md` is the guide. `.goreleaser.yaml` builds every release artefact and `packaging/linux/` holds the unit and maintainer scripts. The older installer, `scripts/install.sh` with a `postgres:17` container (`deploy/`), still works from a checkout. It gets deleted, with `deploy/docker-compose.yml`, `deploy/stockroom-run.sh` and the two service templates, once the packages pass on a real Linux machine and a real Mac. `deploy/camera/` stays.
+Each platform also has a graphical installer, and all three show the one page `internal/wizard` serves on loopback, in the machine's own browser. On Linux the `.deb` adds a Stockroom Setup entry to the applications menu, which runs `setup --gui` through `pkexec`. On macOS `Install Stockroom.app` (in `Stockroom-Installer-macOS.zip`) installs the cask and then runs the same setup. On Windows `Stockroom-Setup.exe` (`cmd/winsetup`) carries `get.ps1` and runs it elevated with `-Unattended`. None is signed. They replace setup's prompts and nothing else, so a change to the install belongs in `internal/setup` or `get.ps1`, not in an installer.
+
+`docs/INSTALL.md` is the guide. `.goreleaser.yaml` builds every release artefact except the macOS installer app, which `release.yml` builds with `scripts/make-mac-installer.sh`. `packaging/linux/` holds the unit, the maintainer scripts and the Stockroom Setup launcher, and `packaging/mac/` the cask and the installer app's two files. The older installer, `scripts/install.sh` with a `postgres:17` container (`deploy/`), still works from a checkout. It gets deleted, with `deploy/docker-compose.yml`, `deploy/stockroom-run.sh` and the two service templates, once the packages pass on a real Linux machine and a real Mac. `deploy/camera/` stays.
 
 ## 4. Backend architecture
 
@@ -131,16 +133,19 @@ The migrations in `supabase/migrations/` are the source. Read them rather than a
 ```
 internal/stockroom/   all business logic, the only code that touches Postgres
 server/               the stockroom binary: net/http handlers, the router, the embedded UI at /, subcommand dispatch
-internal/setup/       stockroom setup, service, doctor and support-bundle, behind a command runner so tests need no root
+internal/setup/       stockroom setup (and setup --gui), service, doctor and support-bundle, behind a command runner so tests need no root
+internal/wizard/      the graphical installers' one page and the loopback server behind it
+cmd/winsetup/         Stockroom-Setup.exe, the Windows installer: the wizard in front of scripts/get.ps1
 internal/cli/         stockroom restore; cmd/restore/ wraps it for go run
 internal/platform/    WSL and systemd detection, opening a browser
 packages/ui/          every screen, component, store, the API client and the scanner
 desktop-app/          Wails host, a window around <StockroomApp>
 web-app/              Vite host; its build is embedded in the binary
 supabase/             migrations/, seed.sql, tests/ (pgTAP), embed.go
-packaging/linux/      the .deb's systemd unit, maintainer scripts and smoke.sh
+packaging/linux/      the .deb's systemd unit, maintainer scripts, Stockroom Setup launcher and smoke.sh
+packaging/mac/        the Homebrew cask template and installer/, the two files of Install Stockroom.app
 deploy/               the older checkout install (compose file, service templates) and camera/
-scripts/              get.sh and get.ps1 (install), dev.sh (development), install.sh (older install)
+scripts/              get.sh and get.ps1 (install), make-mac-installer.sh, dev.sh (development), install.sh (older install), embed.go (get.ps1 for winsetup)
 examples/             fake example data the setup wizard can load (embedded)
 docs/                 api.md, decisions.md, adr/, design/, agents/, and the guides
 ```
@@ -227,6 +232,7 @@ Things that only a person, hardware or the school can settle. Each has a ROADMAP
 - The school hasn't created its own Google OAuth client. Stockroom supports one (`docs/BACKUP-SETUP.md` step 3c), and its consent screen must be Published, because Testing expires refresh tokens after seven days.
 - Whether the photo mirror gets a second physical disk (`docs/design/backup.md` §H).
 - WSL is the last main-track section (ROADMAP §11). `get.ps1` and `dev.ps1` have never run on real Windows.
+- The graphical installers are unproven on real machines. The page and `setup --gui` are tested, and `Install Stockroom.app` has been started on the development Mac as far as the page. The Linux launcher has never met a real polkit prompt, and `Stockroom-Setup.exe` has never run on Windows (ROADMAP §5, §6, §11).
 
 ---
 

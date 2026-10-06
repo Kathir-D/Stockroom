@@ -17,7 +17,7 @@ if [ "$1" = "configure" ]; then
     fi
   elif [ ! -f /etc/stockroom/stockroom.env ] && [ -z "${STOCKROOM_GET:-}" ]; then
     # get.sh sets STOCKROOM_GET and runs setup itself next.
-    echo "Stockroom is installed. Finish with: sudo stockroom setup"
+    echo "Stockroom is installed. Finish with Stockroom Setup in the applications menu, or: sudo stockroom setup"
   fi
 fi
 exit 0

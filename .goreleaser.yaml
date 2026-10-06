@@ -1,5 +1,7 @@
 # GoReleaser builds every release artefact from a v* tag: the binaries, the
-# .deb packages for Debian and Ubuntu, checksums.txt and the Homebrew cask.
+# .deb packages for Debian and Ubuntu, Stockroom-Setup.exe, checksums.txt and
+# the Homebrew cask. release.yml then builds the macOS installer app from the
+# two darwin binaries (scripts/make-mac-installer.sh).
 # .github/workflows/release.yml runs it. Try it locally, without publishing:
 #
 #   goreleaser release --snapshot --clean
@@ -28,8 +30,26 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }}
 
+  # The graphical installer for Windows (cmd/winsetup). It is not a Windows
+  # build of Stockroom: it carries scripts/get.ps1 and installs the .deb
+  # inside WSL. amd64 only, which Windows on ARM runs as it is.
+  - id: winsetup
+    main: ./cmd/winsetup
+    # Not the release name: an archive called the same as its binary makes
+    # GoReleaser list one artefact twice.
+    binary: winsetup
+    env:
+      - CGO_ENABLED=0
+    goos: [windows]
+    goarch: [amd64]
+    flags: [-trimpath]
+    ldflags:
+      # windowsgui: no console window opens behind the browser.
+      - -s -w -H=windowsgui
+
 archives:
   - id: stockroom
+    ids: [stockroom]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
@@ -41,6 +61,13 @@ archives:
       # least one directory deep, so it ships deploy/camera/empty/.gitkeep and
       # silently drops camera.sh -- the one file that matters.
       - deploy/camera/**
+
+  # The installer ships as the bare .exe, named without a version like the
+  # .deb, so releases/latest/download/Stockroom-Setup.exe is always the newest.
+  - id: winsetup
+    ids: [winsetup]
+    formats: [binary]
+    name_template: Stockroom-Setup
 
 checksum:
   name_template: checksums.txt
@@ -61,6 +88,7 @@ changelog:
 # releases/latest/download/stockroom_amd64.deb always resolves to the newest.
 nfpms:
   - id: deb
+    ids: [stockroom]
     package_name: stockroom
     file_name_template: "{{ .PackageName }}_{{ .Arch }}"
     formats: [deb]
@@ -86,7 +114,24 @@ nfpms:
       - rclone (>= 1.60)
     recommends:
       - xdg-utils
+      # The Stockroom Setup launcher asks for the administrator password
+      # through polkit. Without it the launcher falls back to a terminal.
+      - pkexec
     contents:
+      # The graphical installer: an entry in the applications menu that runs
+      # `stockroom setup --gui` (docs/INSTALL.md).
+      - src: packaging/linux/stockroom-setup.desktop
+        dst: /usr/share/applications/stockroom-setup.desktop
+        file_info:
+          mode: 0644
+      - src: packaging/linux/setup-gui
+        dst: /usr/lib/stockroom/setup-gui
+        file_info:
+          mode: 0755
+      - src: desktop-app/build/appicon.png
+        dst: /usr/share/pixmaps/stockroom.png
+        file_info:
+          mode: 0644
       - src: packaging/linux/stockroom.service
         dst: /lib/systemd/system/stockroom.service
         file_info:

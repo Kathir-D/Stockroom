@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Stockroom Setup
+Comment=Install or repair Stockroom on this computer
+Exec=/usr/lib/stockroom/setup-gui
+Icon=stockroom
+Terminal=false
+Categories=Settings;System;
+Keywords=stockroom;install;setup;

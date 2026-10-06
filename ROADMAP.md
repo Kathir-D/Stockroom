@@ -17,7 +17,7 @@ Stockroom running in production on the school's closet PC. Production means all 
 2. **macOS**, through Homebrew.
 3. **Windows through WSL 2**, running the Linux package inside Ubuntu. This is the last main-track section.
 
-There is no native Windows installer, service or package, and none is planned.
+There is no native Windows build of Stockroom, service or package, and none is planned. `Stockroom-Setup.exe` is a graphical installer for the WSL install, not a Windows port (`docs/decisions.md`, 2026-10-06).
 
 ## Where it ends up
 
@@ -119,6 +119,7 @@ Depends on a release (v0.9.2 is out). Linux is ready for the closet PC once this
 The `package-linux` CI job (`CI.md`) installs the `.deb`, runs setup, restarts the service, upgrades to a package with one more migration, and runs `doctor`, on the ubuntu-24.04 runner with systemd and in a debian:12 container. The same steps passed locally in containers, the systemd one included.
 
 - [ ] **Clean-VM run by hand.** Fresh Ubuntu 24.04 desktop VM. Run the one-line install and time it. In the web wizard, load nothing, import `examples/` files through the real screens, and print labels to PDF. Connect Google in Admin → Settings and choose a Drive backup folder. Do one checkout and one return with a keyboard standing in for the scanner. Write down every place the docs fell short and fix them.
+- [ ] **Graphical install on the same VM.** Download the `.deb` in the browser and open it. Note which app Ubuntu offers for a local `.deb` and fix the wording in `docs/INSTALL.md` to match. Open Stockroom Setup from the applications menu: polkit asks for the password, the page opens in the desktop's browser, and Install ends on a working Stockroom. Close the tab halfway through a second run and confirm the `stockroom setup --gui` process exits once setup is done.
 - [ ] **Reboot test.** Reboot and don't log in. From another machine or a console, confirm that Postgres and Stockroom are running and `/health` answers. Log in and confirm the nightly backup's boot catch-up ran: it logs "running now" when the last success is stale. Setup prints this check as its last step.
 - [ ] **Power-cut test.** Hard-power-off the VM mid-use. It comes back with no data lost that was committed before the cut.
 
@@ -131,6 +132,7 @@ Depends on the tap.
 `stockroom setup` on macOS is written and unit-tested: data and config in `$(brew --prefix)/var/stockroom`, `initdb` if the cluster is missing, Homebrew's own `postgresql@17` agent stopped, and two LaunchDaemons (`com.stockroom.postgresql`, `com.stockroom.server`) with `UserName`, `RunAtLoad` and `KeepAlive`. It has never run, because it needs `sudo` on a real Mac.
 
 - [ ] **Prove it on a real Mac.** Install from the tap, run setup, reboot without logging in, and confirm `/health` answers from another machine through SSH port forwarding, or check `$(brew --prefix)/var/log/stockroom.log` after logging in. Check the cask's post-install hook cleared the quarantine flag (`xattr -l $(brew --prefix)/bin/stockroom` shows nothing). If boot-time start can't be made to work, fall back to automatic login (System Settings → Users & Groups) and record why in `docs/decisions.md`.
+- [ ] **Run `Install Stockroom.app` on a Mac that has never had Stockroom.** Download `Stockroom-Installer-macOS.zip` in a browser, so it is quarantined, and write down exactly what Gatekeeper asks on that macOS version. Try it once without Homebrew (the page should link to Homebrew's installer and carry on after Check again) and once with. Confirm the password dialog appears once, not once per `sudo`. The app has only been started on the development Mac, as far as the page.
 - [ ] **Delete the old installer** (decision 5) once this and section 5 pass: `scripts/install.sh`, `deploy/docker-compose.yml`, `deploy/stockroom-run.sh`, `deploy/com.stockroom.server.plist.template` and `deploy/stockroom.service.template`. Remove the "Installing from a checkout" section of `docs/INSTALL.md` and every other mention. Keep `deploy/camera/`. On the development Mac, move the existing Docker-based install over with Admin → Backup → Export everything, then restore it on the new install.
 
 ## 7. Signed apt repository
@@ -189,13 +191,14 @@ Written, and never run on Windows, because nothing here has one:
 - `docs/INSTALL.md` covers the Windows install and the Edge kiosk shortcut.
 
 - [ ] **Clean install and reboot test on a real Windows 11 machine**, by hand. GitHub's Windows runners can't run WSL. Run `get.ps1` on a machine that has never had WSL, including the restart Windows asks for. Reboot without logging in, then log in and confirm Stockroom answered from boot: check `journalctl -u stockroom` inside WSL for the start time. Fix `get.ps1` where it breaks.
+- [ ] **Run `Stockroom-Setup.exe` on the same kind of machine**, one that has never had WSL. It has never run on Windows: it compiles, and its batch file, log reader and `get.ps1 -Unattended` are tested only as far as a Mac can. Check, in order: the UAC prompt appears and a refusal shows on the page; `wsl --install --no-launch` leaves a distribution that `wsl -d Ubuntu-24.04 --user root` can enter without the first-run user prompt (if not, the `ubuntu2404.exe install --root` fallback has to); the restart is reported as exit code 3 and a second run carries on; the log shows on the page as it grows and is readable; the Windows password dialog appears although the script's window is hidden; SmartScreen's wording matches `docs/INSTALL.md`.
 - [ ] **Check the Windows browser reaches the server** at `http://localhost:8080` through WSL's localhost forwarding. Test with the default networking and with `networkingMode=mirrored` in `.wslconfig`. The server's loopback `Host` check (`withHostCheck` in `server/router.go`) already accepts `localhost`.
 - [ ] **Test Google sign-in early.** `rclone authorize` listens on `127.0.0.1:53682` inside WSL, and Google redirects the Windows browser there. If forwarding doesn't carry it, the paste-a-code fallback in the sign-in dialog ("Signing in on a different computer?") has to work, and the docs have to point at it.
 - [x] **Native Windows CI was removed.** `tests-windows` is deleted from the workflow and from the branch-protection checklist in `CI.md`. `scripts/dev.ps1` stays for Windows-through-WSL setup and development support.
 
 # Not planned
 
-- A native Windows installer, service, binary, winget or Scoop package. WSL covers Windows.
+- A native Windows build of Stockroom, service, winget or Scoop package. WSL covers Windows. `Stockroom-Setup.exe` installs into WSL.
 - The closet camera under WSL or on native Windows.
 - Code signing on any platform.
 - Homebrew core. It needs a well-known project and a source build; the tap is one command anyway.

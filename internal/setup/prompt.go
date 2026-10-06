@@ -71,6 +71,13 @@ type failsafe struct {
 	number, password string
 }
 
+// CheckFailsafe is checkFailsafe for an installer outside this package:
+// Stockroom-Setup.exe refuses a bad failsafe admin before it installs
+// anything, by the rule setup will apply inside WSL.
+func CheckFailsafe(number, password string) error {
+	return checkFailsafe(failsafe{number: number, password: password})
+}
+
 // checkFailsafe applies install.sh's rules: both or neither, digits only,
 // 8 to 72 bytes, and no single quote, which the config's quoting can't hold.
 func checkFailsafe(f failsafe) error {

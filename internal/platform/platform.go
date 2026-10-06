@@ -63,7 +63,7 @@ func OpenURL(url string) error {
 		return err
 	}
 	if os.Geteuid() == 0 {
-		if u := os.Getenv("SUDO_USER"); u != "" && u != "root" {
+		if u := SudoUser(); u != "" && u != "root" {
 			argv = append([]string{"sudo", "-u", u, "--"}, argv...)
 		}
 	}
@@ -71,9 +71,25 @@ func OpenURL(url string) error {
 	return cmd.Start()
 }
 
-// InvokingUser is the account that ran sudo, or the current one without sudo.
+// SudoUser is the account that asked for root: sudo's SUDO_USER, or the
+// owner of pkexec's PKEXEC_UID, which is how the Stockroom Setup launcher in
+// the applications menu gets root. Empty when neither is set.
+func SudoUser() string {
+	if name := os.Getenv("SUDO_USER"); name != "" {
+		return name
+	}
+	if uid := os.Getenv("PKEXEC_UID"); uid != "" {
+		if u, err := user.LookupId(uid); err == nil {
+			return u.Username
+		}
+	}
+	return ""
+}
+
+// InvokingUser is the account that ran sudo or pkexec, or the current one
+// without either.
 func InvokingUser() (*user.User, error) {
-	if name := os.Getenv("SUDO_USER"); name != "" && os.Geteuid() == 0 {
+	if name := SudoUser(); name != "" && os.Geteuid() == 0 {
 		return user.Lookup(name)
 	}
 	return user.Current()
