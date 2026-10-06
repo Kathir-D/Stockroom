@@ -80,29 +80,19 @@ cask "stockroom" do
   # bundles; the same fix applies to a bare binary, and `staged_path` is the
   # copy Homebrew verified against the sha256 above.
   #
-  # The rescue matters for the reason the other two explain at length: without
-  # it, a Homebrew that dropped `postflight` would make this cask file invalid,
-  # and an invalid cask stops the whole tap from loading — `brew tap` would fail
-  # and Sonar and headless-spotify would stop installing too. Rescued, the worst
-  # case is one Gatekeeper approval by hand.
-  #
-  # `brew style` reports one offense on the block below, Cask/InstallSteps, and
-  # it cannot be resolved: Homebrew requires postflight_steps, whose DSL exposes
-  # only if_path_exists, on_macos, version and token and cannot run a command at
-  # all; and Style/DisableCopsWithinSourceCodeDirective forbids suppressing the
-  # cop. Check the cask with the cop excluded:
-  #   brew style --except-cops Cask/InstallSteps kathir-d/tap/stockroom
-  begin
-    postflight do
-      system_command(
-        "/usr/bin/xattr",
-        args:         ["-dr", "com.apple.quarantine", "#{staged_path}/stockroom"],
-        must_succeed: false,
-      )
+  # `postflight_steps`, not the old `postflight` block. Homebrew deprecated
+  # `postflight`: it printed a warning on every brew command that loaded the
+  # tap, and with HOMEBREW_DEVELOPER set it raised MethodDeprecatedError, which
+  # made this cask invalid and stopped the whole tap from loading, Sonar and
+  # headless-spotify included. Homebrew will raise that for everyone once it
+  # disables the block. `run` with `must_succeed: false` keeps the old
+  # behaviour: if xattr fails, the user approves the binary once by hand.
+  postflight_steps do
+    on_macos do
+      run "/usr/bin/xattr",
+          args:         ["-dr", "com.apple.quarantine", "{{staged_path}}/stockroom"],
+          must_succeed: false
     end
-  rescue NoMethodError
-    # Homebrew dropped the postflight block. Nothing to do; the install itself
-    # still succeeds, the user approves the binary once themselves.
   end
 
   caveats <<~EOS
