@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/user"
@@ -45,7 +46,11 @@ type Paths struct {
 	// macOS.
 	BrewPrefix    string
 	LaunchDaemons string
-	LogFile       string
+	// LaunchAgents is where the older checkout install (scripts/install.sh)
+	// left its LaunchAgent. Empty means Library/LaunchAgents in the service
+	// account's home.
+	LaunchAgents string
+	LogFile      string
 }
 
 // Data directories under DataDir, created and owned by the service user.
@@ -141,6 +146,8 @@ type Env struct {
 	// HealthTimeout is how long setup waits for /health after starting the
 	// service.
 	HealthTimeout time.Duration
+	// Listening answers whether anything accepts connections at addr.
+	Listening func(addr string) bool
 	// Stdin is what --admin-password-file - reads.
 	Stdin io.Reader
 	// Open opens a URL in the desktop's browser, or is nil where there is
@@ -176,6 +183,7 @@ func NewEnv() *Env {
 		},
 		Health:        httpHealth,
 		HealthTimeout: 2 * time.Minute,
+		Listening:     tcpListening,
 		Stdin:         os.Stdin,
 		Open:          openFunc(),
 	}
@@ -204,6 +212,15 @@ func httpHealth(ctx context.Context, addr string) error {
 		return fmt.Errorf("/health answered %s", res.Status)
 	}
 	return nil
+}
+
+func tcpListening(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func (e *Env) say(format string, args ...any) {

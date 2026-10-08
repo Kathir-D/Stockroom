@@ -23,16 +23,64 @@ type fakeRunner struct {
 	roleExists bool
 	dbExists   bool
 	fail       map[string]error // by command name
+	// loaded is the LaunchDaemons launchd holds, by label. bootoutLag is how
+	// many `launchctl print` calls still find one after its bootout.
+	loaded     map[string]bool
+	bootoutLag int
+	leaving    map[string]int
 }
 
 func newFakeRunner() *fakeRunner {
-	return &fakeRunner{listen: "localhost", fail: map[string]error{}}
+	return &fakeRunner{listen: "localhost", fail: map[string]error{}, loaded: map[string]bool{}, leaving: map[string]int{}}
+}
+
+// launchctl answers like launchd: a label is loaded from its bootstrap until
+// its bootout, and bootstrapping one that hasn't left yet fails.
+func (f *fakeRunner) launchctl(c Cmd) (string, error) {
+	if len(c.Args) < 2 {
+		return "", nil
+	}
+	label := strings.TrimPrefix(c.Args[len(c.Args)-1], "system/")
+	switch c.Args[0] {
+	case "bootstrap":
+		label = strings.TrimSuffix(filepath.Base(label), ".plist")
+		if f.loaded[label] {
+			return "", errors.New("launchctl: exit status 5: Bootstrap failed: 5: Input/output error")
+		}
+		f.loaded[label] = true
+	case "bootout":
+		if !f.loaded[label] {
+			return "", errors.New("launchctl: exit status 3: Boot-out failed: 3: No such process")
+		}
+		if f.bootoutLag > 0 {
+			f.leaving[label] = f.bootoutLag
+			return "", errors.New("launchctl: exit status 36: Boot-out failed: 36: Operation now in progress")
+		}
+		delete(f.loaded, label)
+	case "print":
+		if n, ok := f.leaving[label]; ok {
+			if n <= 1 {
+				delete(f.leaving, label)
+				delete(f.loaded, label)
+			} else {
+				f.leaving[label] = n - 1
+			}
+			return "", nil
+		}
+		if !f.loaded[label] {
+			return "", errors.New("launchctl: exit status 113: Could not find service")
+		}
+	}
+	return "", nil
 }
 
 func (f *fakeRunner) Run(ctx context.Context, c Cmd) (string, error) {
 	f.cmds = append(f.cmds, c)
 	if err := f.fail[filepath.Base(c.Name)]; err != nil {
 		return "", err
+	}
+	if filepath.Base(c.Name) == "launchctl" {
+		return f.launchctl(c)
 	}
 	if filepath.Base(c.Name) != "psql" {
 		return "", nil
@@ -97,11 +145,13 @@ func testEnv(t *testing.T) (*Env, *fakeRunner, *bytes.Buffer) {
 			LocalUnit:    filepath.Join(root, "etc", "systemd", "system", "stockroom.service"),
 			DropIn:       filepath.Join(root, "etc", "systemd", "system", "stockroom.service.d", "user.conf"),
 			CameraDir:    filepath.Join(root, "usr", "share", "stockroom", "camera"),
+			LaunchAgents: filepath.Join(root, "LaunchAgents"),
 		},
 		LookupUser:    func(name string) (*user.User, error) { return user.Lookup(name) },
 		Chown:         func(string, int, int) error { return nil },
 		Health:        func(context.Context, string) error { return nil },
 		HealthTimeout: time.Second,
+		Listening:     func(string) bool { return false },
 		Stdin:         strings.NewReader(""),
 	}
 	return env, run, out
@@ -336,6 +386,39 @@ func TestSetupReportsAServerThatNeverStarts(t *testing.T) {
 	}
 }
 
+// TestSetupRefusesATakenAddress guards the two-minute wait a second program
+// on the server's port used to cause: the service restarted on "address
+// already in use" while the other program answered /health.
+func TestSetupRefusesATakenAddress(t *testing.T) {
+	env, run, _ := testEnv(t)
+	env.Listening = func(string) bool { return true }
+	addrFreeWait = 0
+	t.Cleanup(func() { addrFreeWait = 10 * time.Second })
+	err := Setup(context.Background(), env, nonInteractive())
+	if err == nil || !strings.Contains(err.Error(), "already listening on "+defaultAddr) {
+		t.Fatalf("err = %v", err)
+	}
+	if !run.ran("ss -ltnpH sport = :8080") {
+		t.Error("setup never asked which program holds the port")
+	}
+	if run.ran("systemctl restart stockroom") {
+		t.Error("the service was started on a taken address")
+	}
+}
+
+// TestSetupReplacesItsOwnRunningService is a second setup on a working
+// install: the listener is this install's service, which stops and restarts.
+func TestSetupReplacesItsOwnRunningService(t *testing.T) {
+	env, run, out := testEnv(t)
+	env.Listening = func(string) bool { return !run.ran("systemctl stop stockroom") }
+	if err := Setup(context.Background(), env, nonInteractive()); err != nil {
+		t.Fatalf("Setup: %v\n%s", err, out)
+	}
+	if !run.ran("systemctl restart stockroom") {
+		t.Error("the service was not started again")
+	}
+}
+
 func TestSetupReadsThePasswordFromStdin(t *testing.T) {
 	env, _, out := testEnv(t)
 	env.Stdin = strings.NewReader("from stdin $HOME\n")
@@ -463,6 +546,7 @@ func TestSetupMacOS(t *testing.T) {
 	env.Paths.DataDir = filepath.Join(prefix, "var", "stockroom")
 	env.Paths.LogFile = filepath.Join(prefix, "var", "log", "stockroom.log")
 	env.Paths.LaunchDaemons = filepath.Join(prefix, "LaunchDaemons")
+	env.Paths.LaunchAgents = filepath.Join(prefix, "LaunchAgents")
 	env.Paths.Binary = filepath.Join(prefix, "bin", "stockroom")
 	os.MkdirAll(env.Paths.LaunchDaemons, 0o755)
 	bin := filepath.Join(prefix, "opt", brewFormula, "bin")
@@ -470,9 +554,26 @@ func TestSetupMacOS(t *testing.T) {
 	os.WriteFile(filepath.Join(bin, "postgres"), nil, 0o755)
 	me, _ := user.Current()
 	t.Setenv("USER", me.Username)
+	// An earlier setup left Postgres running, and launchd takes a moment to
+	// let go of it: bootstrapping at once is "Bootstrap failed: 5".
+	run.loaded[postgresLabel] = true
+	run.bootoutLag = 2
+	// The older checkout install's LaunchAgent holds the server's port.
+	agent := filepath.Join(env.Paths.LaunchAgents, serverLabel+".plist")
+	os.MkdirAll(env.Paths.LaunchAgents, 0o755)
+	os.WriteFile(agent, nil, 0o644)
 
 	if err := Setup(context.Background(), env, nonInteractive()); err != nil {
 		t.Fatalf("Setup: %v\n%s", err, out)
+	}
+	if !run.ran("launchctl bootout gui/" + me.Uid + "/" + serverLabel) {
+		t.Error("the older install's LaunchAgent was not stopped")
+	}
+	if _, err := os.Stat(agent); err == nil {
+		t.Error("the older install's LaunchAgent would start again at the next login")
+	}
+	if _, err := os.Stat(agent + ".replaced"); err != nil {
+		t.Errorf("the older install's LaunchAgent was not kept: %v", err)
 	}
 	for _, want := range []string{
 		"initdb --locale=C -E UTF-8 " + filepath.Join(prefix, "var", brewFormula),

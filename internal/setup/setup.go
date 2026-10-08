@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -602,6 +603,12 @@ func (in *installer) startService(ctx context.Context) error {
 		return nil
 	}
 	svc := newService(e)
+	if e.GOOS == "darwin" {
+		retireCheckoutAgent(ctx, e, in.svcUser)
+	}
+	if err := in.freeAddr(ctx, svc); err != nil {
+		return err
+	}
 	if err := svc.install(ctx, in.svcUser); err != nil {
 		return err
 	}
@@ -615,6 +622,51 @@ func (in *installer) startService(ctx context.Context) error {
 	}
 	e.ok("Stockroom answers at http://%s", in.addr)
 	return nil
+}
+
+// addrFreeWait is how long freeAddr gives this install's own service to
+// release the address after stopping it.
+var addrFreeWait = 10 * time.Second
+
+// freeAddr refuses to start the service while another program holds its
+// address. The service would restart forever on "address already in use"
+// while the other program answered /health.
+func (in *installer) freeAddr(ctx context.Context, svc service) error {
+	e := in.env
+	if !e.Listening(in.addr) {
+		return nil
+	}
+	// An earlier setup's service is the usual listener. It starts again below.
+	_ = svc.stop(ctx)
+	deadline := time.Now().Add(addrFreeWait)
+	for e.Listening(in.addr) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("another program is already listening on %s, so Stockroom can't start there%s\nStop that program and run setup again, or set SERVER_ADDR in %s to a free port",
+				in.addr, in.listener(ctx), e.Paths.ConfigFile)
+		}
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// listener names the process listening on the server's address, when the
+// machine's own tools can say.
+func (in *installer) listener(ctx context.Context) string {
+	_, port, err := net.SplitHostPort(in.addr)
+	if err != nil {
+		return ""
+	}
+	c := Cmd{Name: "ss", Args: []string{"-ltnpH", "sport = :" + port}, Root: true}
+	if in.env.GOOS == "darwin" {
+		c = Cmd{Name: "lsof", Args: []string{"-nP", "-iTCP:" + port, "-sTCP:LISTEN"}, Root: true}
+	}
+	out, err := in.env.Run.Run(ctx, c)
+	if out = strings.TrimSpace(out); err != nil || out == "" {
+		return ""
+	}
+	return ":\n" + out
 }
 
 /* -------------------------------------------------------------- camera ---- */

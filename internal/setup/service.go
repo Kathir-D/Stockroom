@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // service is the background service that runs `stockroom serve`: a systemd
@@ -158,8 +159,7 @@ func (s *launchdService) uninstall(ctx context.Context) error {
 }
 
 func (s *launchdService) loaded(ctx context.Context) bool {
-	_, err := s.env.Run.Run(ctx, Cmd{Name: "launchctl", Args: []string{"print", "system/" + serverLabel}, Root: true})
-	return err == nil
+	return daemonLoaded(ctx, s.env, serverLabel)
 }
 
 func (s *launchdService) start(ctx context.Context) error {
@@ -208,6 +208,15 @@ func (s *launchdService) recentLog(ctx context.Context, lines int) string {
 	return out
 }
 
+// unloadWait is how long loadDaemon gives launchd to let go of a daemon it
+// booted out.
+var unloadWait = 30 * time.Second
+
+func daemonLoaded(ctx context.Context, e *Env, label string) bool {
+	_, err := e.Run.Run(ctx, Cmd{Name: "launchctl", Args: []string{"print", "system/" + label}, Root: true})
+	return err == nil
+}
+
 // loadDaemon writes a LaunchDaemon plist owned by root and (re)loads it.
 func loadDaemon(ctx context.Context, e *Env, label, plist string) error {
 	path := filepath.Join(e.Paths.LaunchDaemons, label+".plist")
@@ -216,10 +225,51 @@ func loadDaemon(ctx context.Context, e *Env, label, plist string) error {
 	}
 	// bootout fails when it isn't loaded, which is fine.
 	_, _ = e.Run.Run(ctx, Cmd{Name: "launchctl", Args: []string{"bootout", "system/" + label}, Root: true})
+	// bootout can return while the daemon is still shutting down (Postgres
+	// takes a moment), and a bootstrap before launchd has let go of the label
+	// fails with "Bootstrap failed: 5: Input/output error".
+	deadline := time.Now().Add(unloadWait)
+	for daemonLoaded(ctx, e, label) && time.Now().Before(deadline) {
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
 	if _, err := e.Run.Run(ctx, Cmd{Name: "launchctl", Args: []string{"bootstrap", "system", path}, Root: true}); err != nil {
 		return fmt.Errorf("load %s: %w", path, err)
 	}
 	return nil
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// retireCheckoutAgent stops the LaunchAgent the older checkout install
+// (scripts/install.sh) left in a's login session. It has the daemon's label
+// and listens on the same address, so the daemon could never bind while it
+// runs. The plist is renamed rather than deleted, so the agent stays off at
+// the next login and the older install can still be put back.
+func retireCheckoutAgent(ctx context.Context, e *Env, a account) {
+	dir := e.Paths.LaunchAgents
+	if dir == "" {
+		dir = filepath.Join(a.home, "Library", "LaunchAgents")
+	}
+	plist := filepath.Join(dir, serverLabel+".plist")
+	if _, err := os.Stat(plist); err != nil {
+		return
+	}
+	// bootout fails when nobody is logged in to have loaded it, which is fine.
+	_, _ = e.Run.Run(ctx, Cmd{Name: "launchctl", Args: []string{"bootout", "gui/" + strconv.Itoa(a.uid) + "/" + serverLabel}, Root: e.Root})
+	if err := os.Rename(plist, plist+".replaced"); err != nil {
+		e.warn("the older install's LaunchAgent %s is still in place: %v", plist, err)
+		return
+	}
+	e.warn("stopped the older checkout install's service and renamed its LaunchAgent to %s.replaced. Its folder and its database are untouched, and this install starts with its own database", plist)
 }
 
 // writeRootFile writes a root-owned file with mode 644. Without root it goes
