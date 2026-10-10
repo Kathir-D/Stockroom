@@ -66,7 +66,7 @@ brew install --cask kathir-d/tap/stockroom
 stockroom setup
 ```
 
-Homebrew installs `postgresql@17` and rclone with it. Run setup as yourself, not with `sudo`. It asks for your password once, to install two LaunchDaemons: `com.stockroom.postgresql` and `com.stockroom.server`. Both start at boot with nobody logged in and run as you. If Homebrew's own `brew services` agent for `postgresql@17` is running, setup stops it, so two copies don't fight over the data folder.
+Homebrew installs `postgresql@17` and rclone with it. Run setup as yourself, not with `sudo`. It asks for your password once, to install two LaunchDaemons: `com.stockroom.postgresql` and `com.stockroom.server`. Both start at boot with nobody logged in and run as you. If Homebrew's own `brew services` agent for `postgresql@17` is running, setup stops it, so two copies don't fight over the data folder. If the older installer (`scripts/install.sh`) is running Stockroom from `~/Stockroom`, setup stops its LaunchAgent and renames the plist to `com.stockroom.server.plist.replaced`, because both would use port 8080. That install's folder and database are left alone, and the new install starts empty. If any other program holds the port, setup stops and names it.
 
 | Path | What |
 |---|---|
