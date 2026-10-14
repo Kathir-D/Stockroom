@@ -1,8 +1,3 @@
-> [!WARNING]
-> **MOST OF THE CODE WAS DEVELOPED BY AI, BUT TECHNICAL ARCHITECTURE/UI WAS DESIGNED & PLANNED BEFOREHAND**
-> 
-> Don't be stupid; expect bugs and it might not work so make sure you setup multiple ways for backup.
-
 <h1 align="center">Stockroom</h1>
 
 <p align="center">
